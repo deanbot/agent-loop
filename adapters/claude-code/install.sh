@@ -2,7 +2,7 @@
 set -e
 
 echo "Installing agent-loop for Claude Code..."
-claude plugin marketplace add deanbot/agent-loop
+claude plugin marketplace add agent-loop deanbot/agent-loop
 claude plugin install agent-loop@agent-loop
 echo ""
 echo "Done. Add to your project's AGENTS.md:"

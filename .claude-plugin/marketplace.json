@@ -10,7 +10,7 @@
     {
       "name": "agent-loop",
       "description": "Executor implements issues, reviewer reviews PRs, operator confirms merge.",
-      "source": "./",
+      "source": "./adapters/claude-code",
       "category": "productivity"
     }
   ]
