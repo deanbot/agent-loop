@@ -1,0 +1,8 @@
+{
+  "name": "agent-loop",
+  "description": "Single-account agentic development loop. Executor implements issues; reviewer reviews PRs. Coordinates via GitHub PR comment protocol.",
+  "author": {
+    "name": "Dean Verleger",
+    "url": "https://github.com/deanbot"
+  }
+}

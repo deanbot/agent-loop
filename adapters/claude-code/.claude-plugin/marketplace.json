@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "agent-loop",
+  "description": "Single-account agentic development loop for solo developers. Executor and reviewer agents coordinate via GitHub PR comment protocol.",
+  "owner": {
+    "name": "Dean Verleger",
+    "url": "https://github.com/deanbot"
+  },
+  "plugins": [
+    {
+      "name": "agent-loop",
+      "description": "Executor implements issues, reviewer reviews PRs, operator confirms merge.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
