@@ -20,7 +20,7 @@ $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
 - MERGE_CONFLICT:<n>: post `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main before review."`; ScheduleWakeup(120s)
 
-- REVIEW:<n>: fetch `gh pr diff <n> --repo <repo>` AND `gh pr view <n> --repo <repo> --json body,title` AND `gh pr view <n> --comments --repo <repo>` in parallel, then check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`. Read the PR body first — it contains the deliverable checklist; verify the diff covers every item before reviewing code correctness:
+- REVIEW:<n>: fetch `gh pr diff <n> --repo <repo>` AND `gh pr view <n> --comments --repo <repo>` in parallel, then check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`:
   - read existing comment thread first — filter out findings already answered by `[executor]` comments since last `[reviewer]` post; only raise unanswered issues
   - if any check has bucket `fail`: fetch PR description (`gh pr view <n> --repo <repo> --json body`); if body has "Human setup required" section, prepend CI failure note with those steps as action block; otherwise prepend generic CI failure note
   - review diff scoped to unanswered issues and post:
