@@ -67,11 +67,15 @@ Run `node ~/.claude/plugins/marketplaces/agent-loop/scripts/pr-poll.mjs --repo <
 
 **Loop invariant: every path through the signal handlers below ends with `ScheduleWakeup(60s)` then polls again — no exceptions. MERGED and BLOCKED are the only exits.**
 
+**Never merge.** Merging is always the operator's action. Do not offer to merge, do not ask interactively, do not call `gh pr merge` under any circumstances.
+
+**No interactive prompts.** Never present menus, checkboxes, or structured choices to the user. All questions go to the PR as `gh pr comment` and wait for an unprefixed reply. This agent must be able to run fully headless.
+
 **Before posting any comment:** re-fetch the full PR thread (`gh pr view <PR> --comments --repo <repo>`). Incorporate any `[reviewer]` or operator (unprefixed) observations not yet addressed into your response. Never post a partial reply — one comment only, after all observations are considered.
 
 Signal handling:
 - if MERGED: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, notify user, pick next item (step 8)
-- if MERGE_READY: notify user PR is approved and ready to merge; ScheduleWakeup(60s), poll again
+- if MERGE_READY: display the waiting status block with "✅ Approved — operator merges when ready"; ScheduleWakeup(60s), poll again
 - if NEW_REVIEW_SUBMISSION with CHANGES_REQUESTED: read full thread, collect ALL unaddressed `[reviewer]` findings, address every one in code, push once, post single `gh pr comment <PR> --body "[executor] Pushed fix: <summary>"` — no partial comments mid-batch; ScheduleWakeup(60s), poll again
 - if NEW_REVIEW_SUBMISSION with COMMENTED: answer via `gh pr comment`; ScheduleWakeup(60s), poll again
 - if NEW_INLINE_COMMENT or NEW_COMMENT: skip own `[executor]` posts; operator (unprefixed) — fix or answer; `[reviewer]` — treat as CHANGES_REQUESTED (batch all, fix all, push once, one summary comment); ScheduleWakeup(60s), poll again
