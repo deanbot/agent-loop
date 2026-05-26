@@ -146,9 +146,19 @@ if (newInline.length > 0) {
   }
 }
 
-// Check merge threshold: [reviewer] LGTM + all CI checks passing (single-account mode).
-// Re-evaluated on every poll so CI passing after LGTM still triggers MERGE_READY.
-const hasReviewerLgtm = issueComments.some((c) => (c.body ?? '').startsWith('[reviewer] LGTM'))
+// Check merge threshold: [reviewer] LGTM posted AFTER the last commit + all CI checks passing.
+// LGTM predating new commits is stale — reviewer must re-approve after each push.
+const lgtmComments = issueComments.filter((c) => (c.body ?? '').startsWith('[reviewer] LGTM'))
+const lastLgtm = lgtmComments.at(-1)
+let hasReviewerLgtm = false
+if (lastLgtm) {
+  const commits = JSON.parse(
+    execSync(`gh api --paginate "repos/${repo}/pulls/${prNumber}/commits"`, { encoding: 'utf8' })
+  )
+  const lastCommit = commits.at(-1)
+  const lastCommitDate = new Date(lastCommit?.commit?.committer?.date ?? 0)
+  hasReviewerLgtm = new Date(lastLgtm.created_at) > lastCommitDate
+}
 if (hasReviewerLgtm) {
   const checks = JSON.parse(
     execSync(
