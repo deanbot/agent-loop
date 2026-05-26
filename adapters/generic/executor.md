@@ -9,6 +9,7 @@ Read the project's AGENTS.md `## Agent loop` section. Extract:
 - `in-progress-label` — label for claiming issues (default: `in-progress`)
 - `quality-gates` — commands to run at each checkpoint
 - `spec-path` — where to save spec files during implementation (default: `docs/specs/`)
+- `allow-author-associations` — list of GitHub `authorAssociation` values whose issues may be processed (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
 **No interactive prompts.** Post questions as `gh pr comment <N> --body "[executor] Question: <question>"`.
 
@@ -20,14 +21,18 @@ If given nothing: run pick-next query, treat result as issue number.
 
 ## Implement flow (no existing PR)
 
+Before claiming, fetch author info: `gh issue view <N> --repo <repo> --json author,authorAssociation --jq '{login: .author.login, assoc: .authorAssociation}'`
+
+**Author association check:** if `assoc` not in `allow-author-associations`: post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. To allow, add \`allow-author-associations: [OWNER, MEMBER, COLLABORATOR, <assoc>]\` to AGENTS.md. See README Security section."` — do not claim — pick next.
+
+Claim before branching: `gh issue edit <N> --add-label <in-progress-label> --repo <repo>`
+
 1. `gh issue view <N> --repo <repo>`
 2. Branch off origin/main: `<issue-number>-<slug>`
 3. First commit: save issue body to `<spec-path>/<issue-number>-<slug>.md`
 4. Per checkbox: implement → run quality-gates → mark `[x]` → commit + push
 5. Final commit: delete spec file
 6. `gh pr create --repo <repo>` — title mirrors issue exactly, body: Context / Deliverable (all `[x]`) / Acceptance criteria, ends with `Closes #<N>`
-
-Claim before branching: `gh issue edit <N> --add-label <in-progress-label> --repo <repo>`
 
 ## Poll loop
 

@@ -17,6 +17,7 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `in-progress-label` — label name for claiming issues (default: `in-progress`)
 - `quality-gates` — commands to run at each checkpoint
 - `spec-path` — where to save spec files during implementation (default: `docs/specs/`)
+- `allow-author-associations` — list of GitHub `authorAssociation` values whose issues may be processed (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
 Then proceed with $ARGUMENTS.
 
@@ -30,7 +31,10 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
   - **Empty $ARGUMENTS:** run pick-next query (step 8), use result as issue number.
   - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --json number,body --jq '[.[] | select(.body | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
-    - Not found: immediately before claiming, re-fetch: `gh issue view <N> --repo <repo> --json labels --jq '.labels[].name'` — if `<in-progress-label>` now present, another agent claimed it; go to step 8. Otherwise claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow (steps 1–6).
+    - Not found: immediately before claiming, re-fetch: `gh issue view <N> --repo <repo> --json labels,author,authorAssociation --jq '{labels: [.labels[].name], login: .author.login, assoc: .authorAssociation}'`
+      - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8.
+      - **Author association check:** if `assoc` is not in `allow-author-associations`: post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. To allow, add \`allow-author-associations: [OWNER, MEMBER, COLLABORATOR, <assoc>]\` to AGENTS.md. See README Security section."` — do not claim label — go to step 8.
+      - Otherwise claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow (steps 1–6).
 
 ## Full implement flow (issue input, no existing PR)
 

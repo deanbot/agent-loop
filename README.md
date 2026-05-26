@@ -8,6 +8,43 @@ Standard GitHub PR review requires multiple accounts (GitHub blocks self-approva
 
 This is a **solo developer / single-account** workflow. Not a replacement for team code review.
 
+## Security
+
+**Do not run this on a public repo without understanding the risks.**
+
+The executor fetches issue bodies and feeds them verbatim to an LLM running with your credentials — GitHub token, API keys, everything in your shell environment. A maliciously crafted issue body can use prompt injection to exfiltrate those credentials: instruct the LLM to post env vars as a PR comment, write secrets to a file, or take other unintended actions.
+
+### What the label gate does and doesn't protect
+
+`in-progress-label` requires triage+ permission to apply, so random contributors can't self-label their own issues. But it doesn't protect against:
+- A maintainer labeling a malicious issue without carefully reading the body
+- Untrusted users posting unprefixed comments on an open PR — the executor treats unprefixed PR comments as operator direction
+
+**Applying `in-progress-label` is an implicit statement: "I've read this body and consider it safe to feed to an LLM running with my credentials."**
+
+### Author association check (default-on guardrail)
+
+The executor checks `authorAssociation` before processing any issue. By default, only `OWNER`, `MEMBER`, and `COLLABORATOR` are processed. Issues from other authors are skipped automatically.
+
+To allow broader contributor access, set `allow-author-associations` in your AGENTS.md:
+
+```markdown
+## Agent loop
+repo: owner/repo
+in-progress-label: in-progress
+allow-author-associations: [OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR]
+```
+
+GitHub's association values: `OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, `NONE`.
+
+**This check is not a complete defense.** A trusted author can quote attacker-controlled text (error messages, user-submitted bug repros) containing injection payloads. Prompt injection is an unsolved problem in LLM security. The only complete protection is running on private repos with trusted collaborators.
+
+### Unprefixed PR comments
+
+The executor treats any unprefixed PR comment as operator direction. On public repos, any GitHub user can comment on an open PR. Avoid leaving PRs open on public repos for extended periods during autonomous executor runs.
+
+---
+
 ## What this is not
 
 - Not a team review tool — no formal `APPROVED` / `CHANGES_REQUESTED` review signals
