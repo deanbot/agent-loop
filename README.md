@@ -12,15 +12,7 @@ This is a **solo developer / single-account** workflow. Not a replacement for te
 
 **Do not run this on a public repo without understanding the risks.**
 
-The executor fetches issue bodies and feeds them verbatim to an LLM running with your credentials — GitHub token, API keys, everything in your shell environment. A maliciously crafted issue body can use prompt injection to exfiltrate those credentials: instruct the LLM to post env vars as a PR comment, write secrets to a file, or take other unintended actions.
-
-### What the label gate does and doesn't protect
-
-`in-progress-label` requires triage+ permission to apply, so random contributors can't self-label their own issues. But it doesn't protect against:
-- A maintainer labeling a malicious issue without carefully reading the body
-- Untrusted users posting unprefixed comments on an open PR — the executor treats unprefixed PR comments as operator direction
-
-**Applying `in-progress-label` is an implicit statement: "I've read this body and consider it safe to feed to an LLM running with my credentials."**
+The executor reads GitHub issue and PR content and feeds it verbatim to an LLM running with your credentials — GitHub token, API keys, everything in your shell environment. Any untrusted user who can get their text in front of the executor can attempt prompt injection: instruct the LLM to post env vars as a PR comment, write secrets to a file, or take other unintended actions.
 
 ### Author association check (default-on guardrail)
 
