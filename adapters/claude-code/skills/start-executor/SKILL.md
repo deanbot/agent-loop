@@ -30,7 +30,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
   - **Empty $ARGUMENTS:** run pick-next query (step 8), use result as issue number.
   - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --json number,body --jq '[.[] | select(.body | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
-    - Not found: claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow (steps 1–6).
+    - Not found: immediately before claiming, re-fetch: `gh issue view <N> --repo <repo> --json labels --jq '.labels[].name'` — if `<in-progress-label>` now present, another agent claimed it; go to step 8. Otherwise claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow (steps 1–6).
 
 ## Full implement flow (issue input, no existing PR)
 
@@ -63,9 +63,11 @@ Output the waiting status block:
 └─────────────────────────────────────┘
 ```
 
-Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` from the repo root **once per poll cycle**.
+Run `node ~/.claude/plugins/marketplaces/agent-loop/scripts/pr-poll.mjs --repo <repo> --pr <PR>` **once per poll cycle**.
 
 **Loop invariant: every path through the signal handlers below ends with `ScheduleWakeup(60s)` then polls again — no exceptions. MERGED and BLOCKED are the only exits.**
+
+**Before posting any comment:** re-fetch the full PR thread (`gh pr view <PR> --comments --repo <repo>`). Incorporate any `[reviewer]` or operator (unprefixed) observations not yet addressed into your response. Never post a partial reply — one comment only, after all observations are considered.
 
 Signal handling:
 - if MERGED: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, notify user, pick next item (step 8)

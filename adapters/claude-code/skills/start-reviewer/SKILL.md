@@ -14,7 +14,7 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 
 $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
-/loop run `node scripts/pr-watch.mjs --repo <repo> $ARGUMENTS` and handle each signal.
+/loop run `node ~/.claude/plugins/marketplaces/agent-loop/scripts/pr-watch.mjs --repo <repo> $ARGUMENTS` and handle each signal.
 
 **After handling any signal (including NONE), call ScheduleWakeup before the next pr-watch.mjs call — 300s after posting findings or LGTM (give executor time to respond), 120s after MERGE_CONFLICT or NONE.**
 

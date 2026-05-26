@@ -30,7 +30,8 @@ Full protocol: [`spec/SPEC.md`](spec/SPEC.md)
 ### Path A — Claude Code plugin (first-class)
 
 ```bash
-claude plugin marketplace add deanbot/agent-loop && claude plugin install agent-loop@agent-loop
+claude plugin marketplace add agent-loop deanbot/agent-loop
+claude plugin install agent-loop@agent-loop
 ```
 
 Add to your project's `AGENTS.md`:
@@ -43,6 +44,8 @@ quality-gates: npm test && npm run lint
 ```
 
 Use: `/agent-loop:start-executor`, `/agent-loop:start-reviewer`
+
+> **Updating:** `claude plugin update agent-loop@agent-loop` — then restart any active executor/reviewer sessions to pick up the new skill definitions.
 
 ### Path B — Generic (any tool)
 
