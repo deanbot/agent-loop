@@ -80,6 +80,16 @@ Use: `/agent-loop:start-executor`, `/agent-loop:start-reviewer`
 
 Copy the template from [`adapters/generic/AGENTS.md`](adapters/generic/AGENTS.md) into your project's `AGENTS.md`. Copy `scripts/` into your repo. Any agent that reads AGENTS.md and can run bash follows the instructions. Loop management (scheduling between polls) is manual or via external cron.
 
+### Path C — Kiro
+
+```bash
+cp -r adapters/kiro/skills/. .kiro/skills/
+```
+
+Add the `## Agent loop` block to your project's AGENTS.md (same format as Path A). Loop scheduling is manual re-trigger or external cron — Kiro has no native scheduling primitive. See [`adapters/kiro/README.md`](adapters/kiro/README.md) for full install steps.
+
+Use: `/start-executor`, `/start-reviewer` in Kiro chat.
+
 ## Structure
 
 ```
@@ -88,7 +98,7 @@ spec/                 Protocol definition — the contract between adapters
 adapters/
   claude-code/        First-class: ScheduleWakeup, /loop, plugin format
   generic/            AGENTS.md template, no scheduling assumptions
-  kiro/               Stub
+  kiro/               SKILL.md format, manual/cron scheduling
   gemini/             Stub
 ```
 

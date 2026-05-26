@@ -16,7 +16,7 @@ Kiro is a JetBrains AI coding tool used in enterprise environments where Claude 
 - [x] Create `adapters/kiro/` with full executor and reviewer prompts in Kiro's idiom
 - [x] Implement scheduling using Kiro's native mechanism (or document cron fallback if none exists)
 - [x] Add install instructions to `adapters/kiro/README.md`
-- [ ] Update root `README.md` adoption table
+- [x] Update root `README.md` adoption table
 
 ## Acceptance criteria
 
