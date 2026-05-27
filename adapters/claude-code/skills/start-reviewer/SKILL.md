@@ -20,8 +20,8 @@ $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
 - MERGE_CONFLICT:<n>: post `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main before review."`; ScheduleWakeup(120s)
 
-- REVIEW:<n>: fetch `gh pr diff <n> --repo <repo>` AND `gh pr view <n> --repo <repo> --json body,title` AND `gh pr view <n> --comments --repo <repo>` in parallel, then check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`. Read the PR body first — it contains the deliverable checklist; verify the diff covers every item before reviewing code correctness:
-  - read existing comment thread first — filter out findings already answered by `[executor]` comments since last `[reviewer]` post; only raise unanswered issues
+- REVIEW:<n>: fetch `gh pr diff <n> --repo <repo>` AND `gh pr view <n> --repo <repo> --json body,title` AND `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/pulls/<n>/comments"` in parallel, then check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`. Read the PR body first — it contains the deliverable checklist; verify the diff covers every item before reviewing code correctness:
+  - read existing comment thread first (both timeline comments and inline review comments) — filter out findings already answered by `[executor]` comments since last `[reviewer]` post; only raise unanswered issues
   - if any check has bucket `fail`: fetch PR description (`gh pr view <n> --repo <repo> --json body`); if body has "Human setup required" section, prepend CI failure note with those steps as action block; otherwise prepend generic CI failure note
   - review diff scoped to unanswered issues and post:
     - actionable findings → `gh pr comment <n> --body "[reviewer] <findings>"`
@@ -29,7 +29,7 @@ $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
     - no findings → `gh pr comment <n> --body "[reviewer] LGTM"`
   - ScheduleWakeup(300s)
 
-- REVIEW_COMMENTS:<n>: fetch `gh pr view <n> --comments --repo <repo>` AND check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`, read context (operator and `[executor]` responses — ignore `[reviewer]` own posts), then post follow-up:
+- REVIEW_COMMENTS:<n>: fetch `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/pulls/<n>/comments"` AND check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`, read context (both timeline and inline review comments from operator and `[executor]` — ignore `[reviewer]` own posts), then post follow-up:
   - CI still failing with unfinished "Human setup required" steps: re-surface steps, then add code findings
   - questions answered satisfactorily and CI passing → `gh pr comment <n> --body "[reviewer] LGTM"`
   - answers raise new issues → `gh pr comment <n> --body "[reviewer] <findings>"`
