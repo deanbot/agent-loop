@@ -68,6 +68,8 @@ Run `node ~/.claude/plugins/marketplaces/agent-loop/scripts/pr-poll.mjs --repo <
 
 **Loop invariant: every path through the signal handlers below ends with `ScheduleWakeup(60s)` then polls again — no exceptions. MERGED and BLOCKED are the only exits.**
 
+**Never use `sleep` for waits.** `sleep N && command` is blocked by the harness. To wait for a deployment or external condition: ScheduleWakeup with appropriate delay, then verify on the next cycle. To run a check in the background: use `run_in_background: true` on the Bash call.
+
 **Never merge.** Merging is always the operator's action. Do not offer to merge, do not ask interactively, do not call `gh pr merge` under any circumstances.
 
 **No interactive prompts.** Never present menus, checkboxes, or structured choices to the user. All questions go to the PR as `gh pr comment` and wait for an unprefixed reply. This agent must be able to run fully headless.
