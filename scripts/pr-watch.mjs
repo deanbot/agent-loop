@@ -18,13 +18,15 @@
  *   NONE <timestamp>              no PRs changed since last run
  *   REVIEW:<n>                    PR has new commits; ready for code review
  *   MERGE_CONFLICT:<n>            PR has new commits but branch has merge conflicts
- *   REVIEW_COMMENTS:<n>           PR has new operator (unprefixed) comments
+ *   REVIEW_COMMENTS:<n>           PR has new operator (unprefixed) comments or inline review comments
  *
  * Multiple signals are space-separated on one line.
  * REVIEW:<n> takes precedence over REVIEW_COMMENTS:<n> for the same PR.
  *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-state.json across sessions.
- * State format: { [prNumber]: { sha: string, lastComment: number | null } }
+ * State format: { [prNumber]: { sha: string, lastComment: number | null, lastReviewComment: number | undefined } }
+ *   lastComment       — cursor for issues/{n}/comments (timeline comments)
+ *   lastReviewComment — cursor for pulls/{n}/comments (inline diff review comments)
  *
  * On first encounter of a PR, CHANGES_REQUESTED review suppresses the signal — the PR
  * already has a blocking review. A new commit re-triggers normally.
@@ -108,16 +110,23 @@ for (const { number, headRefOid, mergeable } of prs) {
         toReview.push(number)
       }
     }
-    // Advance comment cursor — reviewer reads thread during REVIEW, so seeding here
+    // Advance comment cursors — reviewer reads thread during REVIEW, so seeding here
     // prevents pre-REVIEW comments from re-firing as REVIEW_COMMENTS next run.
     const comments = JSON.parse(
       execSync(`gh api "repos/${repo}/issues/${number}/comments"`, { encoding: 'utf8' })
     )
+    const inlineComments = JSON.parse(
+      execSync(`gh api "repos/${repo}/pulls/${number}/comments"`, { encoding: 'utf8' })
+    )
     entry.lastComment = comments.length > 0 ? comments.at(-1).id : (entry.lastComment ?? 0)
+    entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : (entry.lastReviewComment ?? 0)
   } else {
-    // No new commits — check for new non-reviewer comments
+    // No new commits — check for new non-reviewer comments (timeline + inline review)
     const comments = JSON.parse(
       execSync(`gh api "repos/${repo}/issues/${number}/comments"`, { encoding: 'utf8' })
+    )
+    const inlineComments = JSON.parse(
+      execSync(`gh api "repos/${repo}/pulls/${number}/comments"`, { encoding: 'utf8' })
     )
     const hasReviewerPost = comments.some((c) => /^\[reviewer\]/.test(c.body ?? ''))
     if (!hasReviewerPost) {
@@ -128,16 +137,23 @@ for (const { number, headRefOid, mergeable } of prs) {
         toReview.push(number)
       }
       entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
+      entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : 0
     } else if (entry.lastComment === null) {
-      // First comment tracking run — seed cursor, emit nothing
+      // First comment tracking run — seed cursors, emit nothing
       entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
+      entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : 0
     } else {
       const newNonAgent = comments.filter(
         (c) => c.id > entry.lastComment && !/^\[reviewer\]/.test(c.body ?? '')
       )
-      if (newNonAgent.length > 0) {
+      const lastReviewComment = entry.lastReviewComment ?? 0
+      const newInlineNonAgent = inlineComments.filter(
+        (c) => c.id > lastReviewComment && !/^\[reviewer\]/.test(c.body ?? '')
+      )
+      if (newNonAgent.length > 0 || newInlineNonAgent.length > 0) {
         reviewComments.push(number)
-        entry.lastComment = comments.at(-1).id
+        entry.lastComment = comments.length > 0 ? comments.at(-1).id : entry.lastComment
+        entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : lastReviewComment
       }
     }
   }
