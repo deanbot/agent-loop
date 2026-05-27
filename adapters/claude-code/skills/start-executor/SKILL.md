@@ -37,7 +37,6 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
       - **Author check:** apply in order:
         1. If `trusted-authors` is set: skip unless `login` is in that list. Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: @<login> is not in \`trusted-authors\`. Add login to AGENTS.md to allow. See README Security section."` — do not claim — go to step 8.
         2. Else if `allow-author-associations` is set (or using default): skip unless `assoc` is in that list. Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. See README Security section."` — do not claim — go to step 8.
-<<<<<<< HEAD
       - Otherwise claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow (steps 1–6).
 
 ## Full implement flow (issue input, no existing PR)
