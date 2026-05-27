@@ -150,7 +150,17 @@ for (const { number, headRefOid, mergeable } of prs) {
       const newInlineNonAgent = inlineComments.filter(
         (c) => c.id > lastReviewComment && !/^\[reviewer\]/.test(c.body ?? '')
       )
-      if (newNonAgent.length > 0 || newInlineNonAgent.length > 0) {
+      // Surface unanswered top-level inline comments even if cursor has passed them
+      const replyToIds = new Set(inlineComments.filter((c) => c.in_reply_to_id).map((c) => c.in_reply_to_id))
+      const unansweredInline = inlineComments.filter(
+        (c) =>
+          !c.in_reply_to_id &&
+          !/^\[reviewer\]/.test(c.body ?? '') &&
+          !/^\[executor\]/.test(c.body ?? '') &&
+          !replyToIds.has(c.id) &&
+          !newInlineNonAgent.some((n) => n.id === c.id)
+      )
+      if (newNonAgent.length > 0 || newInlineNonAgent.length > 0 || unansweredInline.length > 0) {
         reviewComments.push(number)
         entry.lastComment = comments.length > 0 ? comments.at(-1).id : entry.lastComment
         entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : lastReviewComment
