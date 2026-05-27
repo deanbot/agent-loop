@@ -23,6 +23,7 @@ $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 - REVIEW:<n>: fetch `gh pr diff <n> --repo <repo>` AND `gh pr view <n> --repo <repo> --json body,title` AND `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/pulls/<n>/comments"` in parallel, then check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`. Read the PR body first — it contains the deliverable checklist; verify the diff covers every item before reviewing code correctness:
   - read existing comment thread first (both timeline comments and inline review comments) — filter out findings already answered by `[executor]` comments since last `[reviewer]` post; only raise unanswered issues
   - if any check has bucket `fail`: fetch PR description (`gh pr view <n> --repo <repo> --json body`); if body has "Human setup required" section, prepend CI failure note with those steps as action block; otherwise prepend generic CI failure note
+  - **immediately before posting:** re-fetch `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/issues/<n>/comments"` to check for comments that arrived during analysis; if new operator or `[executor]` activity found, incorporate before posting
   - review diff scoped to unanswered issues and post:
     - actionable findings → `gh pr comment <n> --body "[reviewer] <findings>"`
     - questions only → `gh pr comment <n> --body "[reviewer] <questions>"`
@@ -34,6 +35,7 @@ $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
   - questions answered satisfactorily and CI passing → `gh pr comment <n> --body "[reviewer] LGTM"`
   - answers raise new issues → `gh pr comment <n> --body "[reviewer] <findings>"`
   - answers need clarification → `gh pr comment <n> --body "[reviewer] <clarification>"`
+  - **immediately before posting:** re-fetch `gh api "repos/<repo>/issues/<n>/comments"` to check for activity during analysis; incorporate any new operator or `[executor]` comments before posting
   - ScheduleWakeup(300s)
 
 - NONE: no actionable signals (does not mean no open PRs — means no new commits, no unreviewed PRs, and no new comments); ScheduleWakeup(120s)
