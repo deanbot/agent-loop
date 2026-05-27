@@ -119,7 +119,16 @@ for (const { number, headRefOid, mergeable } of prs) {
     const comments = JSON.parse(
       execSync(`gh api "repos/${repo}/issues/${number}/comments"`, { encoding: 'utf8' })
     )
-    if (entry.lastComment === null) {
+    const hasReviewerPost = comments.some((c) => /^\[reviewer\]/.test(c.body ?? ''))
+    if (!hasReviewerPost) {
+      // Reviewer has never posted — PR needs initial review regardless of session
+      if (mergeable === 'CONFLICTING') {
+        mergeConflicts.push(number)
+      } else {
+        toReview.push(number)
+      }
+      entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
+    } else if (entry.lastComment === null) {
       // First comment tracking run — seed cursor, emit nothing
       entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
     } else {

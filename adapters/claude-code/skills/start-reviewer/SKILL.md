@@ -36,4 +36,4 @@ $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
   - answers need clarification → `gh pr comment <n> --body "[reviewer] <clarification>"`
   - ScheduleWakeup(300s)
 
-- NONE: ScheduleWakeup(120s)
+- NONE: no actionable signals (does not mean no open PRs — means no new commits, no unreviewed PRs, and no new comments); ScheduleWakeup(120s)
