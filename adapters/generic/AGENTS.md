@@ -9,7 +9,6 @@ Copy the block below into your project's AGENTS.md to adopt agent-loop with any 
 repo: owner/repo
 in-progress-label: in-progress
 quality-gates: npm test && npm run lint
-spec-path: docs/specs/
 
 ### Executor
 

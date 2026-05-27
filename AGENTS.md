@@ -71,6 +71,25 @@ Scripts persist state to `~/.agent-loop/state/<owner>-<repo>-pr-state.json` and 
 - **Gemini adapter**: Gemini CLI extension format; stub until explored.
 - **Multi-account upgrade path**: document what changes when a second GitHub account is available (formal review signals, branch protection rules).
 
+## Development workflow
+
+Use git worktrees to work on multiple features simultaneously without managing separate clones.
+
+```bash
+# start a new feature
+git worktree add .worktrees/<feature> -b <branch-name>
+
+# list active worktrees
+git worktree list
+
+# clean up when done
+git worktree remove .worktrees/<feature>
+```
+
+Worktrees live in `.worktrees/` (gitignored) — contained inside the repo, not cluttering the parent directory. Each worktree is an independent checkout sharing one `.git` — branches and history stay in sync automatically. No stashing, no context-switching friction. This repo has no build artifacts or `node_modules`, so worktrees require no extra setup steps.
+
+Cannot check out the same branch in two worktrees simultaneously — git enforces this.
+
 ## Commit policy
 
 Direct commits to `main` for docs, spec, and adapter stubs. Script changes go through a PR — scripts affect all adopters.
