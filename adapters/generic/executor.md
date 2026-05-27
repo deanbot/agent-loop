@@ -11,7 +11,6 @@ Read the project's AGENTS.md `## Agent loop` section. Extract:
 - `in-progress-label` — label for claiming issues (default: `in-progress`)
 - `blocked-label` — label indicating a blocked issue to skip (default: `is-blocked`)
 - `quality-gates` — commands to run at each checkpoint
-- `spec-path` — where to save spec files during implementation (default: `docs/specs/`)
 - `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
 - `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
