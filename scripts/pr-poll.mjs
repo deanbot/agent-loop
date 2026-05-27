@@ -156,7 +156,7 @@ if (newInline.length > 0) {
   out.push('NEW_INLINE_COMMENT')
   for (const c of newInline) {
     const line = c.line ?? c.original_line ?? '?'
-    out.push(`---\nauthor: ${c.user.login}\npath: ${c.path}  line: ${line}\n${indentBody(c.body)}`)
+    out.push(`---\nauthor: ${c.user.login}\nid: ${c.id}\npath: ${c.path}  line: ${line}\n${indentBody(c.body)}`)
   }
 }
 
