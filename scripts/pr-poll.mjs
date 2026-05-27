@@ -116,6 +116,20 @@ const newInline = firstInline
   ? []
   : inlineComments.filter((c) => c.id > prState.reviewComments)
 
+// Surface unanswered top-level inline comments even if cursor has already passed them.
+// A top-level comment is unanswered if no other comment has in_reply_to_id pointing to it.
+const replyToIds = new Set(inlineComments.filter((c) => c.in_reply_to_id).map((c) => c.in_reply_to_id))
+const unansweredInline = inlineComments.filter(
+  (c) =>
+    !c.in_reply_to_id &&
+    !/^\[reviewer\]/.test(c.body ?? '') &&
+    !/^\[executor\]/.test(c.body ?? '') &&
+    !replyToIds.has(c.id)
+)
+for (const c of unansweredInline) {
+  if (!newInline.some((n) => n.id === c.id)) newInline.push(c)
+}
+
 // Indent body lines so signal keywords inside comment text don't confuse loop parsers
 function indentBody(body) {
   return (body ?? '').split('\n').map((l) => `  ${l}`).join('\n')
@@ -159,7 +173,7 @@ if (lastLgtm) {
   const lastCommitDate = new Date(lastCommit?.commit?.committer?.date ?? 0)
   hasReviewerLgtm = new Date(lastLgtm.created_at) > lastCommitDate
 }
-if (hasReviewerLgtm) {
+if (hasReviewerLgtm && unansweredInline.length === 0) {
   const checks = JSON.parse(
     execSync(
       `gh pr checks ${prNumber} --repo ${repo} --json name,state`,
