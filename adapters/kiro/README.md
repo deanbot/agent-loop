@@ -31,19 +31,20 @@ waiting, wait the appropriate interval and re-run the skill with the PR or issue
 /start-executor 42        # polls again
 ```
 
-### Option B — External cron (autonomous)
+### Option B — External cron (signal logging)
 
-Use a cron job to re-trigger Kiro's CLI (if available) or a standalone script that
-calls `node scripts/pr-poll.mjs` directly and handles signals without the IDE:
+Use a cron job to run `node scripts/pr-poll.mjs` on a schedule and log its output.
+The script emits signals (e.g. `NEW_COMMENT`, `MERGE_READY`) but does not handle them —
+signal handling still requires an LLM session. Use this to keep a signal log you can
+inspect, or to trigger a Kiro chat session manually when signals appear.
 
 ```bash
 # crontab -e
 * * * * * cd /path/to/repo && node scripts/pr-poll.mjs --repo owner/repo --pr 42 >> ~/.agent-loop/executor.log 2>&1
 ```
 
-For the reviewer (120s / 300s cadence), a cron every 2 minutes covers the shorter
-interval; the reviewer skips early if the wait hasn't elapsed by checking the state file
-timestamp against the required delay.
+For fully autonomous operation, re-invoke the Kiro skill in a new chat session each
+cycle (Option A, scripted via Kiro's CLI if available).
 
 ## Install
 
