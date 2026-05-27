@@ -2,8 +2,8 @@
 name: start-executor
 description: >
   Agentic executor loop. Picks an issue (or resumes a PR), implements it, then polls for
-  review signals until merged. Reads repo, label, quality-gates, and spec-path from the
-  project's AGENTS.md "## Agent loop" section.
+  review signals until merged. Reads repo, label, and quality-gates from the project's
+  AGENTS.md "## Agent loop" section.
 license: MIT
 category: productivity
 complexity: intermediate
@@ -22,8 +22,8 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `repo` — the GitHub repo (owner/repo)
 - `in-progress-label` — label name for claiming issues (default: `in-progress`)
 - `quality-gates` — commands to run at each checkpoint
-- `spec-path` — where to save spec files during implementation (default: `docs/specs/`)
-- `allow-author-associations` — list of GitHub `authorAssociation` values whose issues may be processed (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
+- `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
+- `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
 Then proceed with $ARGUMENTS.
 
@@ -39,21 +39,17 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
     - Not found: immediately before claiming, re-fetch: `gh issue view <N> --repo <repo> --json labels,author,authorAssociation --jq '{labels: [.labels[].name], login: .author.login, assoc: .authorAssociation}'`
       - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8.
-      - **Author association check:** if `assoc` is not in `allow-author-associations`: post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. To allow, add \`allow-author-associations: [OWNER, MEMBER, COLLABORATOR, <assoc>]\` to AGENTS.md. See README Security section."` — do not claim label — go to step 8.
-      - Otherwise claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow (steps 1–6).
+      - **Author check — apply in order:**
+        1. If `trusted-authors` is set: skip unless `login` is in that list. Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: @<login> is not in \`trusted-authors\`. Add login to AGENTS.md to allow. See README Security section."` — do not claim — go to step 8.
+        2. Else: skip unless `assoc` is in `allow-author-associations` (default: `[OWNER, MEMBER, COLLABORATOR]`). Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. See README Security section."` — do not claim — go to step 8.
+      - Otherwise claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow.
 
 ## Full implement flow (issue input, no existing PR)
 
 1. Fetch issue: `gh issue view <N> --repo <repo>`
-2. Branch off origin/main: `<issue-number>-<kebab-slug>`
-3. First commit: save issue body to `<spec-path>/<issue-number>-<slug>.md`
-4. Implement one checkbox at a time:
-   - Implement the slice
-   - Run quality-gates from AGENTS.md config
-   - Mark `[ ]` → `[x]` in spec file
-   - Commit implementation + spec edit together, push
-5. Final commit: delete spec file
-6. Open PR: `gh pr create --repo <repo>` — title mirrors issue title exactly, body follows Context/Deliverable/Acceptance criteria format, ends with `Closes #<N>`
+2. Follow the project's AGENTS.md conventions for branching, work tracking, and commit structure. If not specified, use sensible defaults.
+3. Implement the work described in the issue. Run quality-gates from AGENTS.md config.
+4. Open PR: `gh pr create --repo <repo>` — follow the project's PR conventions; end body with `Closes #<N>`.
 
 ## Orient on existing PR (step 6b)
 

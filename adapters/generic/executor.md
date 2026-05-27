@@ -8,7 +8,6 @@ Read the project's AGENTS.md `## Agent loop` section. Extract:
 - `repo` — GitHub repo (owner/repo)
 - `in-progress-label` — label for claiming issues (default: `in-progress`)
 - `quality-gates` — commands to run at each checkpoint
-- `spec-path` — where to save spec files during implementation (default: `docs/specs/`)
 - `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
 - `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
@@ -31,11 +30,9 @@ Before claiming, fetch author info: `gh issue view <N> --repo <repo> --json auth
 Claim before branching: `gh issue edit <N> --add-label <in-progress-label> --repo <repo>`
 
 1. `gh issue view <N> --repo <repo>`
-2. Branch off origin/main: `<issue-number>-<slug>`
-3. First commit: save issue body to `<spec-path>/<issue-number>-<slug>.md`
-4. Per checkbox: implement → run quality-gates → mark `[x]` → commit + push
-5. Final commit: delete spec file
-6. `gh pr create --repo <repo>` — title mirrors issue exactly, body: Context / Deliverable (all `[x]`) / Acceptance criteria, ends with `Closes #<N>`
+2. Follow the project's AGENTS.md conventions for branching, work tracking, and commit structure. If not specified, use sensible defaults.
+3. Implement the work. Run quality-gates from AGENTS.md config.
+4. `gh pr create --repo <repo>` — follow the project's PR conventions; end body with `Closes #<N>`.
 
 ## Poll loop
 
