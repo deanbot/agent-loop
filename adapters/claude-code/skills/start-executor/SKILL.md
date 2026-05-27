@@ -17,7 +17,8 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `in-progress-label` — label name for claiming issues (default: `in-progress`)
 - `quality-gates` — commands to run at each checkpoint
 - `spec-path` — where to save spec files during implementation (default: `docs/specs/`)
-- `allow-author-associations` — list of GitHub `authorAssociation` values whose issues may be processed (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
+- `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
+- `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
 Then proceed with $ARGUMENTS.
 
@@ -33,7 +34,9 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
     - Not found: immediately before claiming, re-fetch: `gh issue view <N> --repo <repo> --json labels,author,authorAssociation --jq '{labels: [.labels[].name], login: .author.login, assoc: .authorAssociation}'`
       - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8.
-      - **Author association check:** if `assoc` is not in `allow-author-associations`: post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. To allow, add \`allow-author-associations: [OWNER, MEMBER, COLLABORATOR, <assoc>]\` to AGENTS.md. See README Security section."` — do not claim label — go to step 8.
+      - **Author check:** apply in order:
+        1. If `trusted-authors` is set: skip unless `login` is in that list. Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: @<login> is not in \`trusted-authors\`. Add login to AGENTS.md to allow. See README Security section."` — do not claim — go to step 8.
+        2. Else if `allow-author-associations` is set (or using default): skip unless `assoc` is in that list. Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. See README Security section."` — do not claim — go to step 8.
       - Otherwise claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow (steps 1–6).
 
 ## Full implement flow (issue input, no existing PR)
