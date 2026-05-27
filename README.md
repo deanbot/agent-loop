@@ -14,22 +14,31 @@ This is a **solo developer / single-account** workflow. Not a replacement for te
 
 The executor reads GitHub issue and PR content and feeds it verbatim to an LLM running with your credentials — GitHub token, API keys, everything in your shell environment. Any untrusted user who can get their text in front of the executor can attempt prompt injection: instruct the LLM to post env vars as a PR comment, write secrets to a file, or take other unintended actions.
 
-### Author association check (default-on guardrail)
+### Trusted author check
 
-The executor checks `authorAssociation` before processing any issue. By default, only `OWNER`, `MEMBER`, and `COLLABORATOR` are processed. Issues from other authors are skipped automatically.
+Before processing any issue, the executor checks the author against your configured allowlist. Two config keys, in order of strictness:
 
-To allow broader contributor access, set `allow-author-associations` in your AGENTS.md:
+**`trusted-authors` (recommended)** — exact GitHub login allowlist. Only named users are processed. Anything else is skipped.
 
 ```markdown
 ## Agent loop
 repo: owner/repo
-in-progress-label: in-progress
-allow-author-associations: [OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR]
+trusted-authors: [your-login]
+```
+
+**`allow-author-associations`** — fallback when `trusted-authors` is not set. Filters by GitHub's `authorAssociation` field. Default: `[OWNER, MEMBER, COLLABORATOR]`.
+
+```markdown
+## Agent loop
+repo: owner/repo
+allow-author-associations: [OWNER, MEMBER, COLLABORATOR]
 ```
 
 GitHub's association values: `OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, `NONE`.
 
-**This check is not a complete defense.** A trusted author can quote attacker-controlled text (error messages, user-submitted bug repros) containing injection payloads. Prompt injection is an unsolved problem in LLM security. The only complete protection is running on private repos with trusted collaborators.
+If neither key is set, the executor falls back to the `allow-author-associations` default.
+
+**These checks are not a complete defense.** A trusted author can quote attacker-controlled text (error messages, user-submitted bug repros) containing injection payloads. Prompt injection is an unsolved problem in LLM security. The only complete protection is running on private repos with trusted collaborators.
 
 ### Unprefixed PR comments
 
