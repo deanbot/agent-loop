@@ -73,8 +73,11 @@ Multiple signals space-separated on one line. `REVIEW:<n>` takes precedence over
 ### Reviewer handling per signal
 
 - `MERGE_CONFLICT:<n>` — post `[reviewer] Merge conflicts — rebase on main before review.` Do not review diff.
-- `REVIEW:<n>` — fetch diff AND comment thread in parallel. Read thread first: filter out findings already answered by `[executor]` comments since the last `[reviewer]` post. Review only unanswered scope. Post findings as `[reviewer] <findings>`, or `[reviewer] LGTM` if clean.
-- `REVIEW_COMMENTS:<n>` — read thread. Ignore `[reviewer]` own posts. Assess whether `[executor]` responses satisfy open findings. Post LGTM, follow-up, or new findings as appropriate.
+- `REVIEW:<n>` — **QA gate check first:** verify `[qa] PASS` exists after the last commit. If not: post nothing, wait for `REVIEW_COMMENTS` triggered by QA's verdict. If found: fetch diff AND comment thread in parallel, read thread, filter answered findings, review unanswered scope, post `[reviewer] <findings>` or `[reviewer] LGTM`.
+- `REVIEW_COMMENTS:<n>` — read thread, ignore own posts, then:
+  - New comments include `[qa] PASS` with no prior `[reviewer]` post on this commit: QA gate cleared — do full code review (fetch diff).
+  - New comments include only `[qa] BLOCKED` with no executor responses: post nothing — A.C. gate not cleared.
+  - Otherwise: assess executor/operator responses to open findings. Post LGTM, follow-up, or clarification.
 
 ---
 

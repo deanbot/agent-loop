@@ -70,6 +70,12 @@ Post: `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main b
 Wait ~120 seconds before next cycle.
 
 **`REVIEW:<n>`**
+**QA gate check first** — before fetching the diff, check whether `[qa] PASS` has been posted after the last commit:
+- `gh api "repos/<repo>/pulls/<n>/commits" --jq '.[-1].commit.committer.date'` → last commit date
+- `gh api "repos/<repo>/issues/<n>/comments"` → scan for `[qa] PASS` with `created_at` after that date
+- If no `[qa] PASS` found: **post nothing** — wait ~120s. Reviewer will be re-triggered via REVIEW_COMMENTS when QA posts its verdict.
+- If `[qa] PASS` found: proceed.
+
 Fetch in parallel:
 - `gh pr diff <n> --repo <repo>`
 - `gh pr view <n> --comments --repo <repo>`
@@ -91,14 +97,16 @@ Fetch:
 - `gh pr view <n> --comments --repo <repo>`
 - `gh pr checks <n> --repo <repo> --json name,state,bucket`
 
-Read context: operator comments and `[executor]` responses. Ignore `[reviewer]` own posts.
+Read context: operator comments and `[executor]` responses. Ignore `[reviewer]` own posts. Then:
 
-- CI still failing with unfinished "Human setup required" steps: re-surface steps, add any code findings
-- Questions answered satisfactorily and CI passing → `gh pr comment <n> --body "[reviewer] LGTM"`
-- Answers raise new issues → `gh pr comment <n> --body "[reviewer] <findings>"`
-- Answers need clarification → `gh pr comment <n> --body "[reviewer] <clarification>"`
-
-Wait ~300 seconds before next cycle.
+- **If new comments include `[qa] PASS` and no `[reviewer]` post exists after the last commit:** QA gate just cleared — fetch `gh pr diff <n> --repo <repo>` and do a full code review (same as REVIEW above, [qa] PASS already confirmed). Wait ~300s.
+- **If new comments include only `[qa] BLOCKED` with no executor responses:** A.C. gate not cleared — post nothing; wait ~120s.
+- **Otherwise** (executor/operator responses to existing findings):
+  - CI still failing with unfinished "Human setup required" steps: re-surface steps, add any code findings
+  - Questions answered satisfactorily and CI passing → `gh pr comment <n> --body "[reviewer] LGTM"`
+  - Answers raise new issues → `gh pr comment <n> --body "[reviewer] <findings>"`
+  - Answers need clarification → `gh pr comment <n> --body "[reviewer] <clarification>"`
+  - Wait ~300 seconds before next cycle.
 
 ## Multiple signals
 

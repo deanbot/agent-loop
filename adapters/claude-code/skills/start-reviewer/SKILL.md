@@ -51,22 +51,30 @@ If the operator sends a message containing "stop" at any point during the loop:
 
 - MERGE_CONFLICT:<n>: post `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main before review."`; ScheduleWakeup(120s)
 
-- REVIEW:<n>: fetch `gh pr diff <n> --repo <repo>` AND `gh pr view <n> --repo <repo> --json body,title` AND `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/pulls/<n>/comments"` in parallel, then check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`. Read the PR body first — it contains the deliverable checklist; verify the diff covers every item before reviewing code correctness:
-  - read existing comment thread first (both timeline comments and inline review comments) — filter out findings already answered by `[executor]` comments since last `[reviewer]` post; only raise unanswered issues
-  - if any check has bucket `fail`: fetch PR description (`gh pr view <n> --repo <repo> --json body`); if body has "Human setup required" section, prepend CI failure note with those steps as action block; otherwise prepend generic CI failure note
-  - **immediately before posting:** re-fetch `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/issues/<n>/comments"` to check for comments that arrived during analysis; if new operator or `[executor]` activity found, incorporate before posting
-  - review diff scoped to unanswered issues and post:
-    - actionable findings → `gh pr comment <n> --body "[reviewer] <findings>"`
-    - questions only → `gh pr comment <n> --body "[reviewer] <questions>"`
-    - no findings → `gh pr comment <n> --body "[reviewer] LGTM"`
-  - ScheduleWakeup(300s)
+- REVIEW:<n>: **QA gate check first** — before fetching the diff, check whether `[qa] PASS` has been posted after the last commit:
+  - `gh api "repos/<repo>/pulls/<n>/commits" --jq '.[-1].commit.committer.date'` → get last commit date
+  - `gh api "repos/<repo>/issues/<n>/comments"` → scan for a comment starting with `[qa] PASS` with `created_at` after last commit date
+  - If no `[qa] PASS` found after last commit: **post nothing** — ScheduleWakeup(120s). Reviewer will be re-triggered via REVIEW_COMMENTS when QA posts its verdict.
+  - If `[qa] PASS` found: proceed with full review below.
+  - Fetch `gh pr diff <n> --repo <repo>` AND `gh pr view <n> --repo <repo> --json body,title` AND `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/pulls/<n>/comments"` in parallel, then check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`. Read the PR body first — it contains the deliverable checklist; verify the diff covers every item before reviewing code correctness:
+    - read existing comment thread first (both timeline comments and inline review comments) — filter out findings already answered by `[executor]` comments since last `[reviewer]` post; only raise unanswered issues
+    - if any check has bucket `fail`: fetch PR description (`gh pr view <n> --repo <repo> --json body`); if body has "Human setup required" section, prepend CI failure note with those steps as action block; otherwise prepend generic CI failure note
+    - **immediately before posting:** re-fetch `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/issues/<n>/comments"` to check for comments that arrived during analysis; if new operator or `[executor]` activity found, incorporate before posting
+    - review diff scoped to unanswered issues and post:
+      - actionable findings → `gh pr comment <n> --body "[reviewer] <findings>"`
+      - questions only → `gh pr comment <n> --body "[reviewer] <questions>"`
+      - no findings → `gh pr comment <n> --body "[reviewer] LGTM"`
+    - ScheduleWakeup(300s)
 
-- REVIEW_COMMENTS:<n>: fetch `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/pulls/<n>/comments"` AND check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`, read context (both timeline and inline review comments from operator and `[executor]` — ignore `[reviewer]` own posts), then post follow-up:
-  - CI still failing with unfinished "Human setup required" steps: re-surface steps, then add code findings
-  - questions answered satisfactorily and CI passing → `gh pr comment <n> --body "[reviewer] LGTM"`
-  - answers raise new issues → `gh pr comment <n> --body "[reviewer] <findings>"`
-  - answers need clarification → `gh pr comment <n> --body "[reviewer] <clarification>"`
-  - **immediately before posting:** re-fetch `gh api "repos/<repo>/issues/<n>/comments"` to check for activity during analysis; incorporate any new operator or `[executor]` comments before posting
-  - ScheduleWakeup(300s)
+- REVIEW_COMMENTS:<n>: fetch `gh pr view <n> --comments --repo <repo>` AND `gh api "repos/<repo>/pulls/<n>/comments"` AND check CI with `gh pr checks <n> --repo <repo> --json name,state,bucket`, read context (both timeline and inline review comments from operator and `[executor]` — ignore `[reviewer]` own posts), then:
+  - **If new comments include `[qa] PASS` and no `[reviewer]` post exists after the last commit:** QA gate just cleared — treat as REVIEW (fetch `gh pr diff <n> --repo <repo>` and do a full code review as described in REVIEW:<n> above, skipping the gate check since [qa] PASS is already confirmed). ScheduleWakeup(300s).
+  - **If new comments include only `[qa] BLOCKED` with no executor responses:** A.C. gate not cleared — post nothing; ScheduleWakeup(120s).
+  - **Otherwise** (executor/operator responses to existing findings): post follow-up:
+    - CI still failing with unfinished "Human setup required" steps: re-surface steps, then add code findings
+    - questions answered satisfactorily and CI passing → `gh pr comment <n> --body "[reviewer] LGTM"`
+    - answers raise new issues → `gh pr comment <n> --body "[reviewer] <findings>"`
+    - answers need clarification → `gh pr comment <n> --body "[reviewer] <clarification>"`
+    - **immediately before posting:** re-fetch `gh api "repos/<repo>/issues/<n>/comments"` to check for activity during analysis; incorporate any new operator or `[executor]` comments before posting
+    - ScheduleWakeup(300s)
 
 - NONE: no actionable signals (does not mean no open PRs — means no new commits, no unreviewed PRs, and no new comments); ScheduleWakeup(120s)
