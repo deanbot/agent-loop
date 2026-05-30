@@ -51,6 +51,8 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
         2. Else: skip unless `assoc` is in `allow-author-associations` (default: `[OWNER, MEMBER, COLLABORATOR]`). Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. See README Security section."` — do not claim — go to step 8.
       - Otherwise claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow.
 
+**Operator stop — implement phase:** If the operator sends a message containing "stop" at any point before the executor loop (during implement steps 1–4): `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, notify "Executor stopped. Issue #<N> unclaimed.", exit. No sentinel needed — no scheduled re-invocation has been set up yet.
+
 ## Full implement flow (issue input, no existing PR)
 
 1. Fetch issue: `gh issue view <N> --repo <repo>`
