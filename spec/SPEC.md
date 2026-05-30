@@ -12,9 +12,11 @@ This spec defines the protocol that makes adapters interoperable. An adapter tha
 
 **Executor** — AI agent that implements issues and addresses review findings. Posts `[executor]` prefixed comments.
 
-**Reviewer** — AI agent that monitors PRs and posts findings. Posts `[reviewer]` prefixed comments.
+**Reviewer** — AI agent that monitors PRs and posts code-quality findings. Posts `[reviewer]` prefixed comments.
 
-All three communicate through GitHub PR comment threads.
+**QA** — AI agent that evaluates whether acceptance criteria are met before merge. Posts `[qa]` prefixed comments. Adversarial by design — its job is to find what's missing, not validate what's there.
+
+All four communicate through GitHub PR comment threads.
 
 ---
 
@@ -24,11 +26,30 @@ All three communicate through GitHub PR comment threads.
 |---|---|---|
 | *(none)* | Operator | Direction, questions, approval |
 | `[executor]` | Executor agent | Fix summaries, questions, blocked notices |
-| `[reviewer]` | Reviewer agent | Findings, LGTM, conflict notices |
+| `[reviewer]` | Reviewer agent | Code findings, LGTM, conflict notices |
+| `[qa]` | QA agent | A.C. checklist, PASS or BLOCKED verdict |
 
 **Never** use a bracket prefix in operator comments — agents treat prefixed comments as bot traffic and may ignore them.
 
-Scripts filter `[reviewer]` comments when checking for new activity (prevents ping-pong loops). All other prefixed comments are treated as meaningful signals.
+Scripts filter their own prefix when checking for new activity (prevents ping-pong loops). `[reviewer]` and `[qa]` comments are each filtered by their respective scripts.
+
+---
+
+## Agent sequencing
+
+```
+Executor opens PR
+       ↓
+   QA agent — evaluates A.C.; blocks until [qa] PASS
+       ↓ pass
+   Reviewer — evaluates code quality; blocks until [reviewer] LGTM
+       ↓ LGTM
+   MERGE_READY signal → operator merges
+```
+
+QA runs before reviewer. No point reviewing code quality if acceptance criteria aren't met. Both must pass on the same commit before MERGE_READY is emitted.
+
+Both QA and reviewer re-run after every executor push that addresses findings — same new-commit trigger.
 
 ---
 
@@ -57,6 +78,45 @@ Multiple signals space-separated on one line. `REVIEW:<n>` takes precedence over
 
 ---
 
+## QA signals (`pr-qa.mjs`)
+
+Script runs once, emits one line, exits. Persists state between runs.
+
+| Signal | Meaning |
+|---|---|
+| `NONE <timestamp>` | No PRs changed since last run |
+| `QA_READY:<n>` | PR #n has new commits; needs A.C. evaluation |
+| `MERGE_CONFLICT:<n>` | PR #n has new commits but branch conflicts with base |
+
+Multiple signals space-separated on one line.
+
+State file: `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json`
+
+### QA handling per signal
+
+- `MERGE_CONFLICT:<n>` — post `[qa] Merge conflicts — rebase on main before QA.` Do not evaluate A.C.
+- `QA_READY:<n>` — gather full context (issue body, PR description and checklist, project convention files), synthesize requirements, map each to evidence in the diff or tests, post verdict:
+  - `[qa] PASS` — all criteria verified with evidence
+  - `[qa] BLOCKED` — one or more criteria missing evidence; include checklist mapping
+  - If no verifiable criteria found: `[qa] BLOCKED: no acceptance criteria found in issue or PR` — never pass silently
+
+### QA verdict format
+
+```
+[qa] BLOCKED
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| <criterion> | <test file / diff hunk / none> | ✅ / ❌ Missing / ⚠️ Observation-required |
+
+**Observation-required items** (no automated verification possible):
+- <item> — requires screenshot, Playwright assertion on specific element, or explicit human-tested note
+```
+
+Observation-required items block merge the same as missing evidence items. QA posts `[qa] PASS` only when every criterion has code-verifiable evidence or an explicit human-verified note from the operator.
+
+---
+
 ## Executor signals (`pr-poll.mjs`)
 
 Script runs once per poll cycle for a specific PR, emits signals, exits.
@@ -67,7 +127,7 @@ Script runs once per poll cycle for a specific PR, emits signals, exits.
 | `NEW_COMMENT` | New PR-level discussion comment(s) |
 | `NEW_REVIEW_SUBMISSION` | New formal review (state: APPROVED / CHANGES_REQUESTED / COMMENTED) |
 | `NEW_INLINE_COMMENT` | New line-level diff comment(s) |
-| `MERGE_READY` | `[reviewer] LGTM` comment present + all CI checks passed or no checks |
+| `MERGE_READY` | `[reviewer] LGTM` + `[qa] PASS` both posted after last commit + CI passing |
 | `MERGED` | PR is merged |
 
 Content blocks follow signal lines, indented two spaces to prevent keyword confusion.
@@ -78,7 +138,7 @@ Content blocks follow signal lines, indented two spaces to prevent keyword confu
 - `MERGE_READY` — notify operator; continue polling until MERGED or operator confirms merge
 - `NEW_REVIEW_SUBMISSION` with `CHANGES_REQUESTED` — read full thread, collect ALL unaddressed `[reviewer]` findings, address every one in a single code pass, push once, post one `[executor] Pushed fix: <summary>`. Never post partial fix comments mid-batch.
 - `NEW_REVIEW_SUBMISSION` with `COMMENTED` — answer questions via `[executor]` comment
-- `NEW_INLINE_COMMENT` or `NEW_COMMENT` — skip own `[executor]` posts; treat `[reviewer]` comments as CHANGES_REQUESTED (batch, fix all, push once); treat operator (unprefixed) as direction or questions
+- `NEW_INLINE_COMMENT` or `NEW_COMMENT` — skip own `[executor]` posts; treat `[reviewer]` and `[qa]` comments as findings (batch, fix all, push once); treat operator (unprefixed) as direction or questions
 - `NONE` — wait, then poll again
 
 **Loop invariant:** every path through signal handling ends with a wait before the next poll. No exceptions except MERGED and BLOCKED exits. Scheduling mechanism is adapter-specific.
@@ -95,10 +155,11 @@ Content blocks follow signal lines, indented two spaces to prevent keyword confu
 GitHub blocks self-approval when reviewer and executor share one account. Formal `APPROVED` review is not achievable.
 
 **MERGE_READY threshold:**
-1. At least one `[reviewer] LGTM` PR comment
-2. No failing or pending CI checks (or no checks)
+1. At least one `[reviewer] LGTM` PR comment posted after the last commit
+2. At least one `[qa] PASS` PR comment posted after the last commit
+3. No failing or pending CI checks (or no checks)
 
-`pr-poll.mjs` emits `MERGE_READY` when both conditions are met. The executor notifies the operator. **Merge requires explicit operator confirmation** — it is never automatic.
+`pr-poll.mjs` emits `MERGE_READY` when all three conditions are met. The executor notifies the operator. **Merge requires explicit operator confirmation** — it is never automatic.
 
 ### Multi-account upgrade path
 
@@ -128,6 +189,7 @@ Scripts persist state between runs to prevent replaying historical signals.
 |---|---|
 | `pr-watch.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-state.json` |
 | `pr-poll.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-poll-state.json` |
+| `pr-qa.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json` |
 
 Per-repo paths prevent collisions when running agent-loop on multiple repos simultaneously.
 

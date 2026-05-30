@@ -10,7 +10,7 @@
  *   NEW_COMMENT                 new PR-level discussion comment(s); content follows
  *   NEW_REVIEW_SUBMISSION       new formal review (approve/request-changes/comment); content follows
  *   NEW_INLINE_COMMENT          new line-level review comment(s); content follows
- *   MERGE_READY                 [reviewer] LGTM comment + all CI checks passed; no content block
+ *   MERGE_READY                 [reviewer] LGTM + [qa] PASS both posted after last commit + CI passing; no content block
  *   MERGED                      PR is merged; executor should stop
  *
  * Content block format (after each signal line):
@@ -160,20 +160,24 @@ if (newInline.length > 0) {
   }
 }
 
-// Check merge threshold: [reviewer] LGTM posted AFTER the last commit + all CI checks passing.
-// LGTM predating new commits is stale — reviewer must re-approve after each push.
+// Check merge threshold: [reviewer] LGTM + [qa] PASS both posted AFTER the last commit + CI passing.
+// Comments predating new commits are stale — both agents must re-approve after each push.
 const lgtmComments = issueComments.filter((c) => (c.body ?? '').startsWith('[reviewer] LGTM'))
+const qaPassComments = issueComments.filter((c) => (c.body ?? '').startsWith('[qa] PASS'))
 const lastLgtm = lgtmComments.at(-1)
+const lastQaPass = qaPassComments.at(-1)
 let hasReviewerLgtm = false
-if (lastLgtm) {
+let hasQaPass = false
+if (lastLgtm || lastQaPass) {
   const commits = JSON.parse(
     execSync(`gh api --paginate "repos/${repo}/pulls/${prNumber}/commits"`, { encoding: 'utf8' })
   )
   const lastCommit = commits.at(-1)
   const lastCommitDate = new Date(lastCommit?.commit?.committer?.date ?? 0)
-  hasReviewerLgtm = new Date(lastLgtm.created_at) > lastCommitDate
+  if (lastLgtm) hasReviewerLgtm = new Date(lastLgtm.created_at) > lastCommitDate
+  if (lastQaPass) hasQaPass = new Date(lastQaPass.created_at) > lastCommitDate
 }
-if (hasReviewerLgtm && unansweredInline.length === 0) {
+if (hasReviewerLgtm && hasQaPass && unansweredInline.length === 0) {
   const checks = JSON.parse(
     execSync(
       `gh pr checks ${prNumber} --repo ${repo} --json name,state`,

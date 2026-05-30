@@ -81,9 +81,9 @@ in-progress-label: in-progress
 quality-gates: npm test && npm run lint
 ```
 
-Use: `/agent-loop:start-executor`, `/agent-loop:start-reviewer`
+Use: `/agent-loop:start-executor`, `/agent-loop:start-reviewer`, `/agent-loop:start-qa`
 
-> **Updating:** `claude plugin update agent-loop@agent-loop` — then restart any active executor/reviewer sessions to pick up the new skill definitions.
+> **Updating:** `claude plugin update agent-loop@agent-loop` — then restart any active executor/reviewer/QA sessions to pick up the new skill definitions.
 
 ### Path B — Generic (any tool)
 
@@ -97,7 +97,7 @@ cp -r adapters/kiro/skills/. .kiro/skills/
 
 Add the `## Agent loop` block to your project's AGENTS.md (same format as Path A). Loop scheduling is manual re-trigger or external cron — Kiro has no native scheduling primitive. See [`adapters/kiro/README.md`](adapters/kiro/README.md) for full install steps.
 
-Use: `/start-executor`, `/start-reviewer` in Kiro chat.
+Use: `/start-executor`, `/start-reviewer`, `/start-qa` in Kiro chat.
 
 ## Structure
 

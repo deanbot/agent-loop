@@ -22,17 +22,26 @@ Entry points:
 
 ### Reviewer
 
-Monitor open PRs and post findings. Read the reviewer prompt in
+Monitor open PRs and post code-quality findings. Read the reviewer prompt in
 `adapters/generic/reviewer.md` from the agent-loop repo, or paste it here directly.
 
 The reviewer should be run in a separate session. It polls continuously (operator
 re-triggers each cycle, or schedule via external cron).
+
+### QA
+
+Evaluate whether acceptance criteria are met before merge. Read the QA prompt in
+`adapters/generic/qa.md` from the agent-loop repo, or paste it here directly.
+
+The QA agent should be run in a separate session. It runs before the reviewer in the
+agent sequencing — see `spec/SPEC.md` for the full flow.
 
 ### Scheduling note
 
 This generic adapter has no native scheduling. Between poll cycles:
 - Executor: wait ~60 seconds before next `pr-poll.mjs` call (use sleep or manual re-trigger)
 - Reviewer: wait ~120s after NONE or MERGE_CONFLICT, ~300s after posting findings
+- QA: wait ~120s after NONE or MERGE_CONFLICT, ~300s after posting a verdict
 
 ### Protocol reference
 

@@ -33,9 +33,11 @@ Each adapter in `adapters/<tool>/` owns:
 An adapter is valid if:
 1. Executor prompt implements all signals from `pr-poll.mjs` output
 2. Reviewer prompt implements all signals from `pr-watch.mjs` output
-3. Both respect the prefix convention: post `[executor]` or `[reviewer]` comments, never bare agent comments
-4. Loop invariant: every iteration ends with a wait before the next poll (scheduling mechanism is adapter-specific)
-5. MERGE_READY threshold: `[reviewer] LGTM` comment + CI passing (no formal APPROVED required — single-account mode)
+3. QA prompt implements all signals from `pr-qa.mjs` output
+4. All three respect the prefix convention: post `[executor]`, `[reviewer]`, or `[qa]` comments, never bare agent comments
+5. Loop invariant: every iteration ends with a wait before the next poll (scheduling mechanism is adapter-specific)
+6. MERGE_READY threshold: `[reviewer] LGTM` + `[qa] PASS` + CI passing (no formal APPROVED required — single-account mode)
+7. Executor prompt includes pre-PR self-check: verify each A.C. criterion against the diff, note observation-verifiable items explicitly
 
 ## Known design constraints
 
@@ -51,12 +53,12 @@ An adapter is valid if:
 
 ## State files
 
-Scripts persist state to `~/.agent-loop/state/<owner>-<repo>-pr-state.json` and `~/.agent-loop/state/<owner>-<repo>-pr-poll-state.json`. Per-repo paths prevent collisions when running agent-loop on multiple repos simultaneously.
+Scripts persist state to `~/.agent-loop/state/` with per-repo paths to prevent collisions when running agent-loop on multiple repos simultaneously. Three state files per repo: `<slug>-pr-state.json` (reviewer), `<slug>-pr-poll-state.json` (executor), `<slug>-pr-qa-state.json` (QA).
 
 ## How to add an adapter
 
 1. Create `adapters/<toolname>/`
-2. Write full executor and reviewer prompts — do not reference other adapters' prompts
+2. Write full executor, reviewer, and QA prompts — do not reference other adapters' prompts
 3. Implement the adapter contract (all signals, prefix convention, loop invariant, merge threshold)
 4. Add an `install.sh` or equivalent
 5. Add a stub `README.md` noting which features are missing vs. a full implementation
