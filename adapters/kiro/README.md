@@ -64,7 +64,6 @@ timestamp against the required delay.
    repo: owner/repo
    in-progress-label: in-progress
    quality-gates: npm test && npm run lint
-   spec-path: docs/specs/
    ```
 
 4. Create the `in-progress` label (one-time):
