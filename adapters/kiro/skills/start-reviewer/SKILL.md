@@ -24,6 +24,34 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 
 $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
+Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Sentinel path: `~/.agent-loop/state/<slug>-reviewer-stop`.
+
+**Stop-sentinel check — run before calling pr-watch.mjs or re-invoking:**
+
+```bash
+SENTINEL=~/.agent-loop/state/<slug>-reviewer-stop
+if [ -f "$SENTINEL" ]; then
+  AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
+  if [ "$AGE" -lt 600 ]; then
+    rm "$SENTINEL"
+    # exit: notify user, do NOT re-invoke this skill
+  else
+    rm "$SENTINEL"   # stale sentinel from a prior session — discard and proceed
+  fi
+fi
+```
+
+If the sentinel was fresh (age < 600s): notify the user "Reviewer loop stopped (sentinel cleared)." and exit without running pr-watch.mjs or re-invoking. If using an external cron, also pause or cancel it.
+
+If the sentinel was stale (age ≥ 600s): delete it and proceed normally. Handles the case where a stop was issued but the cron continued past the window and a fresh run started — leftover file should not block the new run.
+
+**Operator stop request:**
+
+If the operator sends a message containing "stop" at any point during the cycle:
+1. `mkdir -p ~/.agent-loop/state && date +%s > ~/.agent-loop/state/<slug>-reviewer-stop`
+2. Notify: "Stop sentinel written. Loop will exit on next invocation if it fires within 10 minutes. If using external cron, also pause it."
+3. Exit without re-invoking this skill.
+
 Run `node scripts/pr-watch.mjs --repo <repo> $ARGUMENTS` from the repo root and handle each signal below.
 
 **After handling any signal (including NONE), wait before the next cycle:**
