@@ -17,6 +17,34 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 
 $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
+Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Sentinel path: `~/.agent-loop/state/<slug>-reviewer-stop`.
+
+**Stop-sentinel check — run before anything else:**
+
+```bash
+SENTINEL=~/.agent-loop/state/<slug>-reviewer-stop
+if [ -f "$SENTINEL" ]; then
+  AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
+  if [ "$AGE" -lt 600 ]; then
+    rm "$SENTINEL"
+    # exit: notify user, do NOT call ScheduleWakeup
+  else
+    rm "$SENTINEL"   # stale sentinel from a prior session — discard and proceed
+  fi
+fi
+```
+
+If the sentinel was fresh (age < 600s): notify the user "Reviewer loop stopped (sentinel cleared)." and exit without calling ScheduleWakeup or running pr-watch.mjs. Do not process any signals.
+
+If the sentinel was stale (age ≥ 600s): delete it and proceed normally. This handles the case where the user wrote a stop, the queued wakeup drained, and then they restarted the loop fresh — the leftover file should not block the new run.
+
+**User stop request:**
+
+If the user says "stop", "quit", "cancel", or "exit" at any point during the loop:
+1. `mkdir -p ~/.agent-loop/state && date +%s > ~/.agent-loop/state/<slug>-reviewer-stop`
+2. Notify: "Stop sentinel written. Loop will exit on next wakeup if it fires within 10 minutes."
+3. Exit without calling ScheduleWakeup.
+
 /loop run `node ~/.claude/plugins/marketplaces/agent-loop/scripts/pr-watch.mjs --repo <repo> $ARGUMENTS` and handle each signal.
 
 **After handling any signal (including NONE), call ScheduleWakeup before the next pr-watch.mjs call — 300s after posting findings or LGTM (give executor time to respond), 120s after MERGE_CONFLICT or NONE.**
