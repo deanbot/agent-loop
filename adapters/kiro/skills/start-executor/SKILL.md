@@ -18,9 +18,13 @@ complexity: intermediate
 > **Scheduling note:** Kiro has no native loop primitive. After each poll cycle, wait
 > ~60 seconds then re-invoke this skill, or use an external cron job (see `adapters/kiro/README.md`).
 
+**Prerequisite check — do this first, before any other step:** Read `AGENTS.md` in the current working directory and verify a `## Agent loop` section exists. If not found, stop immediately — do not proceed. Tell the user:
+> This project has no `## Agent loop` config in AGENTS.md. Add one before running start-executor. See `adapters/generic/AGENTS.md` in the agent-loop repo for the config template.
+
 Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `repo` — the GitHub repo (owner/repo)
 - `in-progress-label` — label name for claiming issues (default: `in-progress`)
+- `blocked-label` — label name indicating a blocked issue to skip (default: `is-blocked`)
 - `quality-gates` — commands to run at each checkpoint
 - `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
 - `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
@@ -38,7 +42,8 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
   - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --json number,body --jq '[.[] | select(.body | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
     - Not found: immediately before claiming, re-fetch: `gh issue view <N> --repo <repo> --json labels,author,authorAssociation --jq '{labels: [.labels[].name], login: .author.login, assoc: .authorAssociation}'`
-      - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8.
+      - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8. **Do not infer staleness — absence of an open PR is not evidence the claim is stale. The label is authoritative.**
+      - If `<blocked-label>` now present in labels: issue is blocked; go to step 8 silently.
       - **Author check — apply in order:**
         1. If `trusted-authors` is set: skip unless `login` is in that list. Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: @<login> is not in \`trusted-authors\`. Add login to AGENTS.md to allow. See README Security section."` — do not claim — go to step 8.
         2. Else: skip unless `assoc` is in `allow-author-associations` (default: `[OWNER, MEMBER, COLLABORATOR]`). Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. See README Security section."` — do not claim — go to step 8.
@@ -93,6 +98,6 @@ Signal handling:
 
 ## Pick next item (step 8)
 
-`gh issue list --state open --repo <repo> --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | index("<in-progress-label>") | not)) | first'`
+`gh issue list --state open --repo <repo> --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and (index("<blocked-label>") | not))) | first'`
 
 If result found: restart from detect input type with that issue number. If none: STOP and notify user.

@@ -4,9 +4,12 @@ Paste this into your project's AGENTS.md, or instruct your agent to follow it.
 
 ---
 
+**Prerequisite check — do this first, before any other step:** Verify a `## Agent loop` section exists in the config. If not found, stop immediately and tell the user to add the config block. See `adapters/generic/AGENTS.md` in the agent-loop repo for the template.
+
 Read the project's AGENTS.md `## Agent loop` section. Extract:
 - `repo` — GitHub repo (owner/repo)
 - `in-progress-label` — label for claiming issues (default: `in-progress`)
+- `blocked-label` — label indicating a blocked issue to skip (default: `is-blocked`)
 - `quality-gates` — commands to run at each checkpoint
 - `spec-path` — where to save spec files during implementation (default: `docs/specs/`)
 - `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
@@ -17,12 +20,16 @@ Read the project's AGENTS.md `## Agent loop` section. Extract:
 ## Detect input type
 
 If given a PR number: orient on it (read PR description + full comment thread), enter poll loop.
-If given an issue number: check for existing open PR (`gh pr list --repo <repo> --state open --json number,body`). If found, orient and poll. If not found, claim the issue and implement.
+If given an issue number: check for existing open PR (`gh pr list --repo <repo> --state open --json number,body`). If found, orient and poll. If not found, check labels before claiming (see below).
 If given nothing: run pick-next query, treat result as issue number.
 
 ## Implement flow (no existing PR)
 
-Before claiming, fetch author info: `gh issue view <N> --repo <repo> --json author,authorAssociation --jq '{login: .author.login, assoc: .authorAssociation}'`
+Before claiming, fetch: `gh issue view <N> --repo <repo> --json labels,author,authorAssociation --jq '{labels: [.labels[].name], login: .author.login, assoc: .authorAssociation}'`
+
+If `<in-progress-label>` in labels: another agent claimed it — pick next. **Do not infer staleness — absence of an open PR is not evidence the claim is stale. The label is authoritative.**
+
+If `<blocked-label>` in labels: skip silently — pick next.
 
 **Author check — apply in order:**
 1. If `trusted-authors` set: skip unless `login` in list → post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: @<login> is not in \`trusted-authors\`. Add login to AGENTS.md to allow. See README Security section."` — do not claim — pick next.
@@ -54,6 +61,6 @@ Signal handling:
 
 ## Pick next
 
-`gh issue list --state open --repo <repo> --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | index("<in-progress-label>") | not)) | first'`
+`gh issue list --state open --repo <repo> --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and (index("<blocked-label>") | not))) | first'`
 
 If result: restart with that issue number. If none: stop.

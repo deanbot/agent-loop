@@ -9,6 +9,9 @@ description: >
 > **Single-account mode.** One GitHub account runs executor and reviewer. All review signals
 > arrive as PR comments. `[reviewer]` prefix on all posts from this agent.
 
+**Prerequisite check — do this first, before any other step:** Read `AGENTS.md` in the current working directory and verify a `## Agent loop` section exists. If not found, stop immediately — do not proceed. Tell the user:
+> This project has no `## Agent loop` config in AGENTS.md. Add one before running start-reviewer. See `adapters/generic/AGENTS.md` in the agent-loop repo for the config template.
+
 Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `repo` — the GitHub repo (owner/repo)
 

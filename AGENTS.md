@@ -90,6 +90,18 @@ Worktrees live in `.worktrees/` (gitignored) — contained inside the repo, not 
 
 Cannot check out the same branch in two worktrees simultaneously — git enforces this.
 
+## Issue format convention
+
+Issues in this repo use three standard sections:
+
+- **Context** — why the issue exists; what's broken or missing
+- **What "done" looks like** — verifiable statements an agent or human can check against the PR; prose, bullets, or checklist, any format
+- **Notes / Open questions** — non-blocking context, design debates, unknowns
+
+When implementing an issue, read all three sections plus the PR description and any project convention files before starting. Before opening a PR, verify each item in "What done looks like" is satisfied and summarize the verification in the PR description.
+
+If no "What done looks like" section exists, flag it in a PR comment rather than assuming done.
+
 ## Commit policy
 
 Direct commits to `main` for docs, spec, and adapter stubs. Script changes go through a PR — scripts affect all adopters.

@@ -7,6 +7,8 @@ scheduling between cycles is caller-managed (external cron, manual re-trigger, o
 
 ---
 
+**Prerequisite check — do this first, before any other step:** Verify a `## Agent loop` section exists in the config. If not found, stop immediately and tell the user to add the config block. See `adapters/generic/AGENTS.md` in the agent-loop repo for the template.
+
 Read the project's AGENTS.md `## Agent loop` section. Extract:
 - `repo` — GitHub repo (owner/repo)
 
