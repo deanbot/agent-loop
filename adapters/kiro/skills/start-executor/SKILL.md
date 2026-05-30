@@ -16,7 +16,8 @@ complexity: intermediate
 > `gh label create in-progress --color "0075ca" --description "Executor claimed" --repo <repo>`
 
 > **Scheduling note:** Kiro has no native loop primitive. After each poll cycle, wait
-> ~60 seconds then re-invoke this skill, or use an external cron job (see `adapters/kiro/README.md`).
+> ~60 seconds then re-invoke this skill, or use an external cron job (see the agent-loop
+> repo's `adapters/kiro/README.md` for details).
 
 **Prerequisite check — do this first, before any other step:** Read `AGENTS.md` in the current working directory and verify a `## Agent loop` section exists. If not found, stop immediately — do not proceed. Tell the user:
 > This project has no `## Agent loop` config in AGENTS.md. Add one before running start-executor. See `adapters/generic/AGENTS.md` in the agent-loop repo for the config template.
@@ -109,7 +110,7 @@ Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` from the repo root **once
 
 **Loop invariant: every path through the signal handlers below ends with a wait before the next poll — no exceptions. MERGED and BLOCKED are the only exits.**
 
-**Wait mechanism:** Kiro has no native scheduling. After each cycle, wait ~60 seconds using `sleep 60` in terminal, then re-invoke this skill with the PR number. For autonomous operation, set up external cron (see `adapters/kiro/README.md`).
+**Wait mechanism:** Kiro has no native scheduling. After each cycle, wait ~60 seconds using `sleep 60` in terminal, then re-invoke this skill with the PR number. For autonomous operation, see the agent-loop repo's `adapters/kiro/README.md`.
 
 **Never merge.** Merging is always the operator's action. Do not offer to merge, do not ask interactively, do not call `gh pr merge` under any circumstances.
 

@@ -14,7 +14,7 @@ complexity: intermediate
 
 > **Scheduling note:** Kiro has no native loop primitive. After each poll cycle, wait
 > ~120s (NONE/MERGE_CONFLICT) or ~300s (after posting findings) then re-invoke this skill.
-> For autonomous operation, use external cron (see `adapters/kiro/README.md`).
+> For autonomous operation, see the agent-loop repo's `adapters/kiro/README.md`.
 
 **Prerequisite check — do this first, before any other step:** Read `AGENTS.md` in the current working directory and verify a `## Agent loop` section exists. If not found, stop immediately — do not proceed. Tell the user:
 > This project has no `## Agent loop` config in AGENTS.md. Add one before running start-reviewer. See `adapters/generic/AGENTS.md` in the agent-loop repo for the config template.
