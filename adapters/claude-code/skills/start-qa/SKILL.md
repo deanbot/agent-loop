@@ -52,6 +52,8 @@ If the operator sends a message containing "stop" at any point during the loop:
 
 Run `node ~/.claude/plugins/marketplaces/agent-loop/scripts/pr-qa.mjs --repo <repo> $ARGUMENTS` and handle each signal.
 
+`QA_READY` fires on two triggers: new commits (SHA change) and new operator (unprefixed) comments. The second trigger handles the case where an operator posts a manual-verification confirmation without a code push — QA re-evaluates to pick up the confirmation.
+
 **After handling any signal (including NONE), call ScheduleWakeup before the next pr-qa.mjs call — 300s after posting a verdict (give executor time to push a fix), 120s after MERGE_CONFLICT or NONE.**
 
 ## Signal handling

@@ -85,10 +85,12 @@ Script runs once, emits one line, exits. Persists state between runs.
 | Signal | Meaning |
 |---|---|
 | `NONE <timestamp>` | No PRs changed since last run |
-| `QA_READY:<n>` | PR #n has new commits; needs A.C. evaluation |
+| `QA_READY:<n>` | PR #n has new commits or new operator comments; needs A.C. evaluation |
 | `MERGE_CONFLICT:<n>` | PR #n has new commits but branch conflicts with base |
 
 Multiple signals space-separated on one line.
+
+`QA_READY` fires on two triggers: SHA changes (new commits) and new operator (unprefixed) comments. The second trigger handles the case where an operator posts a manual-verification confirmation for an observation-required item without pushing new code — QA re-evaluates to pick up the confirmation.
 
 State file: `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json`
 
@@ -102,15 +104,31 @@ State file: `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json`
 
 ### QA verdict format
 
+All-pass:
+
+```
+[qa] PASS
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| <criterion> | <test file:line or diff hunk> | ✅ |
+```
+
+Any criterion missing evidence:
+
 ```
 [qa] BLOCKED
 
 | Criterion | Evidence | Status |
 |---|---|---|
-| <criterion> | <test file / diff hunk / none> | ✅ / ❌ Missing / ⚠️ Observation-required |
+| <verified criterion> | <test file:line or diff hunk> | ✅ |
+| <missing criterion> | none found | ❌ Missing |
+| <ui criterion> | no E2E assertion on <element> | ⚠️ Observation-required |
 
-**Observation-required items** (no automated verification possible):
-- <item> — requires screenshot, Playwright assertion on specific element, or explicit human-tested note
+**To unblock:**
+- <missing>: add a test asserting <specific behavior>
+- <observation-required>: add a Playwright assertion on <element>, or post an unprefixed
+  operator comment confirming manual verification (QA re-evaluates on operator comments)
 ```
 
 Observation-required items block merge the same as missing evidence items. QA posts `[qa] PASS` only when every criterion has code-verifiable evidence or an explicit human-verified note from the operator.

@@ -26,6 +26,9 @@ Post: `gh pr comment <n> --body "[qa] Merge conflicts — rebase on main before 
 Wait ~120 seconds before next cycle.
 
 **`QA_READY:<n>`**
+Fires on two triggers: new commits (SHA change) or new operator (unprefixed) comments.
+The second trigger handles operator manual-verification confirmations — no code push needed.
+
 Fetch in parallel:
 - `gh pr view <n> --repo <repo> --json body,title,number`
 - `gh pr diff <n> --repo <repo>`

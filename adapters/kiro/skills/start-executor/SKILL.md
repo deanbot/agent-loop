@@ -58,7 +58,13 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
 1. Fetch issue: `gh issue view <N> --repo <repo>`
 2. Follow the project's AGENTS.md conventions for branching, work tracking, and commit structure. If not specified, use sensible defaults.
 3. Implement the work described in the issue. Run quality-gates from AGENTS.md config.
-4. Open PR: `gh pr create --repo <repo>` — follow the project's PR conventions; end body with `Closes #<N>`.
+4. **Self-check before opening PR:** Re-read the issue body (especially any "What done looks like", "Acceptance criteria", or "Done when" section) and any project convention files (AGENTS.md, CLAUDE.md). For each criterion:
+   - Identify whether it is code-verifiable (a test asserts it) or observation-verifiable (UI visibility, rendering, manual step).
+   - Verify the current diff or test suite satisfies it. A passing test suite is not sufficient — a test must assert the specific criterion.
+   - For observation-verifiable items without automated assertions: note them explicitly in the PR description as requiring manual verification.
+   - Address any unsatisfied code-verifiable criteria before opening the PR.
+   Include a verification summary in the PR description: one line per criterion with evidence (test file, diff hunk, or explicit note on why manual verification is required).
+5. Open PR: `gh pr create --repo <repo>` — follow the project's PR conventions; end body with `Closes #<N>`.
 
 ## Orient on existing PR (step 6b)
 
@@ -115,14 +121,14 @@ Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` from the repo root **once
 
 **No interactive prompts.** Never present menus, checkboxes, or structured choices to the user. All questions go to the PR as `gh pr comment` and wait for an unprefixed reply.
 
-**Before posting any comment:** re-fetch the full PR thread (`gh pr view <PR> --comments --repo <repo>`). Incorporate any `[reviewer]` or operator (unprefixed) observations not yet addressed. Never post a partial reply — one comment only, after all observations are considered.
+**Before posting any comment:** re-fetch the full PR thread (`gh pr view <PR> --comments --repo <repo>`). Incorporate any `[reviewer]`, `[qa]`, or operator (unprefixed) observations not yet addressed. Never post a partial reply — one comment only, after all observations are considered.
 
 Signal handling:
 - if MERGED: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, notify user, pick next item (step 8)
 - if MERGE_READY: display the waiting status block with "✅ Approved — operator merges when ready"; wait 60s, poll again
 - if NEW_REVIEW_SUBMISSION with CHANGES_REQUESTED: read full thread, collect ALL unaddressed `[reviewer]` findings, address every one in code, push once, post single `gh pr comment <PR> --body "[executor] Pushed fix: <summary>"` — no partial comments mid-batch; wait 60s, poll again
 - if NEW_REVIEW_SUBMISSION with COMMENTED: answer via `gh pr comment`; wait 60s, poll again
-- if NEW_INLINE_COMMENT or NEW_COMMENT: skip own `[executor]` posts; operator (unprefixed) — fix or answer; `[reviewer]` — treat as CHANGES_REQUESTED (batch all, fix all, push once, one summary comment); wait 60s, poll again
+- if NEW_INLINE_COMMENT or NEW_COMMENT: skip own `[executor]` posts; operator (unprefixed) — fix or answer; `[reviewer]` — treat as CHANGES_REQUESTED (batch all, fix all, push once, one summary comment); `[qa] BLOCKED` — address every missing criterion listed in the checklist (add tests or implementation), push once, post `[executor] Pushed fix: addressed QA findings — <summary>`; wait 60s, poll again
 - if NONE: wait 60s, poll again
 - if unresolvable: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, post `gh pr comment <PR> --body "[executor] BLOCKED: <reason>"`, pick next item (step 8)
 - if operator input needed: post `gh pr comment <PR> --body "[executor] Question: <question>"`; wait 60s, poll again; if 10 consecutive NONEs with no unprefixed reply: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, post `[executor] BLOCKED: no response — moving on`, pick next item (step 8)
