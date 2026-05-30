@@ -19,7 +19,7 @@ $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
 Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Sentinel path: `~/.agent-loop/state/<slug>-reviewer-stop`.
 
-**Stop-sentinel check — run before anything else:**
+**Stop-sentinel check — run before calling pr-watch.mjs or ScheduleWakeup:**
 
 ```bash
 SENTINEL=~/.agent-loop/state/<slug>-reviewer-stop
