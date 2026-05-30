@@ -29,6 +29,8 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
 - `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
+Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Executor sentinel path: `~/.agent-loop/state/<slug>-executor-stop-<N>` where `<N>` is the issue number.
+
 Then proceed with $ARGUMENTS.
 
 **No interactive terminal prompts.** Post questions as `gh pr comment <N> --body "[executor] Question: <question>"`.
@@ -62,6 +64,33 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
 2. `gh pr view <PR> --comments --repo <repo>` — full thread; note any `[executor] BLOCKED` or `[executor] Question` entries and any operator responses
 
 ## Executor loop (step 7)
+
+**Sentinel check — run at the start of each poll cycle, before pr-poll.mjs:**
+
+```bash
+SENTINEL=~/.agent-loop/state/<slug>-executor-stop-<N>
+if [ -f "$SENTINEL" ]; then
+  AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
+  if [ "$AGE" -lt 600 ]; then
+    rm "$SENTINEL"
+    # exit: unclaim issue, notify user, do NOT re-invoke this skill
+  else
+    rm "$SENTINEL"   # stale sentinel from a prior session — discard and proceed
+  fi
+fi
+```
+
+If fresh: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, notify "Executor stopped (issue #<N> unclaimed).", exit without re-invoking. If using external cron, also pause it.
+
+If stale: delete and proceed normally.
+
+**Operator stop request:**
+
+If the operator sends a message containing "stop" at any point during the loop:
+1. `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`
+2. `mkdir -p ~/.agent-loop/state && date +%s > ~/.agent-loop/state/<slug>-executor-stop-<N>`
+3. Notify: "Executor stopped. Issue #<N> unclaimed. Sentinel written in case a cron invocation fires within 10 minutes. If using external cron, also pause it."
+4. Exit without re-invoking this skill.
 
 Output the waiting status block:
 

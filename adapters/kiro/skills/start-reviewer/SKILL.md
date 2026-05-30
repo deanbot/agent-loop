@@ -45,9 +45,9 @@ If the sentinel was fresh (age < 600s): notify the user "Reviewer loop stopped (
 
 If the sentinel was stale (age ≥ 600s): delete it and proceed normally. Handles the case where a stop was issued but the cron continued past the window and a fresh run started — leftover file should not block the new run.
 
-**User stop request:**
+**Operator stop request:**
 
-If the user says "stop", "quit", "cancel", or "exit" at any point during the cycle:
+If the operator sends a message containing "stop" at any point during the cycle:
 1. `mkdir -p ~/.agent-loop/state && date +%s > ~/.agent-loop/state/<slug>-reviewer-stop`
 2. Notify: "Stop sentinel written. Loop will exit on next invocation if it fires within 10 minutes. If using external cron, also pause it."
 3. Exit without re-invoking this skill.

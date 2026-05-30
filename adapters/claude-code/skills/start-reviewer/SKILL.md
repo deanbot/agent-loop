@@ -38,9 +38,9 @@ If the sentinel was fresh (age < 600s): notify the user "Reviewer loop stopped (
 
 If the sentinel was stale (age ≥ 600s): delete it and proceed normally. This handles the case where the user wrote a stop, the queued wakeup drained, and then they restarted the loop fresh — the leftover file should not block the new run.
 
-**User stop request:**
+**Operator stop request:**
 
-If the user says "stop", "quit", "cancel", or "exit" at any point during the loop:
+If the operator sends a message containing "stop" at any point during the loop:
 1. `mkdir -p ~/.agent-loop/state && date +%s > ~/.agent-loop/state/<slug>-reviewer-stop`
 2. Notify: "Stop sentinel written. Loop will exit on next wakeup if it fires within 10 minutes."
 3. Exit without calling ScheduleWakeup.
