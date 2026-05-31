@@ -60,11 +60,30 @@ Run `node ~/.claude/plugins/marketplaces/agent-loop/scripts/pr-qa.mjs --repo <re
 
 - **MERGE_CONFLICT:<n>**: post `gh pr comment <n> --body "[qa] Merge conflicts — rebase on main before QA."` ScheduleWakeup(120s).
 
-- **QA_READY:<n>**: gather context (see below), evaluate A.C., post verdict. ScheduleWakeup(300s).
+- **QA_READY:<n>**: check CI first (Step 0 below), then gather context, evaluate A.C., post verdict. ScheduleWakeup depends on CI result (see Step 0).
 
 - **NONE**: no actionable signals. ScheduleWakeup(120s).
 
 ## QA_READY evaluation
+
+**Step 0 — CI gate:**
+
+```bash
+CHECKS=$(gh pr checks <n> --repo <repo> --json name,state,bucket 2>/dev/null)
+```
+
+If the command fails or returns empty / `[]`: no CI configured — skip to Step 1.
+
+Otherwise parse:
+
+```bash
+PENDING=$(echo "$CHECKS" | jq '[.[] | select(.bucket == "pending")] | length')
+FAILING=$(echo "$CHECKS" | jq '[.[] | select(.bucket == "fail")] | length')
+```
+
+- If `PENDING > 0`: post `[qa] Waiting: CI still running — <N> check(s) pending. Will re-evaluate when checks complete.` ScheduleWakeup(120s). **Stop — do not proceed to Step 1.**
+- If `FAILING > 0`: extract failing names (`jq -r '[.[] | select(.bucket == "fail") | .name] | join(", ")'`) and post `[qa] BLOCKED: CI failing — <names>. Fix CI before A.C. evaluation.` ScheduleWakeup(120s). **Stop — do not proceed to Step 1.**
+- Otherwise (all pass or skipping): proceed to Step 1. ScheduleWakeup(300s) after posting verdict.
 
 **Step 1 — gather context in parallel:**
 
