@@ -89,7 +89,7 @@ echo '.agent-loop/' >> .gitignore
 
 Use: `/agent-loop:start-executor`, `/agent-loop:start-reviewer`, `/agent-loop:start-qa`
 
-> **One-time permission prompt:** On first run, Claude Code will ask to approve the sentinel check bash command. Select **"Yes, and don't ask again for: `[ -f "$SENTINEL" ]`"** — this allowlists all three agents (executor, reviewer, QA) in one step.
+> **Permissions:** The install script adds sentinel check patterns to `.claude/settings.local.json`. If you skip the script, add them manually: `"Bash(SENTINEL=.agent-loop/*)"` and `"Bash(mkdir -p .agent-loop*)"` to your project's permissions allow list.
 
 > **Updating:** `claude plugin update agent-loop@agent-loop` — then restart any active executor/reviewer/QA sessions to pick up the new skill definitions.
 

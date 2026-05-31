@@ -16,8 +16,37 @@ echo "Then add .agent-loop/ to your project's .gitignore:"
 echo ""
 echo "  echo '.agent-loop/' >> .gitignore"
 echo ""
-echo "Then use: /agent-loop:start-executor  /agent-loop:start-reviewer  /agent-loop:start-qa"
+
+# Add sentinel allowlist to project settings.local.json
+SETTINGS=".claude/settings.local.json"
+SENTINEL_PATTERNS='["Bash(SENTINEL=.agent-loop/*)", "Bash(mkdir -p .agent-loop*)"]'
+
+if [ -f "$SETTINGS" ]; then
+  python3 - <<EOF
+import json, sys
+with open("$SETTINGS") as f:
+    d = json.load(f)
+d.setdefault("permissions", {}).setdefault("allow", [])
+new = json.loads('$SENTINEL_PATTERNS')
+for p in new:
+    if p not in d["permissions"]["allow"]:
+        d["permissions"]["allow"].append(p)
+with open("$SETTINGS", "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+print("Added sentinel allowlist to $SETTINGS")
+EOF
+else
+  mkdir -p .claude
+  python3 -c "
+import json
+d = {'permissions': {'allow': $SENTINEL_PATTERNS}}
+with open('$SETTINGS', 'w') as f:
+    json.dump(d, f, indent=2)
+    f.write('\n')
+print('Created $SETTINGS with sentinel allowlist')
+"
+fi
+
 echo ""
-echo "One-time permission prompt: on first run Claude Code will ask to approve the sentinel"
-echo "check. Select 'Yes, and don't ask again for: [ -f \"\$SENTINEL\" ]' to allowlist all"
-echo "three agents (executor, reviewer, QA) in one step."
+echo "Then use: /agent-loop:start-executor  /agent-loop:start-reviewer  /agent-loop:start-qa"
