@@ -69,21 +69,18 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
 
 **Sentinel check — run at the start of each poll cycle, before pr-poll.mjs:**
 
-```bash
-SENTINEL=.agent-loop/<slug>-executor-stop-<N>
-if [ -f "$SENTINEL" ]; then
-  if find "$SENTINEL" -mmin -10 | grep -q .; then
-    rm "$SENTINEL"
-    # exit: unclaim issue, notify user, do NOT call ScheduleWakeup
-  else
-    rm "$SENTINEL"   # stale sentinel from a prior session — discard and proceed
-  fi
-fi
-```
+Run as two separate bash commands (never combined into one multi-line block):
 
-If fresh: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, notify "Executor stopped (issue #<N> unclaimed).", exit without ScheduleWakeup.
+1. `find .agent-loop -maxdepth 1 -name '<slug>-executor-stop-<N>' -mmin -10 -type f 2>/dev/null`
+   — non-empty: FRESH sentinel (written within last 10 minutes)
+2. `find .agent-loop -maxdepth 1 -name '<slug>-executor-stop-<N>' -type f 2>/dev/null`
+   — non-empty: STALE sentinel (file older than 10 min); empty: NO sentinel
 
-If stale: delete and proceed normally.
+If FRESH: `rm .agent-loop/<slug>-executor-stop-<N>` — `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>` — notify "Executor stopped (issue #<N> unclaimed)." — exit without ScheduleWakeup.
+
+If STALE: `rm .agent-loop/<slug>-executor-stop-<N>` — proceed normally (leftover from a prior session).
+
+If NO sentinel: proceed normally.
 
 **Operator stop request:**
 

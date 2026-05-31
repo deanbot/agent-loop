@@ -26,21 +26,18 @@ Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop`
 
 **Stop-sentinel check — run before calling pr-qa.mjs or ScheduleWakeup:**
 
-```bash
-SENTINEL=.agent-loop/<slug>-qa-stop
-if [ -f "$SENTINEL" ]; then
-  if find "$SENTINEL" -mmin -10 | grep -q .; then
-    rm "$SENTINEL"
-    # exit: notify user, do NOT call ScheduleWakeup
-  else
-    rm "$SENTINEL"   # stale sentinel from a prior session — discard and proceed
-  fi
-fi
-```
+Run as two separate bash commands (never combined into one multi-line block):
 
-If the sentinel was fresh (modified within last 10 minutes): notify the user "QA loop stopped (sentinel cleared)." and exit without calling ScheduleWakeup or running pr-qa.mjs. Do not process any signals.
+1. `find .agent-loop -maxdepth 1 -name '<slug>-qa-stop' -mmin -10 -type f 2>/dev/null`
+   — non-empty: FRESH sentinel (written within last 10 minutes)
+2. `find .agent-loop -maxdepth 1 -name '<slug>-qa-stop' -type f 2>/dev/null`
+   — non-empty: STALE sentinel (file older than 10 min); empty: NO sentinel
 
-If the sentinel was stale (modified more than 10 minutes ago): delete it and proceed normally.
+If FRESH: `rm .agent-loop/<slug>-qa-stop` — notify "QA loop stopped (sentinel cleared)." — exit without ScheduleWakeup or running pr-qa.mjs.
+
+If STALE: `rm .agent-loop/<slug>-qa-stop` — proceed normally (leftover from a prior session).
+
+If NO sentinel: proceed normally.
 
 **Operator stop request:**
 

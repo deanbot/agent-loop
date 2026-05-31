@@ -21,21 +21,18 @@ Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop`
 
 **Stop-sentinel check — run before calling pr-watch.mjs or ScheduleWakeup:**
 
-```bash
-SENTINEL=.agent-loop/<slug>-reviewer-stop
-if [ -f "$SENTINEL" ]; then
-  if find "$SENTINEL" -mmin -10 | grep -q .; then
-    rm "$SENTINEL"
-    # exit: notify user, do NOT call ScheduleWakeup
-  else
-    rm "$SENTINEL"   # stale sentinel from a prior session — discard and proceed
-  fi
-fi
-```
+Run as two separate bash commands (never combined into one multi-line block):
 
-If the sentinel was fresh (modified within last 10 minutes): notify the user "Reviewer loop stopped (sentinel cleared)." and exit without calling ScheduleWakeup or running pr-watch.mjs. Do not process any signals.
+1. `find .agent-loop -maxdepth 1 -name '<slug>-reviewer-stop' -mmin -10 -type f 2>/dev/null`
+   — non-empty: FRESH sentinel (written within last 10 minutes)
+2. `find .agent-loop -maxdepth 1 -name '<slug>-reviewer-stop' -type f 2>/dev/null`
+   — non-empty: STALE sentinel (file older than 10 min); empty: NO sentinel
 
-If the sentinel was stale (modified more than 10 minutes ago): delete it and proceed normally. This handles the case where the user wrote a stop, the queued wakeup drained, and then they restarted the loop fresh — the leftover file should not block the new run.
+If FRESH: `rm .agent-loop/<slug>-reviewer-stop` — notify "Reviewer loop stopped (sentinel cleared)." — exit without ScheduleWakeup or running pr-watch.mjs.
+
+If STALE: `rm .agent-loop/<slug>-reviewer-stop` — proceed normally (leftover from a prior session).
+
+If NO sentinel: proceed normally.
 
 **Operator stop request:**
 
