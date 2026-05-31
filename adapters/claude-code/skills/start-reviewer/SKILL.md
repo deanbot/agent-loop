@@ -24,8 +24,7 @@ Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop`
 ```bash
 SENTINEL=.agent-loop/<slug>-reviewer-stop
 if [ -f "$SENTINEL" ]; then
-  AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
-  if [ "$AGE" -lt 600 ]; then
+  if find "$SENTINEL" -mmin -10 | grep -q .; then
     rm "$SENTINEL"
     # exit: notify user, do NOT call ScheduleWakeup
   else
@@ -34,14 +33,14 @@ if [ -f "$SENTINEL" ]; then
 fi
 ```
 
-If the sentinel was fresh (age < 600s): notify the user "Reviewer loop stopped (sentinel cleared)." and exit without calling ScheduleWakeup or running pr-watch.mjs. Do not process any signals.
+If the sentinel was fresh (modified within last 10 minutes): notify the user "Reviewer loop stopped (sentinel cleared)." and exit without calling ScheduleWakeup or running pr-watch.mjs. Do not process any signals.
 
-If the sentinel was stale (age ≥ 600s): delete it and proceed normally. This handles the case where the user wrote a stop, the queued wakeup drained, and then they restarted the loop fresh — the leftover file should not block the new run.
+If the sentinel was stale (modified more than 10 minutes ago): delete it and proceed normally. This handles the case where the user wrote a stop, the queued wakeup drained, and then they restarted the loop fresh — the leftover file should not block the new run.
 
 **Operator stop request:**
 
 If the operator sends a message containing "stop" at any point during the loop:
-1. `mkdir -p .agent-loop && date +%s > .agent-loop/<slug>-reviewer-stop`
+1. `mkdir -p .agent-loop && touch .agent-loop/<slug>-reviewer-stop`
 2. Notify: "Stop sentinel written. Loop will exit on next wakeup if it fires within 10 minutes."
 3. Exit without calling ScheduleWakeup.
 

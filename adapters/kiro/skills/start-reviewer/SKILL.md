@@ -31,8 +31,7 @@ Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop`
 ```bash
 SENTINEL=.agent-loop/<slug>-reviewer-stop
 if [ -f "$SENTINEL" ]; then
-  AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
-  if [ "$AGE" -lt 600 ]; then
+  if find "$SENTINEL" -mmin -10 | grep -q .; then
     rm "$SENTINEL"
     # exit: notify user, do NOT re-invoke this skill
   else
@@ -41,14 +40,14 @@ if [ -f "$SENTINEL" ]; then
 fi
 ```
 
-If the sentinel was fresh (age < 600s): notify the user "Reviewer loop stopped (sentinel cleared)." and exit without running pr-watch.mjs or re-invoking. If using an external cron, also pause or cancel it.
+If the sentinel was fresh (modified within last 10 minutes): notify the user "Reviewer loop stopped (sentinel cleared)." and exit without running pr-watch.mjs or re-invoking. If using an external cron, also pause or cancel it.
 
-If the sentinel was stale (age ≥ 600s): delete it and proceed normally. Handles the case where a stop was issued but the cron continued past the window and a fresh run started — leftover file should not block the new run.
+If the sentinel was stale (modified more than 10 minutes ago): delete it and proceed normally. Handles the case where a stop was issued but the cron continued past the window and a fresh run started — leftover file should not block the new run.
 
 **Operator stop request:**
 
 If the operator sends a message containing "stop" at any point during the cycle:
-1. `mkdir -p .agent-loop && date +%s > .agent-loop/<slug>-reviewer-stop`
+1. `mkdir -p .agent-loop && touch .agent-loop/<slug>-reviewer-stop`
 2. Notify: "Stop sentinel written. Loop will exit on next invocation if it fires within 10 minutes. If using external cron, also pause it."
 3. Exit without re-invoking this skill.
 

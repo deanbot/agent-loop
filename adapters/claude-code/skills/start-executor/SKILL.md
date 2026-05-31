@@ -72,8 +72,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
 ```bash
 SENTINEL=.agent-loop/<slug>-executor-stop-<N>
 if [ -f "$SENTINEL" ]; then
-  AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
-  if [ "$AGE" -lt 600 ]; then
+  if find "$SENTINEL" -mmin -10 | grep -q .; then
     rm "$SENTINEL"
     # exit: unclaim issue, notify user, do NOT call ScheduleWakeup
   else
@@ -90,7 +89,7 @@ If stale: delete and proceed normally.
 
 If the operator sends a message containing "stop" at any point during the loop:
 1. `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`
-2. `mkdir -p .agent-loop && date +%s > .agent-loop/<slug>-executor-stop-<N>`
+2. `mkdir -p .agent-loop && touch .agent-loop/<slug>-executor-stop-<N>`
 3. Notify: "Executor stopped. Issue #<N> unclaimed. Sentinel written in case a wakeup fires within 10 minutes."
 4. Exit without calling ScheduleWakeup.
 
