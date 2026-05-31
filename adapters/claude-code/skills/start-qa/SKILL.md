@@ -29,8 +29,7 @@ Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop`
 ```bash
 SENTINEL=.agent-loop/<slug>-qa-stop
 if [ -f "$SENTINEL" ]; then
-  AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
-  if [ "$AGE" -lt 600 ]; then
+  if find "$SENTINEL" -mmin -10 | grep -q .; then
     rm "$SENTINEL"
     # exit: notify user, do NOT call ScheduleWakeup
   else
@@ -39,14 +38,14 @@ if [ -f "$SENTINEL" ]; then
 fi
 ```
 
-If the sentinel was fresh (age < 600s): notify the user "QA loop stopped (sentinel cleared)." and exit without calling ScheduleWakeup or running pr-qa.mjs. Do not process any signals.
+If the sentinel was fresh (modified within last 10 minutes): notify the user "QA loop stopped (sentinel cleared)." and exit without calling ScheduleWakeup or running pr-qa.mjs. Do not process any signals.
 
-If the sentinel was stale (age ≥ 600s): delete it and proceed normally.
+If the sentinel was stale (modified more than 10 minutes ago): delete it and proceed normally.
 
 **Operator stop request:**
 
 If the operator sends a message containing "stop" at any point during the loop:
-1. `mkdir -p .agent-loop && date +%s > .agent-loop/<slug>-qa-stop`
+1. `mkdir -p .agent-loop && touch .agent-loop/<slug>-qa-stop`
 2. Notify: "Stop sentinel written. QA loop will exit on next wakeup if it fires within 10 minutes."
 3. Exit without calling ScheduleWakeup.
 
@@ -113,12 +112,19 @@ Produce a list of requirements. Each requirement is one verifiable claim. If a p
 
 **Step 5 — map each requirement to evidence:**
 
+**Core rule: a test cited as evidence must be executed by a verified gate (CI or explicit operator run).** A test file that exists in the diff but is never run by the CI quality gate is not evidence — it is a dead test.
+
 For each requirement, search the diff for:
 - New test files or test additions that assert the criterion
 - Code changes that directly implement the criterion
 - Explicit "human tested" note in PR description or comments from the operator
 
-For observation-verifiable items: check whether there is a Playwright/Cypress/E2E assertion on the specific element or behavior. A passing test suite is not sufficient — the test must assert the specific criterion.
+**Dead-test check — apply before accepting any test file as evidence:**
+1. Identify the CI quality gate command: read `.github/workflows/*.yml` and `package.json` → `scripts.test`. E.g., `npm test` → `vitest`.
+2. Identify that runner's file scope: check `vitest.config.*` include/exclude globs; for Playwright check `playwright.config.*` `testDir`.
+3. Confirm the cited test file falls inside the gate's scope. If the file is a Playwright spec but CI only runs Vitest, or vice versa: **the test is not executed — do not count it as evidence.** Mark the criterion ❌ with note: "test exists (`<file>`) but not executed by CI gate (`<command>`). Not verified evidence."
+
+For observation-verifiable items: check whether there is a Playwright/Cypress/E2E assertion on the specific element or behavior — **and** verify that E2E suite is actually executed by CI or an explicit documented operator run. A Playwright test that CI never runs is not evidence even for observation-verifiable criteria.
 
 **Step 6 — post verdict:**
 
@@ -147,7 +153,7 @@ If any requirement lacks evidence: post:
 
 **To unblock:**
 - <missing>: add a test that asserts <specific behavior>
-- <observation-required>: add a Playwright assertion on <element>, or post an unprefixed operator comment confirming manual verification
+- <observation-required>: add a Playwright assertion on <element> **that is executed by CI**, or post an unprefixed operator comment confirming manual verification
 ```
 
 **Observation-required items block merge** the same as missing items. Post `[qa] PASS` only when every criterion has code-verifiable evidence OR an explicit unprefixed operator comment confirming manual verification.

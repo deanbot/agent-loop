@@ -63,10 +63,10 @@ Read project convention files (if present): `AGENTS.md`, `CLAUDE.md`, `CONTRIBUT
 **Synthesize requirements** from issue body, PR description, and project conventions. Use judgment — do not anchor to a specific header. Include testing requirements from convention files.
 
 **Classify each requirement:**
-- Code-verifiable: a test asserts this directly
+- Code-verifiable: a test asserts this directly — and that test is executed by the CI quality gate
 - Observation-verifiable: only UI/browser/human can confirm
 
-**Map each to evidence** in the diff or test suite. A passing test suite is not sufficient — a test must assert the specific criterion.
+**Map each to evidence** in the diff or test suite. A passing test suite is not sufficient — a test must assert the specific criterion. **A test file that exists in the diff but is not executed by the CI quality gate is not evidence.** Before accepting a test as evidence, verify: read `.github/workflows/*.yml` + `package.json` `scripts.test` to identify the CI gate command and runner scope (e.g., a Playwright spec not run by `npm test`/Vitest is a dead test — mark ❌).
 
 **Before posting:** re-fetch `gh pr view <n> --comments --repo <repo>` to catch any operator (unprefixed) manual-verified notes that arrived during evaluation.
 
@@ -98,7 +98,7 @@ If any requirement lacks evidence:
 
 **To unblock:**
 - <missing>: add a test asserting <specific behavior>
-- <observation-required>: add a Playwright/E2E assertion on <element>, or post an unprefixed operator comment confirming manual verification
+- <observation-required>: add a Playwright/E2E assertion on <element> that is executed by CI, or post an unprefixed operator comment confirming manual verification
 ```
 
 Wait ~300 seconds after posting a verdict (give executor time to push a fix).
