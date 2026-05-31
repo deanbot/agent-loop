@@ -1,8 +1,8 @@
 # Dependencies
 node_modules/
 
-# State files written by scripts at runtime
-~/.agent-loop/
+# Sentinel files written by agent loops at runtime (project-local stop signals)
+.agent-loop/
 
 # Conversation exports / session logs
 *.jsonl

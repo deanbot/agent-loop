@@ -22,12 +22,12 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 
 $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
-Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Sentinel path: `~/.agent-loop/state/<slug>-qa-stop`.
+Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Sentinel path: `.agent-loop/<slug>-qa-stop` (project-local; gitignored).
 
 **Stop-sentinel check — run before calling pr-qa.mjs or ScheduleWakeup:**
 
 ```bash
-SENTINEL=~/.agent-loop/state/<slug>-qa-stop
+SENTINEL=.agent-loop/<slug>-qa-stop
 if [ -f "$SENTINEL" ]; then
   AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
   if [ "$AGE" -lt 600 ]; then
@@ -46,7 +46,7 @@ If the sentinel was stale (age ≥ 600s): delete it and proceed normally.
 **Operator stop request:**
 
 If the operator sends a message containing "stop" at any point during the loop:
-1. `mkdir -p ~/.agent-loop/state && date +%s > ~/.agent-loop/state/<slug>-qa-stop`
+1. `mkdir -p .agent-loop && date +%s > .agent-loop/<slug>-qa-stop`
 2. Notify: "Stop sentinel written. QA loop will exit on next wakeup if it fires within 10 minutes."
 3. Exit without calling ScheduleWakeup.
 

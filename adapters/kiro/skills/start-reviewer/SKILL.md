@@ -24,12 +24,12 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 
 $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
-Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Sentinel path: `~/.agent-loop/state/<slug>-reviewer-stop`.
+Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Sentinel path: `.agent-loop/<slug>-reviewer-stop` (project-local; gitignored).
 
 **Stop-sentinel check — run before calling pr-watch.mjs or re-invoking:**
 
 ```bash
-SENTINEL=~/.agent-loop/state/<slug>-reviewer-stop
+SENTINEL=.agent-loop/<slug>-reviewer-stop
 if [ -f "$SENTINEL" ]; then
   AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
   if [ "$AGE" -lt 600 ]; then
@@ -48,7 +48,7 @@ If the sentinel was stale (age ≥ 600s): delete it and proceed normally. Handle
 **Operator stop request:**
 
 If the operator sends a message containing "stop" at any point during the cycle:
-1. `mkdir -p ~/.agent-loop/state && date +%s > ~/.agent-loop/state/<slug>-reviewer-stop`
+1. `mkdir -p .agent-loop && date +%s > .agent-loop/<slug>-reviewer-stop`
 2. Notify: "Stop sentinel written. Loop will exit on next invocation if it fires within 10 minutes. If using external cron, also pause it."
 3. Exit without re-invoking this skill.
 
