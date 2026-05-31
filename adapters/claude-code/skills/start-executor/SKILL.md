@@ -23,7 +23,7 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
 - `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
-Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Executor sentinel path: `~/.agent-loop/state/<slug>-executor-stop-<N>` where `<N>` is the issue number.
+Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Executor sentinel path: `.agent-loop/<slug>-executor-stop-<N>` where `<N>` is the issue number (project-local; gitignored).
 
 Then proceed with $ARGUMENTS.
 
@@ -70,7 +70,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
 **Sentinel check — run at the start of each poll cycle, before pr-poll.mjs:**
 
 ```bash
-SENTINEL=~/.agent-loop/state/<slug>-executor-stop-<N>
+SENTINEL=.agent-loop/<slug>-executor-stop-<N>
 if [ -f "$SENTINEL" ]; then
   AGE=$(( $(date +%s) - $(cat "$SENTINEL") ))
   if [ "$AGE" -lt 600 ]; then
@@ -90,7 +90,7 @@ If stale: delete and proceed normally.
 
 If the operator sends a message containing "stop" at any point during the loop:
 1. `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`
-2. `mkdir -p ~/.agent-loop/state && date +%s > ~/.agent-loop/state/<slug>-executor-stop-<N>`
+2. `mkdir -p .agent-loop && date +%s > .agent-loop/<slug>-executor-stop-<N>`
 3. Notify: "Executor stopped. Issue #<N> unclaimed. Sentinel written in case a wakeup fires within 10 minutes."
 4. Exit without calling ScheduleWakeup.
 

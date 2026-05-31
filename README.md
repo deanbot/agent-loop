@@ -81,6 +81,12 @@ in-progress-label: in-progress
 quality-gates: npm test && npm run lint
 ```
 
+Add `.agent-loop/` to your project's `.gitignore` (agent loops write stop-sentinels there):
+
+```
+echo '.agent-loop/' >> .gitignore
+```
+
 Use: `/agent-loop:start-executor`, `/agent-loop:start-reviewer`, `/agent-loop:start-qa`
 
 > **Updating:** `claude plugin update agent-loop@agent-loop` — then restart any active executor/reviewer/QA sessions to pick up the new skill definitions.
