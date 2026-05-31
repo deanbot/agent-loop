@@ -89,6 +89,8 @@ echo '.agent-loop/' >> .gitignore
 
 Use: `/agent-loop:start-executor`, `/agent-loop:start-reviewer`, `/agent-loop:start-qa`
 
+> **One-time permission prompt:** On first run, Claude Code will ask to approve the sentinel check bash command. Select **"Yes, and don't ask again for: `[ -f "$SENTINEL" ]`"** — this allowlists all three agents (executor, reviewer, QA) in one step.
+
 > **Updating:** `claude plugin update agent-loop@agent-loop` — then restart any active executor/reviewer/QA sessions to pick up the new skill definitions.
 
 ### Path B — Generic (any tool)
