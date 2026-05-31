@@ -100,12 +100,24 @@ State file: `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json`
 ### QA handling per signal
 
 - `MERGE_CONFLICT:<n>` — post `[qa] Merge conflicts — rebase on main before QA.` Do not evaluate A.C.
-- `QA_READY:<n>` — gather full context (issue body, PR description and checklist, project convention files), synthesize requirements, map each to evidence in the diff or tests, post verdict:
+- `QA_READY:<n>` — check CI status first; if any check is pending or failing, post a waiting/blocked notice and skip A.C. evaluation (re-check in ~120s). If CI is green (or no CI configured): gather full context (issue body, PR description and checklist, project convention files), synthesize requirements, map each to evidence in the diff or tests, post verdict:
   - `[qa] PASS` — all criteria verified with evidence
   - `[qa] BLOCKED` — one or more criteria missing evidence; include checklist mapping
   - If no verifiable criteria found: `[qa] BLOCKED: no acceptance criteria found in issue or PR` — never pass silently
 
 ### QA verdict format
+
+CI pending (re-check in ~120s):
+
+```
+[qa] Waiting: CI still running — <N> check(s) pending. Will re-evaluate when checks complete.
+```
+
+CI failing (re-check in ~120s):
+
+```
+[qa] BLOCKED: CI failing — <check name(s)>. Fix CI before A.C. evaluation.
+```
 
 All-pass:
 

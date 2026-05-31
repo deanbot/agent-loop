@@ -29,6 +29,25 @@ Wait ~120 seconds before next cycle.
 Fires on two triggers: new commits (SHA change) or new operator (unprefixed) comments.
 The second trigger handles operator manual-verification confirmations — no code push needed.
 
+**CI gate — run before fetching any other context:**
+
+```bash
+CHECKS=$(gh pr checks <n> --repo <repo> --json name,state,bucket 2>/dev/null)
+```
+
+If the command fails or returns empty / `[]`: no CI configured — proceed.
+
+Otherwise:
+
+```bash
+PENDING=$(echo "$CHECKS" | jq '[.[] | select(.bucket == "pending")] | length')
+FAILING=$(echo "$CHECKS" | jq '[.[] | select(.bucket == "fail")] | length')
+```
+
+- `PENDING > 0`: post `[qa] Waiting: CI still running — <N> check(s) pending. Will re-evaluate when checks complete.` Wait ~120s. **Stop.**
+- `FAILING > 0`: post `[qa] BLOCKED: CI failing — <names>. Fix CI before A.C. evaluation.` Wait ~120s. **Stop.**
+- Otherwise: proceed.
+
 Fetch in parallel:
 - `gh pr view <n> --repo <repo> --json body,title,number`
 - `gh pr diff <n> --repo <repo>`
