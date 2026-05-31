@@ -17,36 +17,52 @@ echo ""
 echo "  echo '.agent-loop/' >> .gitignore"
 echo ""
 
-# Add sentinel allowlist to project settings.local.json
+# Add agent-loop allowlist to project settings.local.json.
+# Covers: gh CLI, polling scripts, sentinel check/write/cleanup.
 SETTINGS=".claude/settings.local.json"
-SENTINEL_PATTERNS='["Bash(SENTINEL=.agent-loop/*)", "Bash(mkdir -p .agent-loop*)"]'
+AGENT_LOOP_PATTERNS='[
+  "Bash(gh *)",
+  "Bash(node ~/.claude/plugins/marketplaces/agent-loop/scripts/*)",
+  "Bash(find .agent-loop*)",
+  "Bash(rm .agent-loop/*)",
+  "Bash(mkdir -p .agent-loop*)"
+]'
 
-if [ -f "$SETTINGS" ]; then
-  python3 - <<EOF
-import json, sys
-with open("$SETTINGS") as f:
-    d = json.load(f)
-d.setdefault("permissions", {}).setdefault("allow", [])
-new = json.loads('$SENTINEL_PATTERNS')
-for p in new:
-    if p not in d["permissions"]["allow"]:
-        d["permissions"]["allow"].append(p)
-with open("$SETTINGS", "w") as f:
+python3 - <<'PYEOF'
+import json, os, sys
+
+settings = ".claude/settings.local.json"
+patterns = [
+    "Bash(gh *)",
+    "Bash(node ~/.claude/plugins/marketplaces/agent-loop/scripts/*)",
+    "Bash(find .agent-loop*)",
+    "Bash(rm .agent-loop/*)",
+    "Bash(mkdir -p .agent-loop*)",
+]
+
+os.makedirs(".claude", exist_ok=True)
+
+d = {}
+if os.path.exists(settings):
+    with open(settings) as f:
+        d = json.load(f)
+
+allow = d.setdefault("permissions", {}).setdefault("allow", [])
+added = []
+for p in patterns:
+    if p not in allow:
+        allow.append(p)
+        added.append(p)
+
+with open(settings, "w") as f:
     json.dump(d, f, indent=2)
     f.write("\n")
-print("Added sentinel allowlist to $SETTINGS")
-EOF
-else
-  mkdir -p .claude
-  python3 -c "
-import json
-d = {'permissions': {'allow': $SENTINEL_PATTERNS}}
-with open('$SETTINGS', 'w') as f:
-    json.dump(d, f, indent=2)
-    f.write('\n')
-print('Created $SETTINGS with sentinel allowlist')
-"
-fi
+
+if added:
+    print(f"Added {len(added)} agent-loop permission(s) to {settings}")
+else:
+    print(f"{settings} already up to date")
+PYEOF
 
 echo ""
 echo "Then use: /agent-loop:start-executor  /agent-loop:start-reviewer  /agent-loop:start-qa"
