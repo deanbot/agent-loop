@@ -101,7 +101,13 @@ Copy the template from [`adapters/generic/AGENTS.md`](adapters/generic/AGENTS.md
 cp -r adapters/kiro/skills/. .kiro/skills/
 ```
 
-Add the `## Agent loop` block to your project's AGENTS.md (same format as Path A). Loop scheduling is manual re-trigger or external cron — Kiro has no native scheduling primitive. See [`adapters/kiro/README.md`](adapters/kiro/README.md) for full install steps.
+Add the `## Agent loop` block to your project's AGENTS.md (same format as Path A). Add `.agent-loop/` to your project's `.gitignore`:
+
+```
+echo '.agent-loop/' >> .gitignore
+```
+
+Loop scheduling is manual re-trigger or external cron — Kiro has no native scheduling primitive. See [`adapters/kiro/README.md`](adapters/kiro/README.md) for full install steps.
 
 Use: `/start-executor`, `/start-reviewer`, `/start-qa` in Kiro chat.
 

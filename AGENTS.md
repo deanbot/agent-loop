@@ -53,7 +53,9 @@ An adapter is valid if:
 
 ## State files
 
-Scripts persist state to `~/.agent-loop/state/` with per-repo paths to prevent collisions when running agent-loop on multiple repos simultaneously. Three state files per repo: `<slug>-pr-state.json` (reviewer), `<slug>-pr-poll-state.json` (executor), `<slug>-pr-qa-state.json` (QA).
+**Stop sentinels** live in `.agent-loop/` within the project directory (gitignored). Sentinels are project-local — a stop written in one clone does not affect loops running in other clones of the same repo.
+
+**Script state files** persist to `~/.agent-loop/state/` with per-repo paths to prevent collisions when running agent-loop on multiple repos simultaneously. Three state files per repo: `<slug>-pr-state.json` (reviewer), `<slug>-pr-poll-state.json` (executor), `<slug>-pr-qa-state.json` (QA).
 
 ## How to add an adapter
 
