@@ -49,7 +49,7 @@ Fetch in parallel:
 - `gh pr diff <n> --repo <repo>`
 - `gh pr view <n> --comments --repo <repo>`
 
-**Never construct or post a verdict in the same tool batch as these fetches.** The verdict depends on what they return — it is a dependent value. Batching a pre-written verdict alongside the fetches makes it reflect an assumption, not the fetched reality, and it will confabulate (e.g. evaluating the wrong issue). Fetch first, read the results, then compose and post the verdict in a later turn — even when you think you already know the outcome.
+**Never construct or post a verdict in the same tool batch as these fetches.** The verdict depends on what they return — it is a dependent value. Batching a pre-written verdict alongside the fetches makes it reflect an assumption, not the fetched reality, and it will confabulate (e.g. evaluating the wrong issue). Fetch first, read the results, then compose and post the verdict in a separate tool call after the fetches return — within the same wakeup (a later tool call, not a later poll cycle; never defer to the next wakeup), even when you think you already know the outcome.
 
 Extract the linked issue from **this PR's freshly-fetched body** (`Closes #<N>`, case-insensitive) — never from memory, a prior iteration, or another PR. If not found: post `[qa] BLOCKED: PR body does not reference a linked issue (expected "Closes #N").` Wait ~300 seconds.
 
