@@ -29,23 +29,19 @@ Wait ~120 seconds before next cycle.
 Fires on two triggers: new commits (SHA change) or new operator (unprefixed) comments.
 The second trigger handles operator manual-verification confirmations — no code push needed.
 
-**CI gate — run before fetching any other context:**
+**CI gate — run before fetching any other context.**
+
+Run as a single plain command — no variable assignment, `$(...)` substitution, `;` chaining, or pipe to `jq`. Compound forms cannot be statically analyzed against a permission allowlist and force a manual approval prompt on every loop iteration even when `gh pr checks` is allowlisted.
 
 ```bash
-CHECKS=$(gh pr checks <n> --repo <repo> --json name,state,bucket 2>/dev/null)
+gh pr checks <n> --repo <repo> --json name,state,bucket
 ```
 
-If the command fails or returns empty / `[]`: no CI configured — proceed.
+Read the returned JSON directly (do not pipe to `jq`). With `--json`, `gh pr checks` prints the JSON array and exits 0 even while checks are pending or failing. A non-zero exit with empty stdout means a real error (e.g. the PR or repo does not exist) — not a CI state.
 
-Otherwise:
-
-```bash
-PENDING=$(echo "$CHECKS" | jq '[.[] | select(.bucket == "pending")] | length')
-FAILING=$(echo "$CHECKS" | jq '[.[] | select(.bucket == "fail")] | length')
-```
-
-- `PENDING > 0`: post `[qa] Waiting: CI still running — <N> check(s) pending. Will re-evaluate when checks complete.` Wait ~120s. **Stop.**
-- `FAILING > 0`: post `[qa] BLOCKED: CI failing — <names>. Fix CI before A.C. evaluation.` Wait ~120s. **Stop.**
+- If output is empty / `[]` or the command errors with no JSON: no CI configured (or PR not found) — proceed.
+- If any element has `"bucket": "pending"`: post `[qa] Waiting: CI still running — <N> check(s) pending. Will re-evaluate when checks complete.` Wait ~120s. **Stop.**
+- If any element has `"bucket": "fail"`: post `[qa] BLOCKED: CI failing — <names>. Fix CI before A.C. evaluation.` (list the `name` of each failing element) Wait ~120s. **Stop.**
 - Otherwise: proceed.
 
 Fetch in parallel:
@@ -53,7 +49,9 @@ Fetch in parallel:
 - `gh pr diff <n> --repo <repo>`
 - `gh pr view <n> --comments --repo <repo>`
 
-Extract linked issue from PR body (`Closes #<N>`). If not found: post `[qa] BLOCKED: PR body does not reference a linked issue (expected "Closes #N").` Wait ~300 seconds.
+**Never construct or post a verdict in the same tool batch as these fetches.** The verdict depends on what they return — it is a dependent value. Batching a pre-written verdict alongside the fetches makes it reflect an assumption, not the fetched reality, and it will confabulate (e.g. evaluating the wrong issue). Fetch first, read the results, then compose and post the verdict in a separate tool call after the fetches return — within the same wakeup (a later tool call, not a later poll cycle; never defer to the next wakeup), even when you think you already know the outcome.
+
+Extract the linked issue from **this PR's freshly-fetched body** (`Closes #<N>`, case-insensitive) — never from memory, a prior iteration, or another PR. If not found: post `[qa] BLOCKED: PR body does not reference a linked issue (expected "Closes #N").` Wait ~300 seconds.
 
 Fetch linked issue:
 - `gh issue view <N> --repo <repo>`

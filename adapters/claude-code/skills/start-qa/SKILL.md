@@ -64,22 +64,18 @@ Run `node ~/.claude/plugins/marketplaces/agent-loop/scripts/pr-qa.mjs --repo <re
 
 **Step 0 — CI gate:**
 
-```bash
-CHECKS=$(gh pr checks <n> --repo <repo> --json name,state,bucket 2>/dev/null)
-```
-
-If the command fails or returns empty / `[]`: no CI configured — skip to Step 1.
-
-Otherwise parse:
+Run this as a single plain command — **no variable assignment, no `$(...)` command substitution, no `;` chaining, no pipe to `jq`**. Those compound forms cannot be statically analyzed against the permission allowlist, so they force a manual approval prompt on every loop iteration even when `gh pr checks` is allowlisted.
 
 ```bash
-PENDING=$(echo "$CHECKS" | jq '[.[] | select(.bucket == "pending")] | length')
-FAILING=$(echo "$CHECKS" | jq '[.[] | select(.bucket == "fail")] | length')
+gh pr checks <n> --repo <repo> --json name,state,bucket
 ```
 
-- If `PENDING > 0`: post `[qa] Waiting: CI still running — <N> check(s) pending. Will re-evaluate when checks complete.` ScheduleWakeup(120s). **Stop — do not proceed to Step 1.**
-- If `FAILING > 0`: extract failing names (`jq -r '[.[] | select(.bucket == "fail") | .name] | join(", ")'`) and post `[qa] BLOCKED: CI failing — <names>. Fix CI before A.C. evaluation.` ScheduleWakeup(120s). **Stop — do not proceed to Step 1.**
-- Otherwise (all pass or skipping): proceed to Step 1. ScheduleWakeup(300s) after posting verdict.
+Read the returned JSON directly — do not pipe to `jq`. With `--json`, `gh pr checks` prints the JSON array and exits 0 even while checks are pending or failing. A non-zero exit with empty stdout means a real error (e.g. the PR or repo does not exist) — not a CI state.
+
+- If the output is empty / `[]`, or the command errors with no JSON: no CI configured (or PR not found) — skip to Step 1.
+- If any element has `"bucket": "pending"`: post `[qa] Waiting: CI still running — <N> check(s) pending. Will re-evaluate when checks complete.` ScheduleWakeup(120s). **Stop — do not proceed to Step 1.**
+- If any element has `"bucket": "fail"`: post `[qa] BLOCKED: CI failing — <names>. Fix CI before A.C. evaluation.` (list the `name` of each failing element) ScheduleWakeup(120s). **Stop — do not proceed to Step 1.**
+- Otherwise (all pass): proceed to Step 1. ScheduleWakeup(300s) after posting verdict.
 
 **Step 1 — gather context in parallel:**
 
@@ -90,11 +86,13 @@ gh pr view <n> --comments --repo <repo>                 # comment thread
 gh issue view <issue-n> --repo <repo>                   # linked issue (extract from PR body: Closes #<N>)
 ```
 
+> **Never construct or post a verdict in the same tool batch as these gathering calls.** The verdict (the `gh pr comment` with `[qa] PASS`/`BLOCKED`) depends on what these calls return — it is a dependent value, not an independent one. Batching a pre-written verdict alongside the fetches means it reflects an assumption about the PR, not the fetched reality, and will confabulate (e.g. evaluating the wrong issue). **Gather first. Read the results. Only then, in a separate tool call after the fetches return, compose and post the verdict.** Do this within the same wakeup — it means a later tool call, not a later poll cycle; never defer the verdict to the next wakeup. This applies to every signal, even when you think you already know the outcome.
+
 Also read project convention files locally (if they exist): `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `docs/CONTRIBUTING.md`. These may define testing expectations, required patterns, or quality standards that count as acceptance criteria even if not stated in the issue.
 
 **Step 2 — extract linked issue number:**
 
-Parse PR body for `Closes #<N>` (case-insensitive). If no linked issue found: post `[qa] BLOCKED: PR body does not reference a linked issue (expected "Closes #N"). Cannot evaluate A.C. without issue context.` ScheduleWakeup(300s).
+Parse the `Closes #<N>` reference (case-insensitive) **out of the `body` returned by the Step 1 `gh pr view <n>` call for this exact PR number `<n>`.** Never carry an issue number over from memory, a prior loop iteration, or another PR — the PR↔issue mapping must come from this PR's freshly-fetched body every time. If no linked issue found: post `[qa] BLOCKED: PR body does not reference a linked issue (expected "Closes #N"). Cannot evaluate A.C. without issue context.` ScheduleWakeup(300s).
 
 **Step 3 — synthesize requirements:**
 
