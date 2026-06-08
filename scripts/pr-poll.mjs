@@ -130,6 +130,43 @@ for (const c of unansweredInline) {
   if (!newInline.some((n) => n.id === c.id)) newInline.push(c)
 }
 
+// --- Review verdicts (cursor-independent) ---
+// LGTM / PASS / BLOCKED / reviewer findings describe the PR's *current* state, not one-off
+// events, so evaluate them fresh each poll regardless of the comment cursor. This is what lets
+// a [qa] BLOCKED / [reviewer] finding posted in the gap before the executor's first poll survive:
+// first-run baseline seeding (intentional, to skip resolved history on a state wipe) would
+// otherwise swallow it as "pre-existing". Inline comments (unansweredInline) and positive verdicts
+// (MERGE_READY below) already ignore the cursor; negative verdicts were the lone asymmetry.
+// "Live" = newer than the last commit — a fix push supersedes the verdict until the agent re-runs.
+const lgtmComments = issueComments.filter((c) => (c.body ?? '').startsWith('[reviewer] LGTM'))
+const qaPassComments = issueComments.filter((c) => (c.body ?? '').startsWith('[qa] PASS'))
+const isReviewerFinding = (b) => /^\[reviewer\]/.test(b ?? '') && !/^\[reviewer\] LGTM/.test(b ?? '')
+const isQaBlocked = (b) => /^\[qa\] BLOCKED/.test(b ?? '')
+const blockingCandidates = issueComments.filter((c) => isQaBlocked(c.body) || isReviewerFinding(c.body))
+
+// Fetch the last commit date once if any verdict (positive or negative) needs liveness checking.
+let lastCommitDate = null
+if (lgtmComments.length > 0 || qaPassComments.length > 0 || blockingCandidates.length > 0) {
+  const commits = JSON.parse(
+    execSync(`gh api --paginate "repos/${repo}/pulls/${prNumber}/commits"`, { encoding: 'utf8' })
+  )
+  lastCommitDate = new Date(commits.at(-1)?.commit?.committer?.date ?? 0)
+}
+
+// Surface live blocking verdicts even if the cursor has already passed them (mirrors
+// unansweredInline). Re-surfaces each poll until a fix push makes the verdict stale.
+// NOTE: the reviews API path (firstReviews → seed) has the same first-run swallow, but in
+// single-account mode the reviewer posts [reviewer] comments, not formal CHANGES_REQUESTED
+// reviews, so the issue-comment path above is the one that matters. Operator (unprefixed)
+// comments present at first poll are not covered here — the commit-based liveness rule fits
+// verdicts, not free-form operator direction.
+const liveBlocking = blockingCandidates.filter(
+  (c) => lastCommitDate && new Date(c.created_at) > lastCommitDate
+)
+for (const c of liveBlocking) {
+  if (!newComments.some((n) => n.id === c.id)) newComments.push(c)
+}
+
 // Indent body lines so signal keywords inside comment text don't confuse loop parsers
 function indentBody(body) {
   return (body ?? '').split('\n').map((l) => `  ${l}`).join('\n')
@@ -162,18 +199,12 @@ if (newInline.length > 0) {
 
 // Check merge threshold: [reviewer] LGTM + [qa] PASS both posted AFTER the last commit + CI passing.
 // Comments predating new commits are stale — both agents must re-approve after each push.
-const lgtmComments = issueComments.filter((c) => (c.body ?? '').startsWith('[reviewer] LGTM'))
-const qaPassComments = issueComments.filter((c) => (c.body ?? '').startsWith('[qa] PASS'))
+// lgtmComments / qaPassComments / lastCommitDate are computed above with the other verdicts.
 const lastLgtm = lgtmComments.at(-1)
 const lastQaPass = qaPassComments.at(-1)
 let hasReviewerLgtm = false
 let hasQaPass = false
-if (lastLgtm || lastQaPass) {
-  const commits = JSON.parse(
-    execSync(`gh api --paginate "repos/${repo}/pulls/${prNumber}/commits"`, { encoding: 'utf8' })
-  )
-  const lastCommit = commits.at(-1)
-  const lastCommitDate = new Date(lastCommit?.commit?.committer?.date ?? 0)
+if (lastCommitDate) {
   if (lastLgtm) hasReviewerLgtm = new Date(lastLgtm.created_at) > lastCommitDate
   if (lastQaPass) hasQaPass = new Date(lastQaPass.created_at) > lastCommitDate
 }
@@ -194,10 +225,15 @@ if (hasReviewerLgtm && hasQaPass && unansweredInline.length === 0) {
   }
 }
 
-// Persist state only after all signals are collected
-if (newComments.length > 0) prState.comments = newComments.at(-1).id
-if (newReviews.length > 0) prState.reviews = newReviews.at(-1).id
-if (newInline.length > 0) prState.reviewComments = newInline.at(-1).id
+// Persist state only after all signals are collected.
+// Use Math.max, not .at(-1): liveBlocking / unansweredInline append cursor-independent items
+// that may be older than the newest, so .at(-1) could regress the cursor and re-emit comments.
+if (newComments.length > 0)
+  prState.comments = Math.max(prState.comments ?? 0, ...newComments.map((c) => c.id))
+if (newReviews.length > 0)
+  prState.reviews = Math.max(prState.reviews ?? 0, ...newReviews.map((r) => r.id))
+if (newInline.length > 0)
+  prState.reviewComments = Math.max(prState.reviewComments ?? 0, ...newInline.map((c) => c.id))
 state[prNumber] = prState
 writeFileSync(STATE_FILE, JSON.stringify(state))
 
