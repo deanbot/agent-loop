@@ -14,7 +14,7 @@ Read the project's AGENTS.md `## Agent loop` section. Extract:
 - `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
 - `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
-**No interactive prompts.** Post questions as `gh pr comment <N> --body "[executor] Question: <question>"`.
+**No interactive prompts — ever.** Questions go to GitHub, channel by phase: **PR exists** → `gh pr comment <PR> --body "[executor] Question: <question>"`; **no PR yet** (implement phase) → `gh issue comment <N> --body "[executor] Question: <question>"`. A posted question is a **stop**: if a safe default exists, take it and note the assumption instead of asking; only post a question when you genuinely cannot proceed correctly — and then stop, never ask and keep building in the same step.
 
 ## Detect input type
 
@@ -41,6 +41,12 @@ Claim before branching: `gh issue edit <N> --add-label <in-progress-label> --rep
 3. Implement the work. Run quality-gates from AGENTS.md config.
 4. `gh pr create --repo <repo>` — follow the project's PR conventions; end body with `Closes #<N>`.
 
+**Operator input needed during implement (no PR exists yet):** no poll loop and no PR to comment on — do not guess-and-build, do not open a speculative PR, never use an interactive prompt.
+- **Safe default exists** → take it; implement the default and record the assumption in the PR body. Do not also post a question.
+- **No safe default** → **park and pick next**: post `gh issue comment <N> --repo <repo> --body "[executor] BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run on #<N>."`, then `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`, then pick next. Do not continue implementing #<N>. (Same ending as author-skip / blocked-label; `<blocked-label>` keeps pick-next from re-grabbing it.)
+
+When resuming on an existing PR, remove any lingering `<blocked-label>` from the linked issue (`gh issue edit <N> --remove-label <blocked-label> --repo <repo>`).
+
 ## Poll loop
 
 Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` once per cycle.
@@ -55,8 +61,8 @@ Signal handling:
 - `NEW_REVIEW_SUBMISSION` / `COMMENTED`: answer via `gh pr comment`; wait, poll again
 - `NEW_INLINE_COMMENT` or `NEW_COMMENT`: skip own `[executor]` posts; treat `[reviewer]` as CHANGES_REQUESTED (batch all, fix all, push once); treat operator (unprefixed) as direction; wait, poll again
 - `NONE`: wait, poll again
-- Unresolvable: remove label, post `gh pr comment <PR> --body "[executor] BLOCKED: <reason>"`, pick next
-- Operator input needed: post `gh pr comment <PR> --body "[executor] Question: <question>"`; wait, poll again; after 10 consecutive NONE with no unprefixed reply: remove label, post `[executor] BLOCKED: no response — moving on`, pick next
+- Unresolvable: `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`, post `gh pr comment <PR> --body "[executor] BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run on PR #<PR>."`, pick next
+- Operator input needed: post `gh pr comment <PR> --body "[executor] Question: <question>"`; wait, poll again; after 10 consecutive NONE with no unprefixed reply: `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`, post `[executor] BLOCKED: no response — moving on. To resume: remove the \`<blocked-label>\` label and re-run on PR #<PR>.`, pick next
 
 ## Pick next
 

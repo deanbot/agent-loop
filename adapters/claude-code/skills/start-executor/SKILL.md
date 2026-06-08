@@ -27,7 +27,7 @@ Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop`
 
 Then proceed with $ARGUMENTS.
 
-**No interactive terminal prompts.** Post questions as `gh pr comment <N> --body "[executor] Question: <question>"` and continue polling.
+**No interactive terminal prompts — ever** (no menus, no `AskUserQuestion`). Questions go to GitHub, channel by phase: **PR exists** → `gh pr comment <PR> --body "[executor] Question: <question>"`; **no PR yet** (implement phase) → `gh issue comment <N> --body "[executor] Question: <question>"`. A posted question is a **stop**: if a safe default exists, take the default and note the assumption instead of asking; only post a question when you genuinely cannot proceed correctly — and then stop, never ask and keep building in the same step (see implement-phase park-and-stop below and the loop's question handling).
 
 ## Detect input type
 
@@ -60,10 +60,18 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
    Include a verification summary in the PR description: one line per criterion with evidence (test file, diff hunk, or explicit note on why manual verification is required).
 5. Open PR: `gh pr create --repo <repo>` — follow the project's PR conventions; end body with `Closes #<N>`.
 
+**Operator input needed during implement (no PR exists yet):** There is no poll loop and no PR to comment on in this phase, so do not guess-and-build, do not open a speculative PR, and never fall back to an interactive prompt. Decide:
+- **Safe default exists** → take it. Implement the default and record the assumption in the PR body (e.g. "Assumed Tier 2 only; reply to redirect"). Do not also post a question — asking and proceeding produces contradictory comments.
+- **No safe default** (cannot produce correct work without an answer) → **park and stop**:
+  1. `gh issue comment <N> --repo <repo> --body "[executor] BLOCKED: <reason/question>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on #<N>."`
+  2. `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`
+  3. Notify the user, then pick next item (step 8) — do not continue implementing #<N>. (Same "drop this issue, keep the loop going" ending as the author-skip and blocked-label paths above; `<blocked-label>` keeps pick-next from re-grabbing #<N>.)
+
 ## Orient on existing PR (step 6b)
 
 1. `gh pr view <PR> --repo <repo>` — PR description, acceptance criteria
 2. `gh pr view <PR> --comments --repo <repo>` — full thread; note any `[executor] BLOCKED` or `[executor] Question` entries and any operator responses
+3. If the linked issue still carries `<blocked-label>` from a prior park, remove it now — `gh issue edit <N> --remove-label <blocked-label> --repo <repo>` — you are resuming.
 
 ## Executor loop (step 7)
 
@@ -120,8 +128,8 @@ Signal handling:
 - if NEW_REVIEW_SUBMISSION with COMMENTED: answer via `gh pr comment`; ScheduleWakeup(60s), poll again
 - if NEW_INLINE_COMMENT or NEW_COMMENT: skip own `[executor]` posts; operator (unprefixed) — check if already addressed in current code first; if already resolved post inline reply confirming it, if not fix it then reply; always reply to each inline comment thread via `gh api repos/<repo>/pulls/<PR>/comments -X POST -f body="[executor] <response>" -f in_reply_to_id=<id>` — no reply = signal loops forever; `[reviewer]` — treat as CHANGES_REQUESTED (batch all, fix all, push once, one summary comment); `[qa] BLOCKED` — address every missing criterion listed in the checklist (add tests or implementation), push once, post `[executor] Pushed fix: addressed QA findings — <summary>`; ScheduleWakeup(60s), poll again
 - if NONE: ScheduleWakeup(60s), poll again
-- if unresolvable: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, post `gh pr comment <PR> --body "[executor] BLOCKED: <reason>"`, pick next item (step 8)
-- if operator input needed: post `gh pr comment <PR> --body "[executor] Question: <question>"`; ScheduleWakeup(60s), poll again; if 10 consecutive NONEs with no unprefixed reply: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, post `[executor] BLOCKED: no response — moving on`, pick next item (step 8)
+- if unresolvable: `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`, post `gh pr comment <PR> --body "[executor] BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on PR #<PR>."`, pick next item (step 8)
+- if operator input needed: post `gh pr comment <PR> --body "[executor] Question: <question>"`; ScheduleWakeup(60s), poll again; if 10 consecutive NONEs with no unprefixed reply: `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`, post `[executor] BLOCKED: no response — moving on. To resume: remove the \`<blocked-label>\` label and re-run start-executor on PR #<PR>.`, pick next item (step 8)
 
 ## Pick next item (step 8)
 
