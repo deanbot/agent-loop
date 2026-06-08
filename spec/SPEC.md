@@ -178,8 +178,21 @@ Content blocks follow signal lines, indented two spaces to prevent keyword confu
 
 ### Executor question / blocked protocol
 
-- **Question**: post `[executor] Question: <question>`, continue polling. If 10 consecutive NONE signals pass with no unprefixed operator reply: post `[executor] BLOCKED: no response — moving on`, remove `in-progress` label, pick next work.
-- **Blocked**: post `[executor] BLOCKED: <reason>`, remove `in-progress` label, pick next work. Operator resumes by responding on GitHub thread and re-running the executor command with the PR number.
+A posted question is a **stop**, not a checkpoint — never ask and keep working in the same step. Decide between two paths:
+- A safe default exists → take it. Implement the default and record the assumption (PR body if a PR exists, else an issue comment); do **not** post a question.
+- No safe default — you cannot produce correct work without an answer → post the question and stop on that channel. Asking *and* proceeding on a guess (which produces a contradictory follow-up comment) is the failure this rule prevents.
+
+Channel is phase-dependent, never an interactive terminal prompt:
+- **PR exists** (poll loop): `gh pr comment <PR>`.
+- **No PR yet** (implement phase): `gh issue comment <N>`.
+
+Every block parks the issue so automatic pick-next can't re-grab it (removing `in-progress` alone leaves the issue eligible again → re-pick → re-block loop):
+
+- **Question (poll loop)**: post `[executor] Question: <question>`, continue polling. If 10 consecutive NONE signals pass with no unprefixed operator reply: post `[executor] BLOCKED: no response — moving on`, remove `in-progress`, add `blocked-label`, pick next work.
+- **Blocked (poll loop)**: post `[executor] BLOCKED: <reason>`, remove `in-progress`, add `blocked-label`, pick next work.
+- **Blocked / input needed (implement phase, no PR)**: park, then pick next — do **not** open a speculative PR or keep building #<N>. Post `[executor] BLOCKED: <reason>` (or `Question`) as an *issue* comment, remove `in-progress`, add `blocked-label`, pick next work (same ending as the other block paths).
+
+Resume (all cases): operator removes `blocked-label` and re-runs the executor — with the PR number if a PR exists, else the issue number. On a successful resume the executor removes any lingering `blocked-label`.
 
 ---
 
