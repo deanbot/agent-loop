@@ -160,8 +160,14 @@ if (lgtmComments.length > 0 || qaPassComments.length > 0 || blockingCandidates.l
 // reviews, so the issue-comment path above is the one that matters. Operator (unprefixed)
 // comments present at first poll are not covered here — the commit-based liveness rule fits
 // verdicts, not free-form operator direction.
+// "Addressed" = an [executor] comment posted after the verdict (the executor has engaged:
+// a fix push, an answer, or a clarifying question). Without this, a [reviewer] comment or
+// question that needs no commit would never go stale (no superseding commit) and would
+// re-surface every poll, thrashing the loop. The guard is safe: an [executor] comment can
+// only post-date a verdict the executor already saw, so it never hides an unaddressed one.
+const lastExecutorId = issueComments.filter((c) => /^\[executor\]/.test(c.body ?? '')).at(-1)?.id ?? 0
 const liveBlocking = blockingCandidates.filter(
-  (c) => lastCommitDate && new Date(c.created_at) > lastCommitDate
+  (c) => c.id > lastExecutorId && lastCommitDate && new Date(c.created_at) > lastCommitDate
 )
 for (const c of liveBlocking) {
   if (!newComments.some((n) => n.id === c.id)) newComments.push(c)
