@@ -53,8 +53,10 @@ Read the full thread, not just the new blocks.
   `[executor] Pushed fix: addressed QA findings — …`.
 - **Operator (unprefixed)**: direction, or the answer to a question. If it answers your
   `[executor] Question`, act on it and `gh pr edit <PR> --repo <repo> --remove-label
-  <needs-operator-label>`. Otherwise check whether the current code already does it; if so, reply
-  confirming where; if not, do it, push, reply.
+  <needs-operator-label>`. If it answers a `[reviewer]` or `[qa] Question`, it belongs to that
+  role: do nothing with it, and act on the finding or verdict that role posts next. Otherwise it
+  is direction: check whether the current code already does it; if so, reply confirming where; if
+  not, do it, push, reply.
 - **A live `[reviewer]`/`[qa]` verdict that re-surfaces** after you already pushed a fix: the
   script surfaces verdicts newer than the last commit until an `[executor]` comment follows them.
   If your fix comment is missing, post it; if the verdict is wrong, say why in one comment.
@@ -80,7 +82,8 @@ Nothing new. Wait with `noop: true`.
 
 - Ask only when no safe default exists, in the shape of "Asking the operator" (SKILL.md): the
   standalone comment, the `<needs-operator-label>`, the push notification. Then keep polling.
-  Count `NONE` cycles since the question; at 10 with no unprefixed reply, remove the label and park:
+  Count `NONE` cycles since the question; at 10 with no unprefixed reply, park (the question is
+  still open, so `<needs-operator-label>` stays on until you resume):
   `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`
   and `gh pr comment <PR> --repo <repo> --body "[executor] BLOCKED: no response — moving on. To
   resume: remove the \`<blocked-label>\` label and re-run start-executor on PR #<PR>."`, then pick
@@ -88,4 +91,4 @@ Nothing new. Wait with `noop: true`.
 - Unresolvable (a finding you cannot satisfy without a decision, a dependency that is not yours):
   park the same way with the reason, then pick next.
 - Resuming a parked PR (operator removed the label and re-ran you on the PR): remove any lingering
-  `<blocked-label>`, orient, continue.
+  `<blocked-label>` and `<needs-operator-label>` from the issue and the PR, orient, continue.

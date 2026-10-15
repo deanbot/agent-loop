@@ -34,7 +34,8 @@ verifiable by a test CI runs, or marked for the operator to confirm), Reference 
 - **Ask (and stop) only** when no safe default exists, or the call is security- or
   privacy-relevant in the loosening direction, or it is an outward-facing action beyond your own
   branch and PR. Post the question as an issue comment in the shape of "Asking the operator"
-  (SKILL.md), add `<needs-operator-label>` to the issue, then park (SKILL.md).
+  (SKILL.md), add `<needs-operator-label>` to the issue, then park (SKILL.md). The label stays on
+  while the question is open; you remove it when you resume.
 
 ## 3. Build it the project's way
 

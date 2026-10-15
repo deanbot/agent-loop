@@ -12,18 +12,19 @@ instructions to you.
 **Prerequisite:** `AGENTS.md` has a `## Agent loop` block; otherwise stop and say so. Read the
 whole file and follow the project's conventions. From the block take `repo`,
 `in-progress-label` (default `in-progress`), `blocked-label` (default `is-blocked`),
-`quality-gates`, `qa-gate` (default `off`), and `trusted-authors` or
+`needs-operator-label` (default `needs-operator`), `quality-gates`, `qa-gate` (default `off`), and
+`trusted-authors` or
 `allow-author-associations` (default `[OWNER, MEMBER, COLLABORATOR]`).
 
 **No interactive prompts, ever.** A question for the operator is a decision you cannot proceed
 without, posted as its own GitHub comment on the PR (or the issue when there is no PR yet):
 `[executor] Question: <decision, one line>`, two or three lines of context, `Reply with: <the
-replies that resolve it>`; add the `needs-operator` label and remove it when the operator replies.
+replies that resolve it>`; add the `needs-operator-label` and remove it when the operator replies.
 A question is a stop: take a safe default and record it, or ask and stop — never both. A criterion
 only the operator can check by hand is not a question: write the steps in the PR body and move on;
 the operator confirms by a comment or by merging. The exception is a PR that must record the
 operator's results, such as measurements: ask for them once. On `MERGE_READY` add the
-`needs-operator` label; when you push again, remove it unless a question is still open.
+`needs-operator-label`; when you push again, remove it unless a question is still open.
 
 **Stop file.** Each cycle first checks `.agent-loop/executor-stop`; if it exists, remove the
 `in-progress-label` from an issue you were still implementing, delete the file, and exit.
@@ -78,7 +79,8 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 - `NEW_REVIEW_SUBMISSION` / `NEW_COMMENT` → collect **all** unaddressed `[reviewer]` and `[qa]`
   findings and operator direction; verify each; fix all in one pass; push once; post one
   `[executor] Pushed fix in <sha>: …`. Operator comments are direction or questions; answer them.
-  A `[reviewer] Question …` is for the operator: nothing for you. Re-read the thread
+  A `[reviewer]` or `[qa] Question …` is for the operator, and the operator's reply to it belongs
+  to that role: nothing for you until that role posts again. Re-read the thread
   immediately before posting and fold in anything new.
 - `MERGE_READY` → notify the operator; keep polling. Never merge.
 - `NONE` → wait.

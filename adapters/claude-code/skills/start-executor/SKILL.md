@@ -69,8 +69,8 @@ closed (an issue names them as `Depends on #a, #b`; check each with `gh issue vi
 
 **Orient on an existing PR.** `gh pr view <PR> --repo <repo>` and `gh pr view <PR> --comments
 --repo <repo>`: the description, the acceptance criteria table, every comment, any earlier
-`[executor] BLOCKED` or `Question` and the operator's replies. If the linked issue still carries
-`<blocked-label>`, remove it: you are resuming.
+`[executor] BLOCKED` or `Question` and the operator's replies. If the linked issue or the PR still
+carries `<blocked-label>` or `<needs-operator-label>` from a park, remove them: you are resuming.
 
 ## The loop
 
@@ -91,8 +91,9 @@ Each cycle:
      post one `[executor] Pushed fix: …`.
    - Comments → collect **all** unaddressed `[reviewer]` and `[qa]` findings and operator
      direction, verify each, fix all in one pass, push once, post one summary comment. Reply to
-     every inline thread you were asked about. A `[reviewer] Question …` is for the operator:
-     nothing for you. Your own `[executor]` posts are already filtered out.
+     every inline thread you were asked about. A `[reviewer]` or `[qa] Question …` is for the
+     operator, and the operator's reply to it belongs to that role: nothing for you until that
+     role posts again. Your own `[executor]` posts are already filtered out.
    - `MERGE_READY` → `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (a no-op
      when it is on). Print the status block with "✅ Ready — operator merges", keep polling. When
      you next push, remove the label unless a question is still open.
@@ -143,15 +144,18 @@ Reply with: <the replies that resolve it, e.g. "keep", or "no, do X instead">
 Post it only after everything you can do without the answer is done. In the same cycle:
 `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (or `gh issue edit <N> …` when
 there is no PR), and `PushNotification({ status: "proactive", message: "<repo> PR #<PR>: question
-for you — <one line>" })` (skipped when the operator is at your terminal). When the operator's
-unprefixed reply arrives, act on it and remove the label; if the PR is ready to merge, your next
-`MERGE_READY` puts it back. A `[reviewer] Question` in the thread
-is for the operator too: nothing for you.
+for you — <one line>" })`. `PushNotification` is a deferred tool: load it once with
+`ToolSearch("select:PushNotification")` before the first call. Skip it when the operator started
+this cycle by typing in this session rather than through a wakeup: they are at the terminal. When
+the operator's unprefixed reply arrives, act on it and remove the label; if the PR is ready to
+merge, your next `MERGE_READY` puts it back. A `[reviewer]` or `[qa] Question` in the thread is
+for the operator, and the reply to it belongs to that role: nothing for you.
 
 ## Blocked, questions, and stopping
 
 - A question with no safe default: ask as above, keep polling; after 10 consecutive `NONE`
-  cycles with no unprefixed reply, remove the label, park the issue (below) and pick next.
+  cycles with no unprefixed reply, park the issue (below) and pick next. The question is still
+  open, so `<needs-operator-label>` stays on until you resume.
 - Unresolvable, or input needed before there is a PR: park. `gh issue edit <N> --remove-label
   <in-progress-label> --add-label <blocked-label> --repo <repo>`, then post `[executor]
   BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on

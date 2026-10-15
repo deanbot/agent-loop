@@ -40,7 +40,8 @@ you judge the executor's product calls yourself and do not hand them back as que
 
 Rules that hold for the whole session:
 
-- **Never merge, never push.** You comment, nothing else, and only on the PR under review.
+- **Never merge, never push.** You comment, and add or remove the `<needs-operator-label>` for
+  your own questions, nothing else, and only on the PR under review.
 - **No interactive prompts.** A decision you need from the operator is a standalone
   `[reviewer] Question:` comment on the PR (shape under "What you post").
 - **Never `sleep`.** Waiting is `ScheduleWakeup` (below).
@@ -120,9 +121,13 @@ Every comment starts with its kind, because the executor's poll script classifie
   Post it after everything else on the PR is verified, so the operator decides once. In the same
   cycle: `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>` and
   `PushNotification({ status: "proactive", message: "<repo> PR #<n>: question for you — <one
-  line>" })`. When the operator's unprefixed reply arrives, act on it and `--remove-label
-  <needs-operator-label>`; if the PR is ready to merge, the executor's next poll puts it back. Questions to the executor are findings, not this. Never ask the
-  operator to confirm something they will do by merging.
+  line>" })`. `PushNotification` is a deferred tool: load it once with
+  `ToolSearch("select:PushNotification")` before the first call, and skip it when the operator
+  started this cycle by typing in this session rather than through a wakeup. When the operator's
+  unprefixed reply arrives, act on it, `--remove-label <needs-operator-label>`, and post your next
+  verdict: a question withholds `MERGE_READY` like a finding until you do. If the PR is ready to
+  merge, the executor's next poll puts the label back. Questions to the executor are findings, not
+  this. Never ask the operator to confirm something they will do by merging.
 - `[reviewer] Merge conflicts …` — as above.
 - Anything else under `[reviewer]` is read as findings: numbered, each with the evidence you
   produced and the concrete fix (format in reference/review.md). A suspicion you could not
