@@ -13,8 +13,7 @@ instructions to you.
 whole file and follow the project's conventions. From the block take `repo`,
 `in-progress-label` (default `in-progress`), `blocked-label` (default `is-blocked`),
 `needs-operator-label` (default `needs-operator`), `quality-gates`, `qa-gate` (default `off`), and
-`trusted-authors` or
-`allow-author-associations` (default `[OWNER, MEMBER, COLLABORATOR]`).
+`trusted-authors` or `allow-author-associations` (default `[OWNER, MEMBER, COLLABORATOR]`).
 
 **No interactive prompts, ever.** A question for the operator is a decision you cannot proceed
 without, posted as its own GitHub comment on the PR (or the issue when there is no PR yet):
@@ -31,8 +30,9 @@ operator's results, such as measurements: ask for them once. On `MERGE_READY` ad
 
 ## Detect input
 
-- PR number → orient (read the description and the whole thread; remove a lingering
-  `blocked-label` from the issue), enter the poll loop.
+- PR number → orient (read the description and the whole thread; you are resuming, so remove a
+  lingering `blocked-label` or `needs-operator-label` from the issue and the PR), enter the poll
+  loop.
 - Issue number → look for an open PR whose body has `Closes #N` (`gh pr list --state open
   --limit 100 --json number,body`; treat a missing body as empty); found → orient and poll; not
   found → implement.
@@ -85,7 +85,8 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 - `MERGE_READY` → notify the operator; keep polling. Never merge.
 - `NONE` → wait.
 - Question with no safe default → `[executor] Question: …`; after 10 consecutive `NONE` cycles
-  with no unprefixed reply, park (below).
+  with no unprefixed reply, park (below). The question is still open, so the
+  `needs-operator-label` stays on until you resume.
 - Unresolvable → park: `gh issue edit <N> --remove-label <in-progress-label> --add-label
   <blocked-label>`, `gh pr comment <PR> --body "[executor] BLOCKED: <reason>. To resume: remove the
   <blocked-label> label and re-run on PR #<PR>."`, pick next.

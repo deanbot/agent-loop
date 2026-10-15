@@ -80,7 +80,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
 
 1. `gh pr view <PR> --repo <repo>` — PR description, acceptance criteria
 2. `gh pr view <PR> --comments --repo <repo>` — full thread; note any `[executor] BLOCKED` or `[executor] Question` entries and any operator responses
-3. If the linked issue still carries `<blocked-label>` from a prior park, remove it now — `gh issue edit <N> --remove-label <blocked-label> --repo <repo>` — you are resuming.
+3. If the linked issue or the PR still carries `<blocked-label>` or `<needs-operator-label>` from a prior park, remove them now — `gh issue edit <N> --remove-label <blocked-label> --remove-label <needs-operator-label> --repo <repo>` and `gh pr edit <PR> --remove-label <blocked-label> --remove-label <needs-operator-label> --repo <repo>` — you are resuming.
 
 ## Executor loop (step 7)
 
@@ -139,7 +139,7 @@ Signal handling:
 - if NEW_INLINE_COMMENT or NEW_COMMENT: skip own `[executor]` posts; operator (unprefixed) — fix or answer, except a reply to a `[reviewer]` or `[qa] Question`, which belongs to that role: wait for what it posts next; `[reviewer]` — treat as CHANGES_REQUESTED (batch all, fix all, push once, one summary comment); `[qa] BLOCKED` — address every missing criterion listed in the checklist (add tests or implementation), push once, post `[executor] Pushed fix: addressed QA findings — <summary>`; wait 60s, poll again
 - if NONE: wait 60s, poll again
 - if unresolvable: `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`, post `gh pr comment <PR> --body "[executor] BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on PR #<PR>."`, pick next item (step 8)
-- if operator input needed (a decision you cannot proceed without; a criterion only the operator can check by hand is not one, unless the PR must record the operator's results): post a standalone question — `gh pr comment <PR> --body "[executor] Question: <decision, one line>` + two or three lines of context + `Reply with: <the replies that resolve it>"` — and `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>`; remove the label when the operator replies; wait 60s, poll again; if 10 consecutive NONEs with no unprefixed reply: `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`, post `[executor] BLOCKED: no response — moving on. To resume: remove the \`<blocked-label>\` label and re-run start-executor on PR #<PR>.`, pick next item (step 8)
+- if operator input needed (a decision you cannot proceed without; a criterion only the operator can check by hand is not one, unless the PR must record the operator's results): post a standalone question — `gh pr comment <PR> --body "[executor] Question: <decision, one line>` + two or three lines of context + `Reply with: <the replies that resolve it>"` — and `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>`; remove the label when the operator replies; wait 60s, poll again; if 10 consecutive NONEs with no unprefixed reply (the question is still open, so `<needs-operator-label>` stays on until you resume): `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`, post `[executor] BLOCKED: no response — moving on. To resume: remove the \`<blocked-label>\` label and re-run start-executor on PR #<PR>.`, pick next item (step 8)
 
 ## Pick next item (step 8)
 
