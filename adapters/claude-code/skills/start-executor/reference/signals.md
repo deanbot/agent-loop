@@ -65,11 +65,12 @@ After posting, the PR body may be stale: update it (`gh pr edit <PR> --repo <rep
 ## MERGE_READY
 
 `[reviewer] LGTM` is newer than the last commit, CI is green, no inline thread is unanswered
-(and with `qa-gate: on`, `[qa] PASS` is newer than the last commit). The first time for this head:
-`gh pr edit <PR> --repo <repo> --add-label <merge-ready-label>`. Print the status block with
-"✅ Ready — operator merges when ready", then wait as usual. Do not merge, do not offer to, do
-not ask. If the operator comments after this, handle it; when you push again, `--remove-label
-<merge-ready-label>` in the same cycle, since the verdicts are stale until the agents re-approve.
+(and with `qa-gate: on`, `[qa] PASS` is newer than the last commit). Every cycle it holds:
+`gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (a no-op when it is on). Print
+the status block with "✅ Ready — operator merges when ready", then wait as usual. Do not merge,
+do not offer to, do not ask. If the operator comments after this, handle it. When you push again,
+`--remove-label <needs-operator-label>` in the same cycle unless a question is still open, since
+the verdicts are stale until the agents re-approve.
 
 ## NONE
 

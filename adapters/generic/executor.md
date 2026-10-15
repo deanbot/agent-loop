@@ -20,8 +20,10 @@ without, posted as its own GitHub comment on the PR (or the issue when there is 
 `[executor] Question: <decision, one line>`, two or three lines of context, `Reply with: <the
 replies that resolve it>`; add the `needs-operator` label and remove it when the operator replies.
 A question is a stop: take a safe default and record it, or ask and stop — never both. A criterion
-only the operator can confirm is not a question: write the steps in the PR body and move on. On
-`MERGE_READY` add the `merge-ready` label; remove it when you push again.
+only the operator can check by hand is not a question: write the steps in the PR body and move on;
+the operator confirms by a comment or by merging. The exception is a PR that must record the
+operator's results, such as measurements: ask for them once. On `MERGE_READY` add the
+`needs-operator` label; when you push again, remove it unless a question is still open.
 
 **Stop file.** Each cycle first checks `.agent-loop/executor-stop`; if it exists, remove the
 `in-progress-label` from an issue you were still implementing, delete the file, and exit.
@@ -53,7 +55,7 @@ next. Author not in `trusted-authors` (or association not allowed) → post `[ex
    Ask (and park) only when no safe default exists or the call loosens security or privacy.
 4. Run `quality-gates`.
 5. Self-check: for each criterion, name the test that asserts it (a green suite is not enough),
-   or mark it "operator confirms" with the exact steps the operator runs. Fix gaps first.
+   or, for one only a human can check, write the exact steps the operator runs. Fix gaps first.
 6. `gh pr create` with: what and why; a Criterion | Evidence table; Decisions; Known limits;
    `Closes #N`.
 

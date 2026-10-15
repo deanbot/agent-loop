@@ -28,7 +28,7 @@ operator (the human) in unprefixed comments. The operator merges; you never do.
 2. From the block take: `repo` (owner/repo), `in-progress-label` (default `in-progress`),
    `blocked-label` (default `is-blocked`), `quality-gates` (the command that must pass before a
    PR), `qa-gate` (`on` or `off`, default `off`), `needs-operator-label` (default
-   `needs-operator`), `merge-ready-label` (default `merge-ready`), and the author allowlist
+   `needs-operator`), and the author allowlist
    (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
 3. If `.agent-loop/role` exists and does not say `executor`, stop: this clone hosts another role.
 4. Make sure `main` is current: `git checkout main` then `git pull`.
@@ -93,9 +93,9 @@ Each cycle:
      direction, verify each, fix all in one pass, push once, post one summary comment. Reply to
      every inline thread you were asked about. A `[reviewer] Question …` is for the operator:
      nothing for you. Your own `[executor]` posts are already filtered out.
-   - `MERGE_READY` → the first time for this head: `gh pr edit <PR> --repo <repo> --add-label
-     <merge-ready-label>`. Print the status block with "✅ Ready — operator merges", keep polling.
-     Remove the label when you next push.
+   - `MERGE_READY` → `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (a no-op
+     when it is on). Print the status block with "✅ Ready — operator merges", keep polling. When
+     you next push, remove the label unless a question is still open.
    - `NONE` → nothing to do.
 3. **Before posting any comment**, re-fetch `gh pr view <PR> --comments --repo <repo>` and fold
    in anything that arrived while you worked. One comment per cycle, after everything is
@@ -125,10 +125,12 @@ minutes and then ends the loop, so do not rely on it.
 
 ## Asking the operator
 
-A question is a decision you cannot proceed without; a criterion only the operator can confirm is
-**not** a question (write the steps in the PR body, mark it "operator confirms", and move on: the
-reviewer puts it in the LGTM and the merge is the confirmation). The operator is not watching the
-thread, so a question is its own comment, nothing else in it:
+A question is a decision you cannot proceed without. A criterion only the operator can check by
+hand is **not** a question: write its steps in the PR body and move on. The reviewer puts them in
+the LGTM, and the operator confirms by a comment or by merging. The one exception is a PR that must
+record the operator's results, such as measurements from a real model: ask for them once, as a
+question. The operator is not watching the thread, so a question is its own comment, nothing else
+in it:
 
 ```
 [executor] Question: <the decision, one line>
@@ -142,7 +144,8 @@ Post it only after everything you can do without the answer is done. In the same
 `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (or `gh issue edit <N> …` when
 there is no PR), and `PushNotification({ status: "proactive", message: "<repo> PR #<PR>: question
 for you — <one line>" })` (skipped when the operator is at your terminal). When the operator's
-unprefixed reply arrives, act on it and remove the label. A `[reviewer] Question` in the thread
+unprefixed reply arrives, act on it and remove the label; if the PR is ready to merge, your next
+`MERGE_READY` puts it back. A `[reviewer] Question` in the thread
 is for the operator too: nothing for you.
 
 ## Blocked, questions, and stopping

@@ -58,11 +58,12 @@ Re-read the acceptance criteria and the project conventions. For each criterion 
 - **Code-verifiable**: a specific test asserts it. Name the test. A green suite is not enough;
   the test must assert *this* criterion. Where it is cheap, break the behaviour on purpose and
   confirm the test fails, then restore it.
-- **Operator confirms**: only a human can observe it (a real model, a device, a workflow that
-  exists only after merge). Write the exact steps or commands the operator runs into the PR body
-  and mark the criterion "operator confirms". Do not pretend a test covers it, and do not ask the
-  operator about it: the reviewer lists it in the LGTM under "Before you merge" and the merge is
-  the confirmation.
+- **By hand**: only a human can observe it, such as a real model, a device, or a workflow that
+  exists only after merge. Write the exact steps or commands the operator runs into the PR body.
+  Do not pretend a test covers it, and do not ask the operator about it: the reviewer lists it in
+  the LGTM under "Before you merge", and the operator confirms by a comment or by merging. The one
+  exception is a PR that must record the operator's results, such as measurements: ask for them
+  once as a question (SKILL.md, "Asking the operator").
 
 Fix every unsatisfied code-verifiable criterion before opening the PR.
 
@@ -79,7 +80,7 @@ terse and stays true after merge:
 | Criterion | Evidence |
 |---|---|
 | <criterion, quoted or named> | `<test file>::<test name>` |
-| <criterion> | operator confirms before merge: <exact command or steps> |
+| <criterion> | by hand, before merge: <exact command or steps> |
 
 ## Decisions
 - <call you made>: <what and why, one line each>

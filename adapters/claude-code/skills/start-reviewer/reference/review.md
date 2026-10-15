@@ -31,10 +31,12 @@ fix has a regression test"), judge it against what it is *for*, not only its wor
 - **Code-verifiable**: name the test that asserts it. Then check the test is one CI runs: find the
   gate command (the CI workflow, `justfile`, `package.json` scripts) and the runner's file scope.
   A test outside the gate's scope is a dead test and no evidence.
-- **Operator confirms**: the criterion needs a human (a real model, a device, a workflow that
-  exists only after merge). The PR body must give the operator exact steps; if it does not, that is
-  a finding. It never blocks your LGTM: it goes in the LGTM under "Before you merge" and the merge
-  is the confirmation.
+- **By hand**: the criterion needs a human, such as a real model, a device, or a workflow that
+  exists only after merge. The PR body must give the operator exact steps; if it does not, that is
+  a finding. It never blocks your LGTM: it goes in the LGTM under "Before you merge", and the
+  operator confirms by a comment or by merging. The exception is a PR that must record the
+  operator's results, such as measurements: those results are part of the PR, so the criterion is
+  missing until they are in it. The executor asks for them with a question.
 - **Missing**: no test, no implementation, or a test that does not assert the criterion.
 
 The executor's table in the PR body is a pointer, not proof: open each cited test and confirm it
@@ -88,7 +90,7 @@ After merge: <criterion that can only run on main> — <steps>.
 ```
 
 Omit the two trailing lines when every criterion is proven by a test. Never ask the operator to
-post a confirmation first; the merge is the confirmation.
+post a confirmation first; the operator confirms by a comment or by merging.
 
 For a follow-up after the executor's fix: findings start `[reviewer] Recheck of <sha>.` and list
 only what is still wrong; a passing recheck starts `[reviewer] LGTM — recheck of <sha>: …`. The

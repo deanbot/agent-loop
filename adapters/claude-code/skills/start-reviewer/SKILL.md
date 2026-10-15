@@ -97,10 +97,11 @@ forgets, then ends the loop; do not rely on it.)
 Every comment starts with its kind, because the executor's poll script classifies by prefix:
 
 - `[reviewer] LGTM …` — every criterion a test can prove has one, and you have no findings.
-  Criteria only the operator can confirm do **not** hold this back: list them in the same comment
-  under **Before you merge** (or **After merge**, when that is the only order possible) with the
-  exact steps from the PR body; the merge is the confirmation, and a failure comes back as an
-  unprefixed comment you treat as a finding. Note the CI state in the first line (`CI green` /
+  Criteria only the operator can check by hand do **not** hold this back: list them in the same
+  comment under **Before you merge** (or **After merge**, when that is the only order possible)
+  with the exact steps from the PR body. The operator confirms by a comment or by merging, and a
+  failure comes back as an unprefixed comment you treat as a finding. The exception is a PR that
+  must record the operator's results: they are part of the PR, so wait for them like any criterion. Note the CI state in the first line (`CI green` /
   `CI pending`), but CI is not a precondition either: the executor's poll gates `MERGE_READY` on
   CI and receives `CI_FAILING` itself, and nothing would re-trigger you when CI finishes. A red
   check caused by this PR *is* a finding, so then you post findings, not LGTM. A passing recheck
@@ -120,7 +121,7 @@ Every comment starts with its kind, because the executor's poll script classifie
   cycle: `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>` and
   `PushNotification({ status: "proactive", message: "<repo> PR #<n>: question for you — <one
   line>" })`. When the operator's unprefixed reply arrives, act on it and `--remove-label
-  <needs-operator-label>`. Questions to the executor are findings, not this. Never ask the
+  <needs-operator-label>`; if the PR is ready to merge, the executor's next poll puts it back. Questions to the executor are findings, not this. Never ask the
   operator to confirm something they will do by merging.
 - `[reviewer] Merge conflicts …` — as above.
 - Anything else under `[reviewer]` is read as findings: numbered, each with the evidence you

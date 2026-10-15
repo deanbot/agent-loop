@@ -36,9 +36,10 @@ post nothing, wait ~120s. Otherwise the full review:
    --comments`), `gh pr diff <n>`, new files whole (`git fetch origin pull/<n>/head:pr-<n>`,
    `git show pr-<n>:<path>`), and the project's `AGENTS.md`. Fetch first, then write.
 2. Verify the acceptance criteria. For each: a named test that asserts it, **and** that test is
-   in the CI gate's scope (a test outside the gate is a dead test, no evidence); or an operator
-   confirmation on the PR for "operator confirms" criteria; or missing. The executor's table is a
-   pointer, not proof: open the cited tests.
+   in the CI gate's scope (a test outside the gate is a dead test, no evidence); or, for one only
+   a human can check, exact steps in the PR body (none is a finding); or missing. A PR that must
+   record the operator's results is missing that criterion until they are in it. The executor's
+   table is a pointer, not proof: open the cited tests.
 3. Verify the code with evidence you produced: run a probe in your clone (the project's test
    runner on a throwaway test, a script), try to break it (boundaries, adversarial input, the
    empty case), confirm a criterion's test fails when its behaviour is broken, check `main`
@@ -48,9 +49,9 @@ post nothing, wait ~120s. Otherwise the full review:
    - findings, numbered — each one claim, why, evidence (the probe and its output), which
      criterion or rule it breaks, the concrete fix and the regression test to add;
    - or `[reviewer] LGTM — <sha> against #<M>, CI <green | pending>.` when every criterion a test
-     can prove has one and you have no findings. Criteria only the operator can confirm do not
-     hold it back: list them in the LGTM under "Before you merge" with the exact steps; the merge
-     is the confirmation. CI is not a precondition (the executor's poll gates `MERGE_READY` on it
+     can prove has one and you have no findings. Criteria only the operator can check by hand
+     do not hold it back: list them in the LGTM under "Before you merge" with the exact steps; the
+     operator confirms by a comment or by merging. CI is not a precondition (the executor's poll gates `MERGE_READY` on it
      and nothing re-triggers you when a check finishes); a red check caused by the PR is a finding.
    - or, for a decision you cannot review without, a standalone `[reviewer] Question: <one line>`
      with two or three lines of context and `Reply with: …`; add the `needs-operator` label and

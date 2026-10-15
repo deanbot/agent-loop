@@ -37,9 +37,10 @@ For each criterion:
 - **Code-verifiable** → a test asserts it directly, **and** CI runs that test. Find the gate (CI
   workflow, `justfile`, `package.json` scripts) and the runner's file scope; a test file outside
   the scope is a dead test: ❌ with the note "test exists (`<file>`) but is not run by `<gate>`".
-- **Operator confirms** → only a human or a real device can observe it. The PR body must give the
-  exact steps (if not, ❌). It does not block: it is listed in the PASS under "Before you merge" and
-  the merge is the confirmation.
+- **By hand** → only a human or a real device can observe it. The PR body must give the exact
+  steps (if not, ❌). It does not block: it is listed in the PASS under "Before you merge", and the
+  operator confirms by a comment or by merging. The exception is a PR that must record the
+  operator's results, such as measurements: until they are in the PR, ❌.
 - **Missing** → ❌.
 
 A green suite is not evidence; the specific assertion is.
@@ -57,7 +58,7 @@ All criteria evidenced:
 | Criterion | Evidence | Status |
 |---|---|---|
 | <criterion> | `<test file>::<test>` | ✅ |
-| <criterion> | operator confirms before merge: <steps> | ☑ |
+| <criterion> | by hand, before merge: <steps> | ☑ |
 
 Before you merge: <criterion> — <exact steps>; expect <what>.
 ```
