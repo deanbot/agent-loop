@@ -13,6 +13,8 @@ complexity: intermediate
 > or external cron. Full QA prompt: `adapters/generic/qa.md` in the agent-loop repo.
 > Copy it here and adapt when Kiro's scheduling model is understood.
 
+**Prerequisite:** the project's `## Agent loop` block has `qa-gate: on`; otherwise stop — the project runs without the QA gate and the reviewer does this pass.
+
 Follow the QA prompt in `adapters/generic/qa.md` from the agent-loop repo.
 
 One cycle = one invocation. Between cycles: wait ~120s (NONE/MERGE_CONFLICT) or ~300s (after verdict).

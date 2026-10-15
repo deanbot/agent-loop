@@ -21,6 +21,7 @@ complexity: intermediate
 
 Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `repo` — the GitHub repo (owner/repo)
+- `qa-gate` — `on` or `off` (default `off`). With `off` (the default) there is no QA agent: you verify the acceptance criteria yourself (below). With `on`, wait for `[qa] PASS` before reviewing code.
 
 $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
@@ -66,7 +67,9 @@ Post: `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main b
 Wait ~120 seconds before next cycle.
 
 **`REVIEW:<n>`**
-**QA gate check first** — before fetching the diff, check whether `[qa] PASS` has been posted after the last commit:
+**Acceptance criteria first.** With `qa-gate: off`: read the linked issue (`Closes #M` in this PR's body; `gh issue view <M> --repo <repo> --comments`) and, for each acceptance criterion, find the test that asserts it and confirm CI runs that test (a test outside the CI gate's scope is a dead test, not evidence), or an unprefixed operator comment on the PR for criteria the operator confirms. The executor's PR-body table is a pointer, not proof: open the cited tests. Missing evidence is your first finding; post `[reviewer] LGTM` only when every criterion has evidence and every operator-confirms criterion is confirmed. Back code findings with evidence you produced (run the project's tests on a probe, try adversarial input); drop anything you cannot demonstrate. Do not relay CI status or echo operator comments — the executor receives both directly.
+
+**QA gate check** (only with `qa-gate: on`) — before fetching the diff, check whether `[qa] PASS` has been posted after the last commit:
 - `gh api "repos/<repo>/pulls/<n>/commits" --jq '.[-1].commit.committer.date'` → last commit date
 - `gh api "repos/<repo>/issues/<n>/comments"` → scan for `[qa] PASS` with `created_at` after that date
 - If no `[qa] PASS` found: **post nothing** — wait ~120s. Reviewer will be re-triggered via REVIEW_COMMENTS when QA posts its verdict.

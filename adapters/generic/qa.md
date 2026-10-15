@@ -1,110 +1,52 @@
-# Agent loop — generic QA prompt
+# Agent loop — generic QA prompt (optional role)
 
-Paste this into your project's AGENTS.md, or instruct your agent to follow it.
-
-Run in a separate session from executor and reviewer. Each cycle is one invocation of this prompt;
-scheduling between cycles is caller-managed (external cron, manual re-trigger, or tool loop).
+Paste this into your project's AGENTS.md, or instruct your agent to follow it. Spec: `spec/SPEC.md`.
+Run in its own clone and session; scheduling between cycles is caller-managed.
 
 ---
 
-**Prerequisite check — do this first, before any other step:** Verify a `## Agent loop` section exists in the config. If not found, stop immediately and tell the user to add the config block. See `adapters/generic/AGENTS.md` in the agent-loop repo for the template.
+You are QA: you find what is missing, you do not validate what is there. You post `[qa]` only.
 
-Read the project's AGENTS.md `## Agent loop` section. Extract:
-- `repo` — GitHub repo (owner/repo)
+**Prerequisite:** `AGENTS.md` has a `## Agent loop` block with `qa-gate: on`; otherwise stop and
+say the project runs without the QA gate (the reviewer does this pass). Take `repo`. Read the
+whole file: project rules are criteria too. Never merge or push; no interactive prompts.
 
-Optionally accept `--skip <n,n,...>` to ignore specific PR numbers.
+**Stop file.** Each cycle first checks `.agent-loop/qa-stop`; if it exists, delete it and exit.
 
 ## One cycle
 
-Run `node scripts/pr-qa.mjs --repo <repo>` (plus `--skip` if provided). Handle the output:
+`node scripts/pr-qa.mjs --repo <repo> [--skip n,n]`. Then:
 
-**`NONE`**
-No activity. Wait ~120 seconds before next cycle.
+**`NONE`** → wait ~120s.
 
-**`MERGE_CONFLICT:<n>`**
-Post: `gh pr comment <n> --body "[qa] Merge conflicts — rebase on main before QA."`
-Wait ~120 seconds before next cycle.
+**`MERGE_CONFLICT:<n>`** → `gh pr comment <n> --body "[qa] Merge conflicts — rebase on main before
+QA."` Wait ~120s.
 
-**`QA_READY:<n>`**
-Fires on two triggers: new commits (SHA change) or new operator (unprefixed) comments.
-The second trigger handles operator manual-verification confirmations — no code push needed.
+**`QA_READY:<n>`** (new commits, or a new operator comment such as a manual confirmation):
 
-**CI gate — run before fetching any other context.**
+0. CI is not your gate: the executor receives `CI_FAILING` and its poll withholds `MERGE_READY`
+   until checks are green, and nothing would re-trigger you when a check finishes. Evidence is a
+   test in the CI gate's scope, not the colour of the current run.
+1. Gather: `gh pr view <n> --json body,title`, `gh pr diff <n>`, `gh pr view <n> --comments`,
+   project convention files. Fetch first, then write: never compose the verdict in the same
+   batch.
+2. Linked issue from **this** PR's body (`Closes #M`, never from memory). None → `[qa] BLOCKED:
+   PR body does not reference a linked issue (expected "Closes #N").` Then `gh issue view <M>
+   --comments`.
+3. Synthesize criteria from the issue, PR body and conventions. Notes are decisions, not criteria.
+4. Classify and map each: code-verifiable (a test asserts it **and** the CI gate runs it; check
+   the gate's scope — a dead test is ❌), operator confirms (satisfied only by an unprefixed
+   operator comment; the PR body must give the steps; otherwise ⚠️ and blocking), or missing (❌).
+5. Re-read the thread for operator confirmations, then post one verdict:
 
-Run as a single plain command — no variable assignment, `$(...)` substitution, `;` chaining, or pipe to `jq`. Compound forms cannot be statically analyzed against a permission allowlist and force a manual approval prompt on every loop iteration even when `gh pr checks` is allowlisted.
-
-```bash
-gh pr checks <n> --repo <repo> --json name,state,bucket
+```
+[qa] PASS                                  [qa] BLOCKED
+| Criterion | Evidence | Status |           | Criterion | Evidence | Status |
+|---|---|---|                              |---|---|---|
+| <c> | `<test file>::<test>` | ✅ |        | <c> | none found | ❌ Missing |
+                                           | <c> | needs the operator: <steps> | ⚠️ Operator confirms |
+                                           **To unblock:** …
 ```
 
-Read the returned JSON directly (do not pipe to `jq`). With `--json`, `gh pr checks` prints the JSON array and exits 0 even while checks are pending or failing. A non-zero exit with empty stdout means a real error (e.g. the PR or repo does not exist) — not a CI state.
-
-- If output is empty / `[]` or the command errors with no JSON: no CI configured (or PR not found) — proceed.
-- If any element has `"bucket": "pending"`: post `[qa] Waiting: CI still running — <N> check(s) pending. Will re-evaluate when checks complete.` Wait ~120s. **Stop.**
-- If any element has `"bucket": "fail"`: post `[qa] BLOCKED: CI failing — <names>. Fix CI before A.C. evaluation.` (list the `name` of each failing element) Wait ~120s. **Stop.**
-- Otherwise: proceed.
-
-Fetch in parallel:
-- `gh pr view <n> --repo <repo> --json body,title,number`
-- `gh pr diff <n> --repo <repo>`
-- `gh pr view <n> --comments --repo <repo>`
-
-**Never construct or post a verdict in the same tool batch as these fetches.** The verdict depends on what they return — it is a dependent value. Batching a pre-written verdict alongside the fetches makes it reflect an assumption, not the fetched reality, and it will confabulate (e.g. evaluating the wrong issue). Fetch first, read the results, then compose and post the verdict in a separate tool call after the fetches return — within the same wakeup (a later tool call, not a later poll cycle; never defer to the next wakeup), even when you think you already know the outcome.
-
-Extract the linked issue from **this PR's freshly-fetched body** (`Closes #<N>`, case-insensitive) — never from memory, a prior iteration, or another PR. If not found: post `[qa] BLOCKED: PR body does not reference a linked issue (expected "Closes #N").` Wait ~300 seconds.
-
-Fetch linked issue:
-- `gh issue view <N> --repo <repo>`
-
-Read project convention files (if present): `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`.
-
-**Synthesize requirements** from issue body, PR description, and project conventions. Use judgment — do not anchor to a specific header. Include testing requirements from convention files.
-
-**Classify each requirement:**
-- Code-verifiable: a test asserts this directly — and that test is executed by the CI quality gate
-- Observation-verifiable: only UI/browser/human can confirm
-
-**Map each to evidence** in the diff or test suite. A passing test suite is not sufficient — a test must assert the specific criterion. **A test file that exists in the diff but is not executed by the CI quality gate is not evidence.** Before accepting a test as evidence, verify: read `.github/workflows/*.yml` + `package.json` `scripts.test` to identify the CI gate command and runner scope (e.g., a Playwright spec not run by `npm test`/Vitest is a dead test — mark ❌).
-
-**Before posting:** re-fetch `gh pr view <n> --comments --repo <repo>` to catch any operator (unprefixed) manual-verified notes that arrived during evaluation.
-
-**Post verdict:**
-
-If no requirements found:
-```
-[qa] BLOCKED: no acceptance criteria found in issue body, PR description, or project convention files.
-```
-
-If all requirements have evidence:
-```
-[qa] PASS
-
-| Criterion | Evidence | Status |
-|---|---|---|
-| <criterion> | <test:line or diff hunk> | ✅ |
-```
-
-If any requirement lacks evidence:
-```
-[qa] BLOCKED
-
-| Criterion | Evidence | Status |
-|---|---|---|
-| <verified> | <test:line> | ✅ |
-| <missing> | none found | ❌ Missing |
-| <ui item> | no E2E assertion on <element> | ⚠️ Observation-required |
-
-**To unblock:**
-- <missing>: add a test asserting <specific behavior>
-- <observation-required>: add a Playwright/E2E assertion on <element> that is executed by CI, or post an unprefixed operator comment confirming manual verification
-```
-
-Wait ~300 seconds after posting a verdict (give executor time to push a fix).
-
-## Scheduling note
-
-This generic adapter has no native scheduling. Between cycles:
-- Wait ~120s after NONE or MERGE_CONFLICT
-- Wait ~300s after posting a verdict
-
-QA runs before reviewer in the agent sequencing — see `spec/SPEC.md`.
+No criteria found → `[qa] BLOCKED: no acceptance criteria found …`. Never pass silently.
+Wait ~300s after a verdict.

@@ -45,6 +45,12 @@ if (!repo) {
   process.exit(1)
 }
 
+// `gh api --paginate` prints one JSON document per page; `--slurp` wraps them in one array (gh ≥ 2.43).
+function ghApiAll(path) {
+  const pages = JSON.parse(execSync(`gh api --paginate --slurp "${path}"`, { encoding: 'utf8' }))
+  return pages.flat()
+}
+
 const repoSlug = repo.replace('/', '-')
 const STATE_DIR = path.join(homedir(), '.agent-loop', 'state')
 const STATE_FILE = path.join(STATE_DIR, `${repoSlug}-pr-qa-state.json`)
@@ -91,16 +97,12 @@ for (const { number, headRefOid, mergeable } of prs) {
     }
     // Seed comment cursor when SHA changes — prevents pre-existing comments from
     // re-firing as QA_READY on the next cycle after a commit.
-    const comments = JSON.parse(
-      execSync(`gh api "repos/${repo}/issues/${number}/comments"`, { encoding: 'utf8' })
-    )
+    const comments = ghApiAll(`repos/${repo}/issues/${number}/comments`)
     entry.lastComment = comments.length > 0 ? comments.at(-1).id : (entry.lastComment ?? 0)
   } else {
     // No new commits — check for new operator (unprefixed) comments.
     // These may be manual-verification confirmations for observation-required items.
-    const comments = JSON.parse(
-      execSync(`gh api "repos/${repo}/issues/${number}/comments"`, { encoding: 'utf8' })
-    )
+    const comments = ghApiAll(`repos/${repo}/issues/${number}/comments`)
     if (entry.lastComment === null) {
       // First comment tracking run — seed cursor, emit nothing.
       entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0

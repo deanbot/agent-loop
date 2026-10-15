@@ -27,6 +27,7 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `in-progress-label` — label name for claiming issues (default: `in-progress`)
 - `blocked-label` — label name indicating a blocked issue to skip (default: `is-blocked`)
 - `quality-gates` — commands to run at each checkpoint
+- `qa-gate` — `on` or `off` (default `off`). With `on`, pass `--require-qa` to pr-poll.mjs and expect `[qa]` verdicts; with `off` the reviewer verifies acceptance criteria itself.
 - `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
 - `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
 
@@ -42,7 +43,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
 - If it succeeds: $ARGUMENTS is a PR — note linked issue from PR body (`Closes #<N>`), orient (step 6b), enter executor loop (step 7).
 - If it fails or $ARGUMENTS is empty: treat as issue number or pick next.
   - **Empty $ARGUMENTS:** run pick-next query (step 8), use result as issue number.
-  - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --json number,body --jq '[.[] | select(.body | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
+  - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
     - Not found: immediately before claiming, re-fetch: `gh issue view <N> --repo <repo> --json labels,author,authorAssociation --jq '{labels: [.labels[].name], login: .author.login, assoc: .authorAssociation}'`
       - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8. **Do not infer staleness — absence of an open PR is not evidence the claim is stale. The label is authoritative.**
@@ -116,7 +117,7 @@ Output the waiting status block:
 └─────────────────────────────────────┘
 ```
 
-Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` from the repo root **once per poll cycle**.
+Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` from the repo root **once per poll cycle** (append `--require-qa` when `qa-gate` is `on`). Your own `[executor]` posts are already filtered out by the script.
 
 **Loop invariant: every path through the signal handlers below ends with a wait before the next poll — no exceptions. MERGED and BLOCKED are the only exits.**
 
@@ -131,6 +132,7 @@ Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` from the repo root **once
 Signal handling:
 - if MERGED: `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, notify user, pick next item (step 8)
 - if MERGE_READY: display the waiting status block with "✅ Approved — operator merges when ready"; wait 60s, poll again
+- if CI_FAILING: a check failed on the current head (emitted once per commit, with names and links); read the failing log (`gh run view <id> --log-failed --repo <repo>`), fix at the root, run quality-gates, push once, post one `[executor] Pushed fix: <summary>`; a failure `main` shares or a documented flake: say so with evidence and re-run, never call a real failure a flake; wait 60s, poll again
 - if NEW_REVIEW_SUBMISSION with CHANGES_REQUESTED: read full thread, collect ALL unaddressed `[reviewer]` findings, address every one in code, push once, post single `gh pr comment <PR> --body "[executor] Pushed fix: <summary>"` — no partial comments mid-batch; wait 60s, poll again
 - if NEW_REVIEW_SUBMISSION with COMMENTED: answer via `gh pr comment`; wait 60s, poll again
 - if NEW_INLINE_COMMENT or NEW_COMMENT: skip own `[executor]` posts; operator (unprefixed) — fix or answer; `[reviewer]` — treat as CHANGES_REQUESTED (batch all, fix all, push once, one summary comment); `[qa] BLOCKED` — address every missing criterion listed in the checklist (add tests or implementation), push once, post `[executor] Pushed fix: addressed QA findings — <summary>`; wait 60s, poll again
@@ -140,6 +142,6 @@ Signal handling:
 
 ## Pick next item (step 8)
 
-`gh issue list --state open --repo <repo> --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and (index("<blocked-label>") | not))) | first'`
+`gh issue list --state open --repo <repo> --limit 200 --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and (index("<blocked-label>") | not))) | first'`
 
-If result found: restart from detect input type with that issue number. If none: STOP and notify user.
+Take the first result whose dependencies (`Depends on #a, #b` in the body) are all closed (`gh issue view <a> --repo <repo> --json state`); skip the others. If one is found: restart from detect input type with that issue number. If none: STOP and notify user.

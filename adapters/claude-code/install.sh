@@ -1,68 +1,16 @@
 #!/usr/bin/env bash
-set -e
+# Install the agent-loop plugin for Claude Code (user scope). Run once per machine.
+# Per-project setup (labels, permissions, role marker) is `/agent-loop:setup <role>` inside
+# each clone, or adapters/claude-code/setup-project.sh.
+set -euo pipefail
 
 echo "Installing agent-loop for Claude Code..."
-claude plugin marketplace add agent-loop deanbot/agent-loop
-claude plugin install agent-loop@agent-loop
-echo ""
-echo "Done. Add to your project's AGENTS.md:"
-echo ""
-echo "  ## Agent loop"
-echo "  repo: owner/repo"
-echo "  in-progress-label: in-progress"
-echo "  quality-gates: npm test && npm run lint"
-echo ""
-echo "Then add .agent-loop/ to your project's .gitignore:"
-echo ""
-echo "  echo '.agent-loop/' >> .gitignore"
-echo ""
-
-# Add agent-loop allowlist to project settings.local.json.
-# Covers: gh CLI, polling scripts, sentinel check/write/cleanup.
-SETTINGS=".claude/settings.local.json"
-AGENT_LOOP_PATTERNS='[
-  "Bash(gh *)",
-  "Bash(node ~/.claude/plugins/marketplaces/agent-loop/scripts/*)",
-  "Bash(find .agent-loop*)",
-  "Bash(rm .agent-loop/*)",
-  "Bash(mkdir -p .agent-loop*)"
-]'
-
-python3 - <<'PYEOF'
-import json, os, sys
-
-settings = ".claude/settings.local.json"
-patterns = [
-    "Bash(gh *)",
-    "Bash(node ~/.claude/plugins/marketplaces/agent-loop/scripts/*)",
-    "Bash(find .agent-loop*)",
-    "Bash(rm .agent-loop/*)",
-    "Bash(mkdir -p .agent-loop*)",
-]
-
-os.makedirs(".claude", exist_ok=True)
-
-d = {}
-if os.path.exists(settings):
-    with open(settings) as f:
-        d = json.load(f)
-
-allow = d.setdefault("permissions", {}).setdefault("allow", [])
-added = []
-for p in patterns:
-    if p not in allow:
-        allow.append(p)
-        added.append(p)
-
-with open(settings, "w") as f:
-    json.dump(d, f, indent=2)
-    f.write("\n")
-
-if added:
-    print(f"Added {len(added)} agent-loop permission(s) to {settings}")
-else:
-    print(f"{settings} already up to date")
-PYEOF
-
-echo ""
-echo "Then use: /agent-loop:start-executor  /agent-loop:start-reviewer  /agent-loop:start-qa"
+claude plugin marketplace add agent-loop deanbot/agent-loop 2>/dev/null || claude plugin marketplace update agent-loop
+claude plugin install agent-loop@agent-loop 2>/dev/null || claude plugin update agent-loop@agent-loop
+echo
+echo "Installed. In each project clone that hosts a role, run inside Claude Code:"
+echo "  /agent-loop:setup executor     (the clone the executor works in)"
+echo "  /agent-loop:setup reviewer     (the clone the reviewer works in)"
+echo "  /agent-loop:setup operator     (your own clone; no role marker)"
+echo
+echo "Then add the '## Agent loop' block to the project's AGENTS.md if setup says it is missing."
