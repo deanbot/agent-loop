@@ -57,9 +57,12 @@ same script with `--wait`, in the background. The waiter polls GitHub every 30 s
 recording anything, and exits as soon as a run would have news (or after 25 minutes); its exit
 wakes you. Any wakeup is a continuation: run the cycle.
 
-A waiter's task notification ending in **exit code 3** is the exception: another waiter is still
-alive (it printed `WATCHER_RUNNING`). Run nothing and start no waiter; only call the
-`ScheduleWakeup` from step 5.
+A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
+is still alive (it printed `WATCHER_RUNNING`). Run nothing and start no waiter; only call the
+`ScheduleWakeup` from step 5. Any **other failed exit** means the waiter itself broke (a usage
+error, a broken install): name it in the status line, run the cycle, but end it with
+`ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
+again, so a failure that repeats costs one turn per five minutes, not one per second.
 
 1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> $ARGUMENTS`, in the foreground,
    once per cycle. One line, space-separated signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`,

@@ -80,10 +80,15 @@ recording anything, and exits as soon as a run would have news (or when `--max` 
 wakes you. A wakeup is a continuation, not a fresh start: skip detection and orientation and run
 the cycle.
 
-Two notifications are not poll cycles: a waiter's notification ending in **exit code 3** (another
-waiter is still alive: run nothing, start no waiter, only call the `ScheduleWakeup` from step 5),
-and one from another background command such as a test run (read its output and continue the work
-it belongs to).
+A notification from another background command, such as a test run, is not a poll cycle: read its
+output and continue the work it belongs to.
+
+A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
+is still alive (it printed `WATCHER_RUNNING`). Run nothing and start no waiter; only call the
+`ScheduleWakeup` from step 5. Any **other failed exit** means the waiter itself broke (a usage
+error, a broken install): name it in the status line, run the cycle, but end it with
+`ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
+again, so a failure that repeats costs one turn per five minutes, not one per second.
 
 Below, `<poll>` is `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR>`, plus
 `--require-qa` when `qa-gate` is `on`.

@@ -157,7 +157,7 @@ export async function runSignalScript({ argv, usage, stateFile, key, pass }) {
   if (wait === null) {
     const gh = memoGh()
     const before = own(readOr(stateFile, null), key)
-    const out = pass({ gh, save: (text) => writeFileSync(stateFile, text), dry: false })
+    const out = pass({ gh, save: (text) => writeAtomic(stateFile, text), dry: false })
     const changed = own(readOr(stateFile, null), key) !== before
     const baseline = changed ? fingerprint(dryPass(pass, gh).out) : fingerprint(out)
     writeAtomic(waitFile, JSON.stringify({ baseline }))
@@ -178,7 +178,8 @@ export async function runSignalScript({ argv, usage, stateFile, key, pass }) {
     }
   }
   process.on('exit', release)
-  // A stopped waiter (TaskStop, Ctrl-C) prints nothing and leaves through 'exit', releasing the lock.
+  // A stopped waiter (killed by its harness, Ctrl-C) prints nothing and leaves through 'exit',
+  // releasing the lock.
   const signalCodes = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }
   for (const [sig, code] of Object.entries(signalCodes)) process.on(sig, () => process.exit(128 + code))
 

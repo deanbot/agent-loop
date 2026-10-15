@@ -47,9 +47,14 @@ questions and do not block (see reference/evaluate.md).
 Each cycle runs `pr-qa.mjs` once, handles its signals, and ends by starting a **waiter**: the same
 script with `--wait`, in the background, which polls every 30 seconds without recording anything
 and exits as soon as a run would have news (or after 25 minutes). Its exit wakes you. Any wakeup
-is a continuation: run the cycle. Except: a waiter's notification ending in **exit code 3** means
-another waiter is still alive; run nothing, start no waiter, only call the `ScheduleWakeup` from
-step 5.
+is a continuation: run the cycle.
+
+A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
+is still alive (it printed `WATCHER_RUNNING`). Run nothing and start no waiter; only call the
+`ScheduleWakeup` from step 5. Any **other failed exit** means the waiter itself broke (a usage
+error, a broken install): name it in the status line, run the cycle, but end it with
+`ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
+again, so a failure that repeats costs one turn per five minutes, not one per second.
 
 1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-qa.mjs --repo <repo> $ARGUMENTS`, in the foreground, once
    per cycle. Signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`, `QA_READY:<n>` (new commits, or

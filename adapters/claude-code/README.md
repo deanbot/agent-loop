@@ -62,8 +62,10 @@ background command exits, and that wake runs an ordinary cycle, so a handoff wai
 seconds and an idle role takes one model turn per 25 minutes instead of one every minute or two.
 The skill never reads the waiter's output (the notification carries only an output-file path,
 outside the project), and a session that dies before handling a wake loses nothing: the state was
-never written. A waiter that finds another alive exits with code 3, which the notification shows;
-that wake only re-schedules the fallback.
+never written. A waiter that finds another alive exits with code 3, which the notification shows
+("failed with exit code 3"); that wake only re-schedules the fallback. Any other failed waiter
+(a usage error, a broken install) makes the next cycle end with a 300-second `ScheduleWakeup`
+instead of a waiter, so a persistent failure cannot spin the session.
 
 The fallback fires only if no waiter woke the session; a new `ScheduleWakeup` replaces the
 pending one, so it never stacks. "stop" ends the waiter with `TaskStop` (which wakes nothing) and

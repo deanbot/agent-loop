@@ -334,9 +334,13 @@ the waiter's exit and its next run.
 - A failed poll (network, rate limit, auth) is reported on stderr and retried on the next
   interval.
 
-Adapters whose tool wakes the agent when a background process exits (Claude Code) start a waiter
-at the end of each cycle and keep a timer only as a fallback; adapters driven by cron or by hand
-keep one-shot runs, or chain them: `node pr-watch.mjs --repo R --wait && node pr-watch.mjs --repo R`.
+Adapters whose harness wakes the agent when a background process exits start a waiter at the end
+of each cycle and keep a timer only as a fallback. Adapters driven by cron or by hand keep
+one-shot runs, or chain the two:
+
+```
+node pr-watch.mjs --repo R --wait && node pr-watch.mjs --repo R
+```
 
 ---
 
