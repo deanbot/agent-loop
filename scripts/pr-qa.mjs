@@ -21,6 +21,7 @@
  *   NONE <timestamp>         no PRs changed since last run
  *   QA_READY:<n>             PR has new commits or new operator comments; needs A.C. evaluation
  *   MERGE_CONFLICT:<n>       PR has new commits but branch conflicts with base
+ *   CLOSED:<n>               PR the script was tracking is no longer open (merged or closed); emitted once
  *
  * Multiple signals space-separated on one line.
  *
@@ -118,15 +119,20 @@ for (const { number, headRefOid, mergeable } of prs) {
   }
 }
 
-// Remove state for PRs no longer open
+// PRs the script was tracking that are no longer open (merged or closed): say so once, then forget them.
 const openNumbers = new Set(prs.map((p) => String(p.number)))
+const closed = []
 for (const key of Object.keys(state)) {
-  if (!openNumbers.has(key)) delete state[key]
+  if (!openNumbers.has(key)) {
+    closed.push(Number(key))
+    delete state[key]
+  }
 }
 
 writeFileSync(STATE_FILE, JSON.stringify(state))
 
 const signals = [
+  ...closed.sort((a, b) => a - b).map((n) => `CLOSED:${n}`),
   ...mergeConflicts.map((n) => `MERGE_CONFLICT:${n}`),
   ...qaReady.map((n) => `QA_READY:${n}`),
 ]

@@ -116,6 +116,7 @@ Script runs once, emits one line, exits. Persists state between runs.
 | `REVIEW:<n>` | PR #n has new commits (or no `[reviewer]` post yet) and is mergeable |
 | `MERGE_CONFLICT:<n>` | PR #n has new commits but conflicts with base |
 | `REVIEW_COMMENTS:<n>` | PR #n has new non-reviewer comments (timeline or inline) since last check |
+| `CLOSED:<n>` | PR #n, which the script was tracking, is no longer open (merged or closed); emitted once |
 
 Multiple signals space-separated on one line. `REVIEW:<n>` subsumes `REVIEW_COMMENTS:<n>` for the
 same PR. On first encounter of a PR with a `CHANGES_REQUESTED` formal review the signal is
@@ -123,6 +124,8 @@ suppressed. Comment cursors advance when the SHA changes and when `REVIEW_COMMEN
 
 ### Reviewer handling per signal
 
+- `CLOSED:<n>` — the operator merged or closed the PR; nothing to post. Say so in the status line
+  and forget the PR, whatever was outstanding on it.
 - `MERGE_CONFLICT:<n>` — post `[reviewer] Merge conflicts — rebase on main before review.`
 - `REVIEW:<n>` — with `qa-gate: on`, require a `[qa] PASS` newer than the head commit first; none
   → post nothing. Then the full review: gather the PR, its linked issue, the whole thread and the
@@ -154,9 +157,11 @@ push or a later finding.
 | `NONE <timestamp>` | No PRs changed since last run |
 | `QA_READY:<n>` | PR #n has new commits or a new operator comment; needs evaluation |
 | `MERGE_CONFLICT:<n>` | PR #n has new commits but conflicts with base |
+| `CLOSED:<n>` | PR #n, which the script was tracking, is no longer open; emitted once |
 
 ### QA handling per signal
 
+- `CLOSED:<n>` — nothing to post; note it and forget the PR.
 - `MERGE_CONFLICT:<n>` — post `[qa] Merge conflicts — rebase on main before QA.`
 - `QA_READY:<n>` — gather the PR body, diff, thread, the linked issue (from **this** PR's body)
   and project conventions; synthesize criteria; map each to a test that CI runs (evidence is the
@@ -304,7 +309,7 @@ unanswered inline threads are still surfaced).
 
 ## Spec versioning
 
-0.2 — QA optional, `CI_FAILING`, own-prefix filtering everywhere, newest-comment verdicts, CI
-gated in the executor's poll only, adapter-specific stop. Breaking
+0.2 — QA optional, `CI_FAILING`, `CLOSED`, own-prefix filtering everywhere, newest-comment
+verdicts, CI gated in the executor's poll only, adapter-specific stop. Breaking
 changes to signal format or prefix convention increment the version. Adapters note which version
 they implement. `scripts/test/run.mjs` holds the contract tests for the three scripts.
