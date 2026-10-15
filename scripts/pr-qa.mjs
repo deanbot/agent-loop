@@ -15,9 +15,9 @@
  * produce SHA changes; reviewer findings are irrelevant to A.C. evaluation).
  *
  * Usage:
- *   node scripts/pr-qa.mjs --repo owner/repo [--skip <n,n,...>]
+ *   node scripts/pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--wait [secs] [--max secs]]
  *
- * Output — one line, then exits:
+ * Output — one line, then exits (with --wait: the first line that is news, see lib/wait.mjs):
  *   NONE <timestamp>         no PRs changed since last run
  *   QA_READY:<n>             PR has new commits or new operator comments; needs A.C. evaluation
  *   MERGE_CONFLICT:<n>       PR has new commits but branch conflicts with base
@@ -30,10 +30,12 @@
  *   lastComment — cursor for issues/{n}/comments; tracks operator comments only
  */
 
-import { execSync } from 'child_process'
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
+import { runSignalScript, usageError } from './lib/wait.mjs'
+
+const USAGE = 'pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--wait [secs] [--max secs]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -41,14 +43,11 @@ function arg(name) {
 }
 
 const repo = arg('--repo')
-if (!repo) {
-  process.stderr.write('Usage: pr-qa.mjs --repo owner/repo [--skip <n,n,...>]\n')
-  process.exit(1)
-}
+if (!repo) usageError(USAGE)
 
 // `gh api --paginate` prints one JSON document per page; `--slurp` wraps them in one array (gh ≥ 2.43).
-function ghApiAll(path) {
-  const pages = JSON.parse(execSync(`gh api --paginate --slurp "${path}"`, { encoding: 'utf8' }))
+function ghApiAll(gh, path) {
+  const pages = JSON.parse(gh(`gh api --paginate --slurp "${path}"`))
   return pages.flat()
 }
 
@@ -65,80 +64,80 @@ const skip = new Set(
     .map(Number)
 )
 
-let state = {}
-try {
-  state = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
-} catch {
-  // no prior state
-}
-
-const prs = JSON.parse(
-  execSync(`gh pr list --repo ${repo} --json number,headRefOid,mergeable --limit 50`, { encoding: 'utf8' })
-)
-
-const qaReady = []
-const mergeConflicts = []
-
-for (const { number, headRefOid, mergeable } of prs) {
-  if (skip.has(number)) {
-    state[number] = { sha: headRefOid, lastComment: state[number]?.lastComment ?? null }
-    continue
+function pass({ gh, save }) {
+  let state = {}
+  try {
+    state = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
+  } catch {
+    // no prior state
   }
 
-  if (!state[number]) state[number] = { sha: null, lastComment: null }
-  const entry = state[number]
+  const prs = JSON.parse(
+    gh(`gh pr list --repo ${repo} --json number,headRefOid,mergeable --limit 50`)
+  )
 
-  const shaChanged = entry.sha !== headRefOid
-  if (shaChanged) {
-    entry.sha = headRefOid
-    if (mergeable === 'CONFLICTING') {
-      mergeConflicts.push(number)
-    } else {
-      qaReady.push(number)
+  const qaReady = []
+  const mergeConflicts = []
+
+  for (const { number, headRefOid, mergeable } of prs) {
+    if (skip.has(number)) {
+      state[number] = { sha: headRefOid, lastComment: state[number]?.lastComment ?? null }
+      continue
     }
-    // Seed comment cursor when SHA changes — prevents pre-existing comments from
-    // re-firing as QA_READY on the next cycle after a commit.
-    const comments = ghApiAll(`repos/${repo}/issues/${number}/comments`)
-    entry.lastComment = comments.length > 0 ? comments.at(-1).id : (entry.lastComment ?? 0)
-  } else {
-    // No new commits — check for new operator (unprefixed) comments.
-    // These may be manual-verification confirmations for observation-required items.
-    const comments = ghApiAll(`repos/${repo}/issues/${number}/comments`)
-    if (entry.lastComment === null) {
-      // First comment tracking run — seed cursor, emit nothing.
-      entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
-    } else {
-      const newOperator = comments.filter(
-        (c) => c.id > entry.lastComment && !/^\[/.test(c.body ?? '')
-      )
-      if (newOperator.length > 0) {
+
+    if (!state[number]) state[number] = { sha: null, lastComment: null }
+    const entry = state[number]
+
+    const shaChanged = entry.sha !== headRefOid
+    if (shaChanged) {
+      entry.sha = headRefOid
+      if (mergeable === 'CONFLICTING') {
+        mergeConflicts.push(number)
+      } else {
         qaReady.push(number)
-        entry.lastComment = comments.length > 0 ? comments.at(-1).id : entry.lastComment
+      }
+      // Seed comment cursor when SHA changes — prevents pre-existing comments from
+      // re-firing as QA_READY on the next cycle after a commit.
+      const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
+      entry.lastComment = comments.length > 0 ? comments.at(-1).id : (entry.lastComment ?? 0)
+    } else {
+      // No new commits — check for new operator (unprefixed) comments.
+      // These may be manual-verification confirmations for observation-required items.
+      const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
+      if (entry.lastComment === null) {
+        // First comment tracking run — seed cursor, emit nothing.
+        entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
+      } else {
+        const newOperator = comments.filter(
+          (c) => c.id > entry.lastComment && !/^\[/.test(c.body ?? '')
+        )
+        if (newOperator.length > 0) {
+          qaReady.push(number)
+          entry.lastComment = comments.length > 0 ? comments.at(-1).id : entry.lastComment
+        }
       }
     }
   }
-}
 
-// PRs the script was tracking that are no longer open (merged or closed): say so once, then forget them.
-const openNumbers = new Set(prs.map((p) => String(p.number)))
-const closed = []
-for (const key of Object.keys(state)) {
-  if (!openNumbers.has(key)) {
-    closed.push(Number(key))
-    delete state[key]
+  // PRs the script was tracking that are no longer open (merged or closed): say so once, then forget them.
+  const openNumbers = new Set(prs.map((p) => String(p.number)))
+  const closed = []
+  for (const key of Object.keys(state)) {
+    if (!openNumbers.has(key)) {
+      closed.push(Number(key))
+      delete state[key]
+    }
   }
+
+  save(JSON.stringify(state))
+
+  const signals = [
+    ...closed.sort((a, b) => a - b).map((n) => `CLOSED:${n}`),
+    ...mergeConflicts.map((n) => `MERGE_CONFLICT:${n}`),
+    ...qaReady.map((n) => `QA_READY:${n}`),
+  ]
+
+  return signals.length === 0 ? `NONE ${new Date().toISOString()}\n` : signals.join(' ') + '\n'
 }
 
-writeFileSync(STATE_FILE, JSON.stringify(state))
-
-const signals = [
-  ...closed.sort((a, b) => a - b).map((n) => `CLOSED:${n}`),
-  ...mergeConflicts.map((n) => `MERGE_CONFLICT:${n}`),
-  ...qaReady.map((n) => `QA_READY:${n}`),
-]
-
-if (signals.length === 0) {
-  process.stdout.write(`NONE ${new Date().toISOString()}\n`)
-} else {
-  process.stdout.write(signals.join(' ') + '\n')
-}
+await runSignalScript({ argv: process.argv, usage: USAGE, stateFile: STATE_FILE, pass })

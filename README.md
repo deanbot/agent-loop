@@ -68,6 +68,9 @@ pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NON
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green (+ `[qa] PASS` with
 `qa-gate: on`). The operator merges.
 
+Each script runs once and exits. With `--wait` it becomes a waiter that polls in place and exits once
+a run would have news, so an agent can sleep until something happens instead of polling on a timer.
+
 Full protocol: [`spec/SPEC.md`](spec/SPEC.md). Contract tests: `node scripts/test/run.mjs`.
 
 ## Two roles or three?
@@ -138,7 +141,7 @@ scripts/              Tool-agnostic Node.js — the signal sources, and their co
 spec/                 Protocol definition — the contract between adapters
 .claude-plugin/       Claude Code plugin + marketplace manifests (plugin root = repo root)
 adapters/
-  claude-code/        First-class: skills, ScheduleWakeup loops, merge-guard hook, setup
+  claude-code/        First-class: skills, event-driven loops, merge-guard hook, setup
   generic/            AGENTS.md template and prompts, no scheduling assumptions
   kiro/               SKILL.md format, manual/cron scheduling
   gemini/             Stub

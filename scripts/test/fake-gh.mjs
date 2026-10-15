@@ -11,11 +11,17 @@
 //   checks    → gh pr checks N ... --json                    (array; null → "no checks reported", exit 1)
 //   prs       → gh pr list ... --json                        (array)
 //   prView    → gh pr view N ... --json                      (object)
+//   fail      → every call fails like a network error         (true)
 import { readFileSync, appendFileSync } from 'fs'
 
 const args = process.argv.slice(2)
 const fixture = JSON.parse(readFileSync(process.env.FAKE_GH_FIXTURE, 'utf8'))
 if (process.env.FAKE_GH_LOG) appendFileSync(process.env.FAKE_GH_LOG, args.join(' ') + '\n')
+
+if (fixture.fail) {
+  process.stderr.write('HTTP 502: Bad Gateway (https://api.github.com/)\n')
+  process.exit(1)
+}
 
 function out(v) {
   process.stdout.write(JSON.stringify(v ?? []))

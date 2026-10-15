@@ -1,7 +1,7 @@
 # agent-loop — Claude Code adapter
 
-Status: **implemented** (spec v0.2). First-class adapter: plugin format, `ScheduleWakeup` loops,
-a merge-guard hook, a setup skill.
+Status: **implemented** (spec v0.2). First-class adapter: plugin format, event-driven loops
+(background waiter + fallback `ScheduleWakeup`), a merge-guard hook, a setup skill.
 
 ## Layout
 
@@ -53,12 +53,25 @@ bump needed), then restart running loop sessions.
 
 ## Loop model
 
-Each cycle runs the signal script once, handles the signals, prints a status line and calls
-`ScheduleWakeup({ delaySeconds, noop, prompt, reason })`; the wakeup re-enters the loop. Delays:
-executor 60s; reviewer and QA 60s after posting findings (`[qa] BLOCKED`) or a question, 300s
-after LGTM or `[qa] PASS`, 120s otherwise; the shortest wins when a cycle touched several PRs.
-Wakeups fire on minute boundaries, so real delays run longer than requested. `stop: true` ends
-a loop.
+Each cycle runs the role's signal script once, handles the signals, prints a status line, then
+starts a **waiter** — the same script with `--wait 30 --max 1500`, under Bash
+`run_in_background` — and schedules a fallback `ScheduleWakeup({ delaySeconds: 1800, … })`. The
+waiter polls GitHub every 30 seconds without recording anything and exits as soon as a one-shot
+run would have news (spec: "Waiting for events"). Claude Code re-invokes the session when a
+background command exits, and that wake runs an ordinary cycle, so a handoff waits about 30
+seconds and an idle role takes one model turn per 25 minutes instead of one every minute or two.
+The skill never reads the waiter's output (the notification carries only an output-file path,
+outside the project), and a session that dies before handling a wake loses nothing: the state was
+never written. A waiter that finds another alive exits with code 3, which the notification shows;
+that wake only re-schedules the fallback.
+
+The fallback fires only if no waiter woke the session; a new `ScheduleWakeup` replaces the
+pending one, so it never stacks. "stop" ends the waiter with `TaskStop` (which wakes nothing) and
+the loop with `ScheduleWakeup({ stop: true })`. Verified in smoke sessions, bare and under
+`/loop`: a background exit re-invokes an idle session within seconds, a second `ScheduleWakeup`
+replaces the first, a background command outlives the 600-second foreground limit, and `TaskStop`
+produces no notification.
+
 `gh` 2.43 or newer is required (`gh api --slurp`). The
 loop also works when started as `/loop /agent-loop:start-reviewer` (Esc cancels a pending wakeup).
 Claude Code fires one fallback wakeup about 20 minutes after an iteration that forgot to

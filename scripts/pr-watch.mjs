@@ -12,9 +12,9 @@
  * treated as meaningful signals.
  *
  * Usage:
- *   node scripts/pr-watch.mjs --repo owner/repo [--skip <n,n,...>]
+ *   node scripts/pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--wait [secs] [--max secs]]
  *
- * Output — one line, then exits:
+ * Output — one line, then exits (with --wait: the first line that is news, see lib/wait.mjs):
  *   NONE <timestamp>              no PRs changed since last run
  *   REVIEW:<n>                    PR has new commits; ready for code review
  *   MERGE_CONFLICT:<n>            PR has new commits but branch has merge conflicts
@@ -33,10 +33,12 @@
  * already has a blocking review. A new commit re-triggers normally.
  */
 
-import { execSync } from 'child_process'
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
+import { runSignalScript, usageError } from './lib/wait.mjs'
+
+const USAGE = 'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--wait [secs] [--max secs]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -44,14 +46,11 @@ function arg(name) {
 }
 
 const repo = arg('--repo')
-if (!repo) {
-  process.stderr.write('Usage: pr-watch.mjs --repo owner/repo [--skip <n,n,...>]\n')
-  process.exit(1)
-}
+if (!repo) usageError(USAGE)
 
 // `gh api --paginate` prints one JSON document per page; `--slurp` wraps them in one array (gh ≥ 2.43).
-function ghApiAll(path) {
-  const pages = JSON.parse(execSync(`gh api --paginate --slurp "${path}"`, { encoding: 'utf8' }))
+function ghApiAll(gh, path) {
+  const pages = JSON.parse(gh(`gh api --paginate --slurp "${path}"`))
   return pages.flat()
 }
 
@@ -68,128 +67,123 @@ const skip = new Set(
     .map(Number)
 )
 
-let state = {}
-try {
-  state = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
-} catch {
-  // no prior state
-}
-
-// Migrate old state format: { [n]: sha_string } → { [n]: { sha, lastComment: null } }
-for (const key of Object.keys(state)) {
-  if (typeof state[key] === 'string') {
-    state[key] = { sha: state[key], lastComment: null }
-  }
-}
-
-const prs = JSON.parse(
-  execSync(`gh pr list --repo ${repo} --json number,headRefOid,mergeable --limit 50`, { encoding: 'utf8' })
-)
-
-const toReview = []
-const mergeConflicts = []
-const reviewComments = []
-
-for (const { number, headRefOid, mergeable } of prs) {
-  if (skip.has(number)) {
-    state[number] = { sha: headRefOid, lastComment: state[number]?.lastComment ?? null }
-    continue
+function pass({ gh, save }) {
+  let state = {}
+  try {
+    state = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
+  } catch {
+    // no prior state
   }
 
-  if (!state[number]) state[number] = { sha: null, lastComment: null }
-  const entry = state[number]
-  const isNew = entry.sha === null
-
-  // SHA check
-  const shaChanged = entry.sha !== headRefOid
-  if (shaChanged) {
-    const prData = JSON.parse(
-      execSync(
-        `gh pr view ${String(number)} --repo ${repo} --json reviewDecision`,
-        { encoding: 'utf8' }
-      )
-    )
-    entry.sha = headRefOid
-    if (!(isNew && prData.reviewDecision === 'CHANGES_REQUESTED')) {
-      if (mergeable === 'CONFLICTING') {
-        mergeConflicts.push(number)
-      } else {
-        toReview.push(number)
-      }
+  // Migrate old state format: { [n]: sha_string } → { [n]: { sha, lastComment: null } }
+  for (const key of Object.keys(state)) {
+    if (typeof state[key] === 'string') {
+      state[key] = { sha: state[key], lastComment: null }
     }
-    // Advance comment cursors — reviewer reads thread during REVIEW, so seeding here
-    // prevents pre-REVIEW comments from re-firing as REVIEW_COMMENTS next run.
-    const comments = ghApiAll(`repos/${repo}/issues/${number}/comments`)
-    const inlineComments = ghApiAll(`repos/${repo}/pulls/${number}/comments`)
-    entry.lastComment = comments.length > 0 ? comments.at(-1).id : (entry.lastComment ?? 0)
-    entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : (entry.lastReviewComment ?? 0)
-  } else {
-    // No new commits — check for new non-reviewer comments (timeline + inline review)
-    const comments = ghApiAll(`repos/${repo}/issues/${number}/comments`)
-    const inlineComments = ghApiAll(`repos/${repo}/pulls/${number}/comments`)
-    const hasReviewerPost = comments.some((c) => /^\[reviewer\]/.test(c.body ?? ''))
-    if (!hasReviewerPost) {
-      // Reviewer has never posted — PR needs initial review regardless of session
-      if (mergeable === 'CONFLICTING') {
-        mergeConflicts.push(number)
-      } else {
-        toReview.push(number)
+  }
+
+  const prs = JSON.parse(
+    gh(`gh pr list --repo ${repo} --json number,headRefOid,mergeable --limit 50`)
+  )
+
+  const toReview = []
+  const mergeConflicts = []
+  const reviewComments = []
+
+  for (const { number, headRefOid, mergeable } of prs) {
+    if (skip.has(number)) {
+      state[number] = { sha: headRefOid, lastComment: state[number]?.lastComment ?? null }
+      continue
+    }
+
+    if (!state[number]) state[number] = { sha: null, lastComment: null }
+    const entry = state[number]
+    const isNew = entry.sha === null
+
+    // SHA check
+    const shaChanged = entry.sha !== headRefOid
+    if (shaChanged) {
+      const prData = JSON.parse(gh(`gh pr view ${String(number)} --repo ${repo} --json reviewDecision`))
+      entry.sha = headRefOid
+      if (!(isNew && prData.reviewDecision === 'CHANGES_REQUESTED')) {
+        if (mergeable === 'CONFLICTING') {
+          mergeConflicts.push(number)
+        } else {
+          toReview.push(number)
+        }
       }
-      entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
-      entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : 0
-    } else if (entry.lastComment === null) {
-      // First comment tracking run — seed cursors, emit nothing
-      entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
-      entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : 0
+      // Advance comment cursors — reviewer reads thread during REVIEW, so seeding here
+      // prevents pre-REVIEW comments from re-firing as REVIEW_COMMENTS next run.
+      const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
+      const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${number}/comments`)
+      entry.lastComment = comments.length > 0 ? comments.at(-1).id : (entry.lastComment ?? 0)
+      entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : (entry.lastReviewComment ?? 0)
     } else {
-      const newNonAgent = comments.filter(
-        (c) => c.id > entry.lastComment && !/^\[reviewer\]/.test(c.body ?? '')
-      )
-      const lastReviewComment = entry.lastReviewComment ?? 0
-      const newInlineNonAgent = inlineComments.filter(
-        (c) => c.id > lastReviewComment && !/^\[reviewer\]/.test(c.body ?? '')
-      )
-      // Surface unanswered top-level inline comments even if cursor has passed them
-      const replyToIds = new Set(inlineComments.filter((c) => c.in_reply_to_id).map((c) => c.in_reply_to_id))
-      const unansweredInline = inlineComments.filter(
-        (c) =>
-          !c.in_reply_to_id &&
-          !/^\[reviewer\]/.test(c.body ?? '') &&
-          !/^\[executor\]/.test(c.body ?? '') &&
-          !replyToIds.has(c.id) &&
-          !newInlineNonAgent.some((n) => n.id === c.id)
-      )
-      if (newNonAgent.length > 0 || newInlineNonAgent.length > 0 || unansweredInline.length > 0) {
-        reviewComments.push(number)
-        entry.lastComment = comments.length > 0 ? comments.at(-1).id : entry.lastComment
-        entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : lastReviewComment
+      // No new commits — check for new non-reviewer comments (timeline + inline review)
+      const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
+      const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${number}/comments`)
+      const hasReviewerPost = comments.some((c) => /^\[reviewer\]/.test(c.body ?? ''))
+      if (!hasReviewerPost) {
+        // Reviewer has never posted — PR needs initial review regardless of session
+        if (mergeable === 'CONFLICTING') {
+          mergeConflicts.push(number)
+        } else {
+          toReview.push(number)
+        }
+        entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
+        entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : 0
+      } else if (entry.lastComment === null) {
+        // First comment tracking run — seed cursors, emit nothing
+        entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
+        entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : 0
+      } else {
+        const newNonAgent = comments.filter(
+          (c) => c.id > entry.lastComment && !/^\[reviewer\]/.test(c.body ?? '')
+        )
+        const lastReviewComment = entry.lastReviewComment ?? 0
+        const newInlineNonAgent = inlineComments.filter(
+          (c) => c.id > lastReviewComment && !/^\[reviewer\]/.test(c.body ?? '')
+        )
+        // Surface unanswered top-level inline comments even if cursor has passed them
+        const replyToIds = new Set(inlineComments.filter((c) => c.in_reply_to_id).map((c) => c.in_reply_to_id))
+        const unansweredInline = inlineComments.filter(
+          (c) =>
+            !c.in_reply_to_id &&
+            !/^\[reviewer\]/.test(c.body ?? '') &&
+            !/^\[executor\]/.test(c.body ?? '') &&
+            !replyToIds.has(c.id) &&
+            !newInlineNonAgent.some((n) => n.id === c.id)
+        )
+        if (newNonAgent.length > 0 || newInlineNonAgent.length > 0 || unansweredInline.length > 0) {
+          reviewComments.push(number)
+          entry.lastComment = comments.length > 0 ? comments.at(-1).id : entry.lastComment
+          entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : lastReviewComment
+        }
       }
     }
   }
-}
 
-// PRs the script was tracking that are no longer open (merged or closed): say so once, then forget
-// them. Without this a merged PR silently vanishes and the agent's status never acknowledges it.
-const openNumbers = new Set(prs.map((p) => String(p.number)))
-const closed = []
-for (const key of Object.keys(state)) {
-  if (!openNumbers.has(key)) {
-    closed.push(Number(key))
-    delete state[key]
+  // PRs the script was tracking that are no longer open (merged or closed): say so once, then forget
+  // them. Without this a merged PR silently vanishes and the agent's status never acknowledges it.
+  const openNumbers = new Set(prs.map((p) => String(p.number)))
+  const closed = []
+  for (const key of Object.keys(state)) {
+    if (!openNumbers.has(key)) {
+      closed.push(Number(key))
+      delete state[key]
+    }
   }
+
+  save(JSON.stringify(state))
+
+  const signals = [
+    ...closed.sort((a, b) => a - b).map((n) => `CLOSED:${n}`),
+    ...mergeConflicts.map((n) => `MERGE_CONFLICT:${n}`),
+    ...toReview.map((n) => `REVIEW:${n}`),
+    ...reviewComments.map((n) => `REVIEW_COMMENTS:${n}`),
+  ]
+
+  return signals.length === 0 ? `NONE ${new Date().toISOString()}\n` : signals.join(' ') + '\n'
 }
 
-writeFileSync(STATE_FILE, JSON.stringify(state))
-
-const signals = [
-  ...closed.sort((a, b) => a - b).map((n) => `CLOSED:${n}`),
-  ...mergeConflicts.map((n) => `MERGE_CONFLICT:${n}`),
-  ...toReview.map((n) => `REVIEW:${n}`),
-  ...reviewComments.map((n) => `REVIEW_COMMENTS:${n}`),
-]
-
-if (signals.length === 0) {
-  process.stdout.write(`NONE ${new Date().toISOString()}\n`)
-} else {
-  process.stdout.write(signals.join(' ') + '\n')
-}
+await runSignalScript({ argv: process.argv, usage: USAGE, stateFile: STATE_FILE, pass })

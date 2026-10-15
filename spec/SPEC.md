@@ -130,9 +130,10 @@ once. A verdict or a PR body never carries a question; it may point at one.
 exists) while it waits on the operator: a question is open, or `MERGE_READY` holds. The agent
 that asks adds it with the question and removes it on the operator's unprefixed reply. The
 executor adds it whenever it sees `MERGE_READY`, and removes it when it pushes, unless a question
-is still open. `pr-poll` reports `MERGE_READY` every cycle while it holds, so a label removed with
-an answered question comes back on the executor's next poll. `gh pr list --label needs-operator`
-shows everything waiting on the operator.
+is still open. `pr-poll` reports `MERGE_READY` on every run while it holds, so a label removed with
+an answered question comes back on the executor's next poll (an event-driven executor polls when
+the asking role posts its next verdict). `gh pr list --label needs-operator` shows everything
+waiting on the operator.
 
 **The agent's own terminal** says the same in its status line, and an adapter with a notification
 primitive sends one when a question is posted.
@@ -163,7 +164,8 @@ agents re-evaluate after every push.
 
 ## Reviewer signals (`pr-watch.mjs`)
 
-Script runs once, emits one line, exits. Persists state between runs.
+Script runs once, emits one line, exits. Persists state between runs. (`--wait` turns it into a
+waiter: see "Waiting for events" below.)
 
 | Signal | Meaning |
 |---|---|
@@ -245,9 +247,8 @@ merge" with its steps, and the operator confirms by a comment or by merging.
 
 ## Executor signals (`pr-poll.mjs`)
 
-Script runs once per poll cycle for one PR, emits signals and content blocks, exits.
-Usage: `pr-poll.mjs --repo owner/repo --pr <n> [--require-qa]`. Adapters pass `--require-qa`
-when `qa-gate: on`.
+Script runs once per poll cycle for one PR, emits signals and content blocks, exits. Usage: `pr-poll.mjs --repo owner/repo --pr <n> [--require-qa]`. Adapters
+pass `--require-qa` when `qa-gate: on`.
 
 | Signal | Meaning |
 |---|---|
@@ -304,9 +305,38 @@ shape and the label of "Operator attention" above.
 
 Every block parks the issue: remove `in-progress-label`, add `blocked-label`, post `[executor]
 BLOCKED: <reason>. To resume: remove the label and re-run on <PR or issue>.`, pick next. A question
-in the poll loop with no unprefixed reply after 10 consecutive `NONE` cycles parks the same way.
+in the poll loop with no unprefixed reply for about 10 minutes parks the same way (ten one-minute
+polls, or a cycle with no news after a `--wait --max 600` waiter).
 Resume: the operator removes `blocked-label` and re-runs the executor on the PR or issue; the
 executor removes any lingering `blocked-label` on resume.
+
+---
+
+## Waiting for events (`--wait`)
+
+All three scripts take `--wait [secs]` (poll interval, default 30) and `--max <secs>` (default
+1500), which turn the script into a **waiter**. Without `--wait` nothing changes.
+
+A waiter never writes state. Every interval it evaluates what a one-shot run would print; as soon
+as that is news it prints `PENDING` and exits 0, and the agent then runs the script one-shot, once,
+as in every other cycle. When `--max` passes first it prints `NONE <timestamp>` and exits 0. The
+signal format and the state contract are unchanged, and nothing is lost if the agent dies between
+the waiter's exit and its next run.
+
+- **News** is a non-`NONE` output that either would change the script's state (an event to
+  consume: a comment, a commit, a CI failure, a close) or differs from the **baseline**, what the
+  script reports while nothing happens. Each one-shot run records the baseline next to its state.
+  Standing signals (`MERGE_READY`, a re-surfaced live verdict or unanswered inline thread,
+  `REVIEW:<n>` for a PR with no reviewer post) are in the baseline, so they wake the agent when
+  they appear or change, not on every poll.
+- **One waiter per state file** (per PR for `pr-poll`). A second waiter while the first is alive
+  prints `WATCHER_RUNNING <pid>` and exits 3. A stopped waiter prints nothing.
+- A failed poll (network, rate limit, auth) is reported on stderr and retried on the next
+  interval.
+
+Adapters whose tool wakes the agent when a background process exits (Claude Code) start a waiter
+at the end of each cycle and keep a timer only as a fallback; adapters driven by cron or by hand
+keep one-shot runs, or chain them: `node pr-watch.mjs --repo R --wait && node pr-watch.mjs --repo R`.
 
 ---
 
@@ -348,7 +378,8 @@ own claim), and no further poll runs. See each adapter's README for its mechanis
 alongside the diff and raises only unanswered scope; it re-reads immediately before posting and
 drops the comment if the head moved.
 
-**Executor tight-poll loop.** Mitigation: the loop invariant (a wait after every cycle).
+**Executor tight-poll loop.** Mitigation: the loop invariant (a wait after every cycle); a
+waiter's baseline keeps standing signals from waking the agent on every poll.
 
 **Two executors on one issue.** Mitigation: the `in-progress-label` claim, re-fetched immediately
 before claiming; the label is authoritative.
@@ -366,9 +397,11 @@ refuse to run in a clone marked for another role.
 | `pr-poll.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-poll-state.json` |
 | `pr-qa.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json` |
 
-Per-repo paths prevent collisions when running agent-loop on several repos. State is safe to
-delete: the next run re-seeds cursors and treats current activity as baseline (live verdicts and
-unanswered inline threads are still surfaced).
+Per-repo paths prevent collisions when running agent-loop on several repos. Next to each state
+file, `<state>-wait.json` holds the baseline a one-shot run records for waiters and
+`<state>-wait.lock` the running waiter's pid (`pr-poll` adds `-<pr>` to both names). State is safe to delete: the next run
+re-seeds cursors and treats current activity as baseline (live verdicts and unanswered inline
+threads are still surfaced).
 
 ---
 
@@ -377,6 +410,7 @@ unanswered inline threads are still surfaced).
 0.2 — QA optional, `CI_FAILING`, `CLOSED`, own-prefix filtering everywhere, newest-comment
 verdicts, CI gated in the executor's poll only, adapter-specific stop. Later in 0.2, with no
 change to signal format: the `Question` kind, the `needs-operator-label` key, hand checks that
-never block, and the retired `[reviewer] Verified` kind (tolerated by `pr-poll`). Breaking
+never block, the retired `[reviewer] Verified` kind (tolerated by `pr-poll`), and `--wait` waiters
+(their own output, `PENDING` / `NONE` / `WATCHER_RUNNING <pid>`, never a signal line). Breaking
 changes to signal format or prefix convention increment the version. Adapters note which version
 they implement. `scripts/test/run.mjs` holds the contract tests for the three scripts.
