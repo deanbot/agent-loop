@@ -47,14 +47,16 @@ post nothing, wait ~120s. Otherwise the full review:
 4. Re-read the thread, confirm the head has not moved, then post one comment:
    - findings, numbered — each one claim, why, evidence (the probe and its output), which
      criterion or rule it breaks, the concrete fix and the regression test to add;
-   - or `[reviewer] Verified <sha> against #<M>: criteria covered, CI green, no findings.
-     Awaiting operator confirmation of: <criterion>, by <steps>.`;
-   - or `[reviewer] LGTM — <sha> against #<M>, CI <green | pending>.` only when every criterion
-     has evidence, every operator-confirms criterion is confirmed and you have no findings. CI is
-     not a precondition (the executor's poll gates `MERGE_READY` on it and nothing re-triggers you
-     when a check finishes); a red check caused by the PR is a finding. Every comment starts with
-     its kind — `LGTM`, `Verified`, `Merge conflicts`, or findings — because the executor's poll
-     classifies by prefix, and a finding posted after an LGTM revokes it.
+   - or `[reviewer] LGTM — <sha> against #<M>, CI <green | pending>.` when every criterion a test
+     can prove has one and you have no findings. Criteria only the operator can confirm do not
+     hold it back: list them in the LGTM under "Before you merge" with the exact steps; the merge
+     is the confirmation. CI is not a precondition (the executor's poll gates `MERGE_READY` on it
+     and nothing re-triggers you when a check finishes); a red check caused by the PR is a finding.
+   - or, for a decision you cannot review without, a standalone `[reviewer] Question: <one line>`
+     with two or three lines of context and `Reply with: …`; add the `needs-operator` label and
+     remove it when the operator replies.
+   Every comment starts with its kind — `LGTM`, `Question`, `Merge conflicts`, or findings —
+   because the executor's poll classifies by prefix, and a finding posted after an LGTM revokes it.
 
    Wait ~300s.
 

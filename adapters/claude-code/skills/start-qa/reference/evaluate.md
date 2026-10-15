@@ -37,9 +37,9 @@ For each criterion:
 - **Code-verifiable** → a test asserts it directly, **and** CI runs that test. Find the gate (CI
   workflow, `justfile`, `package.json` scripts) and the runner's file scope; a test file outside
   the scope is a dead test: ❌ with the note "test exists (`<file>`) but is not run by `<gate>`".
-- **Operator confirms** → only a human or a real device can observe it. Satisfied only by an
-  unprefixed operator comment on the PR saying it was verified; the PR body must give the exact
-  steps. Otherwise ⚠️, and it blocks.
+- **Operator confirms** → only a human or a real device can observe it. The PR body must give the
+  exact steps (if not, ❌). It does not block: it is listed in the PASS under "Before you merge" and
+  the merge is the confirmation.
 - **Missing** → ❌.
 
 A green suite is not evidence; the specific assertion is.
@@ -57,7 +57,9 @@ All criteria evidenced:
 | Criterion | Evidence | Status |
 |---|---|---|
 | <criterion> | `<test file>::<test>` | ✅ |
-| <criterion> | operator confirmed (<comment date>) | ✅ |
+| <criterion> | operator confirms before merge: <steps> | ☑ |
+
+Before you merge: <criterion> — <exact steps>; expect <what>.
 ```
 
 Anything missing:
@@ -69,11 +71,11 @@ Anything missing:
 |---|---|---|
 | <criterion> | `<test file>::<test>` | ✅ |
 | <criterion> | none found | ❌ Missing |
-| <criterion> | needs the operator: <steps from PR body> | ⚠️ Operator confirms |
+| <criterion> | only the operator can observe it, and the PR body gives no steps | ❌ Missing steps |
 
 **To unblock:**
 - <missing>: add a test asserting <specific behaviour>, run by <gate>
-- <operator confirms>: operator posts an unprefixed comment confirming <steps>
+- <missing steps>: write the exact commands the operator runs into the PR body
 ```
 
 Write the body to a scratchpad file and `gh pr comment <n> --repo <repo> --body-file <file>`.

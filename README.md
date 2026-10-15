@@ -108,7 +108,10 @@ rules. Needs `gh` 2.43+ and Node 18+.
 
 Run, one session per clone: `/agent-loop:start-executor [issue-or-PR]`,
 `/agent-loop:start-reviewer`, and with `qa-gate: on` `/agent-loop:start-qa`. Say `stop` to end a
-loop. Details: [`adapters/claude-code/README.md`](adapters/claude-code/README.md).
+loop. Your inbox: `gh pr list --label needs-operator` (an agent has a question for you, as a
+standalone comment ending in "Reply with:") and `gh pr list --label merge-ready` (reviewed and
+green; anything you confirm by hand is listed in the LGTM under "Before you merge"; you merge).
+Details: [`adapters/claude-code/README.md`](adapters/claude-code/README.md).
 
 > **Updating:** `claude plugin update agent-loop@agent-loop`, then restart loop sessions.
 

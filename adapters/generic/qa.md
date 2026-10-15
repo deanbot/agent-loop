@@ -37,8 +37,9 @@ QA."` Wait ~120s.
    --comments`.
 3. Synthesize criteria from the issue, PR body and conventions. Notes are decisions, not criteria.
 4. Classify and map each: code-verifiable (a test asserts it **and** the CI gate runs it; check
-   the gate's scope — a dead test is ❌), operator confirms (satisfied only by an unprefixed
-   operator comment; the PR body must give the steps; otherwise ⚠️ and blocking), or missing (❌).
+   the gate's scope — a dead test is ❌), operator confirms (the PR body gives the exact steps;
+   listed in the PASS under "Before you merge", the merge is the confirmation; no steps → ❌), or
+   missing (❌).
 5. Re-read the thread for operator confirmations, then post one verdict:
 
 ```
@@ -46,7 +47,7 @@ QA."` Wait ~120s.
 | Criterion | Evidence | Status |           | Criterion | Evidence | Status |
 |---|---|---|                              |---|---|---|
 | <c> | `<test file>::<test>` | ✅ |        | <c> | none found | ❌ Missing |
-                                           | <c> | needs the operator: <steps> | ⚠️ Operator confirms |
+                                           | <c> | only the operator can observe it; no steps in the PR body | ❌ Missing steps |
                                            **To unblock:** …
 ```
 

@@ -47,14 +47,14 @@ Read the full thread, not just the new blocks.
   before fixing; if a suggested fix is unsafe or incomplete, do better and say why. Fix all in one
   pass with a regression test per finding, run `quality-gates`, push once, post one `[executor]
   Pushed fix in <sha>: <what changed per finding>`. Never post partial progress mid-batch.
-- **`[reviewer]` "awaiting operator confirmation of …"**: nothing for you unless the reviewer
-  also asked you for something.
+- **`[reviewer] Question …`**: a question for the operator. Nothing for you.
 - **`[qa] BLOCKED`** (only with `qa-gate: on`): each ❌ or ⚠️ row is a finding: add the test or
   the implementation, or write the operator's steps into the PR body. Push once, post one
   `[executor] Pushed fix: addressed QA findings — …`.
-- **Operator (unprefixed)**: direction or a question. Check whether the current code already does
-  it; if so, reply confirming where. Otherwise do it, push, reply. If the operator's comment
-  confirms an "operator confirms" criterion, note it in the PR body's table.
+- **Operator (unprefixed)**: direction, or the answer to a question. If it answers your
+  `[executor] Question`, act on it and `gh pr edit <PR> --repo <repo> --remove-label
+  <needs-operator-label>`. Otherwise check whether the current code already does it; if so, reply
+  confirming where; if not, do it, push, reply.
 - **A live `[reviewer]`/`[qa]` verdict that re-surfaces** after you already pushed a fix: the
   script surfaces verdicts newer than the last commit until an `[executor]` comment follows them.
   If your fix comment is missing, post it; if the verdict is wrong, say why in one comment.
@@ -65,9 +65,11 @@ After posting, the PR body may be stale: update it (`gh pr edit <PR> --repo <rep
 ## MERGE_READY
 
 `[reviewer] LGTM` is newer than the last commit, CI is green, no inline thread is unanswered
-(and with `qa-gate: on`, `[qa] PASS` is newer than the last commit). Print the status block with
+(and with `qa-gate: on`, `[qa] PASS` is newer than the last commit). The first time for this head:
+`gh pr edit <PR> --repo <repo> --add-label <merge-ready-label>`. Print the status block with
 "✅ Ready — operator merges when ready", then wait as usual. Do not merge, do not offer to, do
-not ask. If the operator comments after this, handle it; a new push resets the verdicts.
+not ask. If the operator comments after this, handle it; when you push again, `--remove-label
+<merge-ready-label>` in the same cycle, since the verdicts are stale until the agents re-approve.
 
 ## NONE
 
@@ -75,8 +77,9 @@ Nothing new. Wait with `noop: true`.
 
 ## Questions and blocks in the loop
 
-- Post `[executor] Question: <question>` only when no safe default exists, then keep polling.
-  Count `NONE` cycles since the question; at 10 with no unprefixed reply, park:
+- Ask only when no safe default exists, in the shape of "Asking the operator" (SKILL.md): the
+  standalone comment, the `<needs-operator-label>`, the push notification. Then keep polling.
+  Count `NONE` cycles since the question; at 10 with no unprefixed reply, remove the label and park:
   `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`
   and `gh pr comment <PR> --repo <repo> --body "[executor] BLOCKED: no response — moving on. To
   resume: remove the \`<blocked-label>\` label and re-run start-executor on PR #<PR>."`, then pick
