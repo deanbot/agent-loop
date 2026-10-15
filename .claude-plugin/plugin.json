@@ -1,0 +1,12 @@
+{
+  "name": "agent-loop",
+  "description": "Single-account agentic development loop. Executor implements issues; reviewer verifies acceptance criteria and reviews PRs; optional QA role. Coordinates via a GitHub PR comment protocol.",
+  "author": {
+    "name": "Dean Verleger",
+    "url": "https://github.com/deanbot"
+  },
+  "repository": "https://github.com/deanbot/agent-loop",
+  "license": "MIT",
+  "skills": "./adapters/claude-code/skills",
+  "hooks": "./adapters/claude-code/hooks/hooks.json"
+}

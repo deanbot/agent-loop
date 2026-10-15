@@ -2,9 +2,12 @@
 
 ## What this repo is
 
-Infrastructure for a single-account agentic SDLC loop. Scripts emit signals. Adapters define how agents handle those signals. The spec defines the protocol that makes adapters interoperable.
+Infrastructure for a single-account agentic SDLC loop. Scripts emit signals. Adapters define how
+agents handle those signals. The spec defines the protocol that makes adapters interoperable.
 
-Work here is meta-infrastructure — changes affect every project that adopts agent-loop. Treat breakage as high severity.
+Work here is meta-infrastructure — changes affect every project that adopts agent-loop. Treat
+breakage as high severity. This repo is not itself a consumer: it has no `## Agent loop` block,
+and the loop skills refuse to run here. Never start a loop from this repo.
 
 ## Architecture
 
@@ -12,104 +15,131 @@ Three layers. Boundaries are strict.
 
 ### Core (tool-agnostic)
 
-`scripts/` and `spec/` only. No tool names, no tool-specific API calls, no scheduling primitives (ScheduleWakeup, sleep, cron). If it can't run in a shell with Node.js, it doesn't belong here.
+`scripts/` and `spec/` only. No tool names, no tool-specific API calls, no scheduling primitives
+(ScheduleWakeup, sleep, cron). If it can't run in a shell with Node.js, it doesn't belong here.
 
-- `scripts/pr-watch.mjs` — reviewer signal source. Requires `--repo owner/repo`. Emits one line then exits.
-- `scripts/pr-poll.mjs` — executor signal source. Requires `--repo owner/repo` and `--pr <number>`. Emits signals then exits.
-- `spec/SPEC.md` — the protocol contract. Signal types, prefix convention, state machine, merge policy, collision avoidance rules.
+- `scripts/pr-watch.mjs` — reviewer signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
+- `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]`.
+  Signals then content blocks, exits.
+- `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
+- `scripts/test/run.mjs` — contract tests for all three against a fake `gh`
+  (`scripts/test/fake-gh.mjs`). Run `node scripts/test/run.mjs` before any script change lands.
+- `spec/SPEC.md` — the protocol contract: roles, config keys, signals, merge policy, collision
+  avoidance, state. Version 0.2.
 
 ### Adapters (tool-specific, full ownership)
 
-Each adapter in `adapters/<tool>/` owns:
-- Full prompt files (not wrappers around shared prompts)
-- Install mechanism
-- Scheduling model
-- Plugin/skill/extension format
+Each adapter in `adapters/<tool>/` owns: full prompt files (not wrappers around shared prompts),
+install mechanism, scheduling model, stop mechanism, plugin/skill/extension format.
 
-**Adapters do not share prompt files.** Two adapters implementing the same executor behavior write two separate prompt files. This prevents annotation drift ("\\[Claude only\\]") and lets adapters diverge freely as tools diverge.
+**Adapters do not share prompt files.** Two adapters implementing the same role write two
+separate prompt files. This prevents annotation drift and lets adapters diverge as tools diverge.
+
+**Claude Code plugin layout.** The plugin root is the repository root (`source: "./"` in
+`.claude-plugin/marketplace.json`; `.claude-plugin/plugin.json` points `skills` and `hooks` into
+`adapters/claude-code/`). Claude Code copies only the plugin directory into its cache, so this is
+what lets the skills reach `${CLAUDE_PLUGIN_ROOT}/scripts/` and `${CLAUDE_PLUGIN_ROOT}/spec/`.
+Never reference `~/.claude/plugins/marketplaces/…` from a skill: that path is the marketplace
+clone, not the installed plugin.
 
 ### Adapter contract
 
 An adapter is valid if:
-1. Executor prompt implements all signals from `pr-poll.mjs` output
-2. Reviewer prompt implements all signals from `pr-watch.mjs` output
-3. QA prompt implements all signals from `pr-qa.mjs` output
-4. All three respect the prefix convention: post `[executor]`, `[reviewer]`, or `[qa]` comments, never bare agent comments
-5. Loop invariant: every iteration ends with a wait before the next poll (scheduling mechanism is adapter-specific)
-6. MERGE_READY threshold: `[reviewer] LGTM` + `[qa] PASS` + CI passing (no formal APPROVED required — single-account mode)
-7. Executor prompt includes pre-PR self-check: verify each A.C. criterion against the diff, note observation-verifiable items explicitly
+
+1. Executor prompt implements all signals from `pr-poll.mjs` output, including `CI_FAILING`
+2. Reviewer prompt implements all signals from `pr-watch.mjs` output, and verifies acceptance
+   criteria itself when `qa-gate` is off
+3. QA prompt implements all signals from `pr-qa.mjs` output and refuses to run unless `qa-gate: on`
+4. All roles respect the prefix convention: `[executor]`, `[reviewer]`, `[qa]`, never bare
+5. Loop invariant: every iteration ends with a wait before the next poll (mechanism is
+   adapter-specific), and the operator can stop a loop
+6. `MERGE_READY` threshold: `[reviewer] LGTM` + CI passing, plus `[qa] PASS` when `qa-gate: on`.
+   Agents never merge; adapters enforce it structurally where the tool allows
+7. Executor prompt includes the pre-PR self-check: each criterion mapped to a test CI runs, or
+   marked for the operator to confirm with exact steps
+8. Prompts give shell commands as single plain commands (no `$(…)`, `;`, pipes) so permission
+   allowlists can match them
 
 ## Known design constraints
 
-**Single-account limitation.** GitHub blocks self-approval. Formal `APPROVED` / `CHANGES_REQUESTED` review submissions from a reviewer agent are impossible when reviewer and executor share one account. The comment-prefix protocol is the workaround. A second GitHub account unlocks formal review signals — this is documented in spec but not yet implemented in any adapter.
+**Single-account limitation.** GitHub blocks self-approval. Formal review submissions from a
+reviewer agent are impossible when reviewer and executor share one account. The comment-prefix
+protocol is the workaround. A second account unlocks formal signals — documented in the spec, not
+implemented.
 
-**ScheduleWakeup is Claude-specific.** The loop invariant (wait between polls) is implemented differently per adapter:
-- Claude Code: `ScheduleWakeup(60s)` tool call
-- Generic: external cron, `sleep`, or operator manual re-trigger
+**Scheduling is adapter-specific.** Claude Code: `ScheduleWakeup({ delaySeconds, prompt, reason,
+noop })` ends every cycle and `ScheduleWakeup({ stop: true })` ends the loop; the skill works
+whether started bare or under `/loop`. Generic/Kiro: external cron, `sleep`, or manual re-trigger,
+with a sentinel file under `.agent-loop/` as the stop signal.
 
-**Reviewer "has this been answered" judgment is LLM-dependent.** The reviewer must parse comment thread history to avoid re-raising findings the executor already addressed. This is inherently soft — no script can make it reliable. Mitigation: the reviewer always reads the full thread alongside the diff, not just the diff.
+**Permissions are the recurring failure.** An unattended loop dies on a permission prompt. The
+Claude Code adapter uses skill `allowed-tools` for the invoking turn and writes per-role allow
+rules into the clone's `.claude/settings.local.json` (`setup-project.sh`). `find` and other exec
+wrappers are never prefix-approvable, and compound commands never match — keep skill bash flat.
 
-**Race condition.** Reviewer fetches diff → executor pushes fix → reviewer posts stale comment. Partially mitigated by "read thread before posting" instruction. No structural fix without real-time locking.
+**Reviewer "has this been answered" judgment is LLM-dependent.** Mitigation: the reviewer always
+reads the full thread alongside the diff, re-reads immediately before posting, and drops its
+comment if the head moved.
+
+**Race condition.** Reviewer fetches diff → executor pushes → reviewer posts stale comment.
+Narrowed by the re-read-before-posting rule; no structural fix without real-time locking.
 
 ## State files
 
-**Stop sentinels** live in `.agent-loop/` within the project directory (gitignored). Sentinels are project-local — a stop written in one clone does not affect loops running in other clones of the same repo.
+**Per-clone state** lives in `.agent-loop/` within the project directory (gitignored):
+`role` (executor | reviewer | qa; written by setup; read by the merge-guard hook and the skills'
+wrong-clone check) and, for adapters that need one, stop sentinels.
 
-**Script state files** persist to `~/.agent-loop/state/` with per-repo paths to prevent collisions when running agent-loop on multiple repos simultaneously. Three state files per repo: `<slug>-pr-state.json` (reviewer), `<slug>-pr-poll-state.json` (executor), `<slug>-pr-qa-state.json` (QA).
+**Script state** persists to `~/.agent-loop/state/` with per-repo paths: `<slug>-pr-state.json`
+(reviewer), `<slug>-pr-poll-state.json` (executor), `<slug>-pr-qa-state.json` (QA). Safe to delete.
+
+## One clone per role
+
+A project that runs agent-loop has one clone per role: the operator's own, `proj-exec`,
+`proj-review`, optionally `proj-qa`. Each clone gets `/agent-loop:setup <role>`. This keeps
+branches, installed dependencies, `.claude/settings.local.json`, the role marker and stop requests
+isolated, and lets the reviewer run probes against the PR branch without disturbing the executor.
 
 ## How to add an adapter
 
 1. Create `adapters/<toolname>/`
-2. Write full executor, reviewer, and QA prompts — do not reference other adapters' prompts
-3. Implement the adapter contract (all signals, prefix convention, loop invariant, merge threshold)
-4. Add an `install.sh` or equivalent
-5. Add a stub `README.md` noting which features are missing vs. a full implementation
-6. Update root `README.md` adoption table
+2. Write full executor, reviewer and QA prompts — do not reference other adapters' prompts
+3. Implement the adapter contract above
+4. Add an install mechanism and a README noting what is missing vs. a full implementation
+5. Update the root README adoption table
 
 ## Roadmap (design decisions, not filed issues)
 
-- **Scripts parameterization**: `--repo` flag replaces hardcoded repo names. State file paths per-repo. Done in initial scripts; adopting projects should use these parameterized versions.
-- **Adopting project migration**: delete embedded commands from the project, install claude-code adapter, add `## Agent loop` config block to project AGENTS.md.
-- **Consolidate start-issue + start-executor**: single entry point with three modes — no args (pick next issue), issue number, PR number.
-- **Kiro adapter**: unknown scheduling model; stub until explored.
-- **Gemini adapter**: Gemini CLI extension format; stub until explored.
-- **Multi-account upgrade path**: document what changes when a second GitHub account is available (formal review signals, branch protection rules).
+- **Monitor-based loops**: Claude Code's `Monitor` tool streams a background script's output; a
+  long-running `pr-poll` mode could replace polling-by-wakeup. Not started.
+- **Kiro adapter**: ported from the Claude Code prompts, manual scheduling; not exercised.
+- **Gemini adapter**: stub until explored.
+- **Multi-account upgrade path**: what changes with a second GitHub account (formal review
+  signals, branch protection). Documented in spec, not implemented.
 
 ## Development workflow
 
-Use git worktrees to work on multiple features simultaneously without managing separate clones.
+Use git worktrees for parallel features: `git worktree add .worktrees/<feature> -b <branch>`;
+worktrees live in `.worktrees/` (gitignored). No build step, no `node_modules`.
 
-```bash
-# start a new feature
-git worktree add .worktrees/<feature> -b <branch-name>
-
-# list active worktrees
-git worktree list
-
-# clean up when done
-git worktree remove .worktrees/<feature>
-```
-
-Worktrees live in `.worktrees/` (gitignored) — contained inside the repo, not cluttering the parent directory. Each worktree is an independent checkout sharing one `.git` — branches and history stay in sync automatically. No stashing, no context-switching friction. This repo has no build artifacts or `node_modules`, so worktrees require no extra setup steps.
-
-Cannot check out the same branch in two worktrees simultaneously — git enforces this.
+Test a plugin change without installing it: `claude --plugin-dir /path/to/agent-loop -p
+"/agent-loop:start-reviewer"` in a scratch git repo (it should refuse without a `## Agent loop`
+block). `claude plugin validate .` checks the manifests.
 
 ## Issue format convention
 
-Issues in this repo use three standard sections:
-
-- **Context** — why the issue exists; what's broken or missing
-- **What "done" looks like** — verifiable statements an agent or human can check against the PR; prose, bullets, or checklist, any format
-- **Notes / Open questions** — non-blocking context, design debates, unknowns
-
-When implementing an issue, read all three sections plus the PR description and any project convention files before starting. Before opening a PR, verify each item in "What done looks like" is satisfied and summarize the verification in the PR description.
-
-If no "What done looks like" section exists, flag it in a PR comment rather than assuming done.
+Issues in this repo use three sections: **Context**, **What "done" looks like** (verifiable
+statements), **Notes / Open questions**. Read all three plus any project convention files before
+implementing. Verify each "done" item before opening a PR and summarize the verification in the PR
+description.
 
 ## Commit policy
 
-Direct commits to `main` for docs, spec, and adapter stubs. Script changes go through a PR — scripts affect all adopters.
+Direct commits to `main` for docs, spec and adapter stubs. Script changes go through a PR —
+scripts affect all adopters — and `node scripts/test/run.mjs` must pass. After a PR merges, run
+`claude plugin update agent-loop@agent-loop` so the installed plugin follows `main`.
 
 ## Source of truth
 
-This file is the canonical architecture record for agent-loop. Update it when design decisions change. Do not let implementation drift from what's written here without updating this file first.
+This file is the canonical architecture record for agent-loop. Update it when design decisions
+change. Do not let implementation drift from what's written here without updating this file first.

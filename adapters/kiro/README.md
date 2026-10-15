@@ -1,6 +1,6 @@
 # agent-loop — Kiro adapter
 
-Status: **implemented** (spec v0.1, single-account mode)
+Status: **ported, not exercised** (spec v0.2, single-account mode). The prompts track the Claude Code adapter's protocol handling; the scheduling model is manual.
 
 Kiro is an AI-powered IDE from Amazon. It reads AGENTS.md natively and supports
 [SKILL.md](https://kiro.dev/docs/skills/) files for reusable agent instructions.
@@ -64,7 +64,10 @@ cycle (Option A, scripted via Kiro's CLI if available).
    ## Agent loop
    repo: owner/repo
    in-progress-label: in-progress
+   blocked-label: is-blocked
    quality-gates: npm test && npm run lint
+   qa-gate: off
+   trusted-authors: [your-login]
    ```
 
 4. Create the `in-progress` label (one-time):
@@ -98,12 +101,13 @@ After each cycle, re-invoke with the PR number to continue polling.
 
 | Requirement | Status |
 |---|---|
-| All executor signals from `pr-poll.mjs` implemented | ✅ |
-| All reviewer signals from `pr-watch.mjs` implemented | ✅ |
+| All executor signals from `pr-poll.mjs` implemented (incl. `CI_FAILING`) | ✅ |
+| QA skill gated on `qa-gate: on` | ✅ (stub delegating to the generic prompt) |
+| All reviewer signals from `pr-watch.mjs` implemented; acceptance criteria verified when `qa-gate: off` | ✅ |
 | Prefix convention (`[executor]`, `[reviewer]`) | ✅ |
 | Loop invariant (wait between polls) | ✅ — manual or cron |
-| MERGE_READY threshold (LGTM + CI passing) | ✅ |
-| Spec version | v0.1 |
+| MERGE_READY threshold (LGTM + CI passing; + `[qa] PASS` with `--require-qa`) | ✅ |
+| Spec version | v0.2 |
 
 ## Known limitations
 

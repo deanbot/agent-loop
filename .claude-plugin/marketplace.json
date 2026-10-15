@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "agent-loop",
-      "description": "Executor implements issues, reviewer reviews PRs, operator confirms merge.",
-      "source": "./adapters/claude-code",
+      "description": "Executor implements issues, reviewer verifies acceptance criteria and reviews PRs, operator merges. Optional QA role.",
+      "source": "./",
       "category": "productivity"
     }
   ]

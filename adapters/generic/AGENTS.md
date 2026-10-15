@@ -8,42 +8,34 @@ Copy the block below into your project's AGENTS.md to adopt agent-loop with any 
 
 repo: owner/repo
 in-progress-label: in-progress
+blocked-label: is-blocked
 quality-gates: npm test && npm run lint
+qa-gate: off
+trusted-authors: [your-login]
 
 ### Executor
 
-Implement issues and address review findings. Read the executor prompt in
-`adapters/generic/executor.md` from the agent-loop repo, or paste it here directly.
-
-Entry points:
-- No args: pick next open issue without `in-progress` label
-- Issue number: implement that issue
-- PR number: orient on existing PR and enter polling loop
+Implements issues and addresses findings. Prompt: `adapters/generic/executor.md` in the
+agent-loop repo (read it, or paste it here). Entry points: no args (pick the next open issue
+whose dependencies are closed), an issue number, or a PR number (resume polling).
 
 ### Reviewer
 
-Monitor open PRs and post code-quality findings. Read the reviewer prompt in
-`adapters/generic/reviewer.md` from the agent-loop repo, or paste it here directly.
+Verifies each PR against its issue's acceptance criteria and reviews the code; posts
+`[reviewer]` findings or `LGTM`. Prompt: `adapters/generic/reviewer.md`. Runs in its own clone
+and session; the operator re-triggers each cycle or schedules it with cron.
 
-The reviewer should be run in a separate session. It polls continuously (operator
-re-triggers each cycle, or schedule via external cron).
+### QA (optional, `qa-gate: on`)
 
-### QA
+Maps acceptance criteria to evidence CI ran and posts `[qa] PASS` or `BLOCKED` before the
+reviewer looks at code. Prompt: `adapters/generic/qa.md`. Its own clone and session.
 
-Evaluate whether acceptance criteria are met before merge. Read the QA prompt in
-`adapters/generic/qa.md` from the agent-loop repo, or paste it here directly.
+### Scheduling
 
-The QA agent should be run in a separate session. It runs before the reviewer in the
-agent sequencing — see `spec/SPEC.md` for the full flow.
-
-### Scheduling note
-
-This generic adapter has no native scheduling. Between poll cycles:
-- Executor: wait ~60 seconds before next `pr-poll.mjs` call (use sleep or manual re-trigger)
-- Reviewer: wait ~120s after NONE or MERGE_CONFLICT, ~300s after posting findings
-- QA: wait ~120s after NONE or MERGE_CONFLICT, ~300s after posting a verdict
+No native scheduling here. Between cycles: executor ~60s; reviewer and QA ~120s after `NONE` or
+`MERGE_CONFLICT`, ~300s after posting. Stop a loop by writing `.agent-loop/<role>-stop` in its
+clone; each cycle checks for that file first and exits when it exists.
 
 ### Protocol reference
 
-Signal types, prefix convention, state machine, merge policy: `spec/SPEC.md` in the
-agent-loop repo.
+Signal types, prefix convention, merge policy: `spec/SPEC.md` in the agent-loop repo.

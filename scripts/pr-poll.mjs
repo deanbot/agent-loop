@@ -3,14 +3,15 @@
  * Poll a PR for new review signals and emit them by type.
  *
  * Usage:
- *   node scripts/pr-poll.mjs --repo owner/repo --pr <number>
+ *   node scripts/pr-poll.mjs --repo owner/repo --pr <number> [--require-qa]
  *
  * Output — signal lines then content blocks, exits when done:
  *   NONE <timestamp>            no new signals since last run
  *   NEW_COMMENT                 new PR-level discussion comment(s); content follows
  *   NEW_REVIEW_SUBMISSION       new formal review (approve/request-changes/comment); content follows
  *   NEW_INLINE_COMMENT          new line-level review comment(s); content follows
- *   MERGE_READY                 [reviewer] LGTM + [qa] PASS both posted after last commit + CI passing; no content block
+ *   CI_FAILING                  a CI check failed on the current head commit; emitted once per commit; content follows
+ *   MERGE_READY                 [reviewer] LGTM posted after last commit + CI passing (+ [qa] PASS with --require-qa); no content block
  *   MERGED                      PR is merged; executor should stop
  *
  * Content block format (after each signal line):
@@ -20,8 +21,17 @@
  *   [path: <file>  line: <n>]                   (inline comments only)
  *   <body>
  *
+ * CI_FAILING content block:
+ *   ---
+ *   check: <name>  state: <state>
+ *   <link>
+ *
+ * --require-qa: MERGE_READY additionally requires a [qa] PASS comment posted after the last commit.
+ * Without it the QA role is optional: a live [qa] BLOCKED is still surfaced as NEW_COMMENT, but no
+ * [qa] PASS is needed to reach MERGE_READY.
+ *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-poll-state.json across sessions.
- * Keyed by PR number → { comments, reviews, reviewComments } last-seen IDs.
+ * Keyed by PR number → { comments, reviews, reviewComments, ciFailedSha } last-seen IDs.
  */
 
 import { execSync } from 'child_process'
@@ -33,12 +43,16 @@ function arg(name) {
   const i = process.argv.indexOf(name)
   return i !== -1 ? (process.argv[i + 1] ?? null) : null
 }
+function flag(name) {
+  return process.argv.includes(name)
+}
 
 const repo = arg('--repo')
 const prNumber = arg('--pr')
+const requireQa = flag('--require-qa')
 
 if (!repo || !prNumber) {
-  process.stderr.write('Usage: pr-poll.mjs --repo owner/repo --pr <number>\n')
+  process.stderr.write('Usage: pr-poll.mjs --repo owner/repo --pr <number> [--require-qa]\n')
   process.exit(1)
 }
 
@@ -71,6 +85,7 @@ if (pr.merged) {
   process.stdout.write('MERGED\n')
   process.exit(0)
 }
+const headSha = pr.head?.sha ?? null
 
 // Fetch all three signal sources via REST API
 const issueComments = JSON.parse(
@@ -92,20 +107,46 @@ const inlineComments = JSON.parse(
   )
 )
 
+// CI checks. `gh pr checks` exits non-zero with "no checks reported" when the PR has none —
+// that is "no CI configured", not an error, so treat it as an empty list.
+// bucket is gh's normalised status: pass | fail | pending | skipping | cancel.
+function fetchChecks() {
+  try {
+    const raw = execSync(
+      `gh pr checks ${prNumber} --repo ${repo} --json name,state,bucket,link`,
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    )
+    const parsed = JSON.parse(raw || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+const checks = fetchChecks()
+const failingChecks = checks.filter((c) => c.bucket === 'fail')
+const ciPassed = checks.every((c) => c.bucket === 'pass' || c.bucket === 'skipping')
+
 // First run: seed cursors to current max IDs and emit nothing.
 // Only subsequent runs emit NEW_* signals for activity since last check.
 const firstComments = prState.comments === null
 const firstReviews = prState.reviews === null
 const firstInline = prState.reviewComments === null
 
-if (firstComments && issueComments.length > 0) prState.comments = issueComments.at(-1).id
-if (firstReviews && reviewSubmissions.length > 0) prState.reviews = reviewSubmissions.at(-1).id
-if (firstInline && inlineComments.length > 0) prState.reviewComments = inlineComments.at(-1).id
+// Seed to 0 when the list is empty: leaving the cursor null would make every poll a "first run"
+// until something is posted, and then swallow that first comment as baseline.
+if (firstComments) prState.comments = issueComments.at(-1)?.id ?? 0
+if (firstReviews) prState.reviews = reviewSubmissions.at(-1)?.id ?? 0
+if (firstInline) prState.reviewComments = inlineComments.at(-1)?.id ?? 0
+
+// Own-prefix filter: this script serves the executor, so the executor's own [executor] posts are
+// never a signal (same rule as pr-watch.mjs for [reviewer] and pr-qa.mjs for [qa]). Cursors still
+// advance past them below.
+const isOwn = (b) => /^\[executor\]/.test(b ?? '')
 
 // Filter to new items only
 const newComments = firstComments
   ? []
-  : issueComments.filter((c) => c.id > prState.comments)
+  : issueComments.filter((c) => c.id > prState.comments && !isOwn(c.body))
 
 const newReviews = (firstReviews
   ? []
@@ -114,7 +155,7 @@ const newReviews = (firstReviews
 
 const newInline = firstInline
   ? []
-  : inlineComments.filter((c) => c.id > prState.reviewComments)
+  : inlineComments.filter((c) => c.id > prState.reviewComments && !isOwn(c.body))
 
 // Surface unanswered top-level inline comments even if cursor has already passed them.
 // A top-level comment is unanswered if no other comment has in_reply_to_id pointing to it.
@@ -203,9 +244,19 @@ if (newInline.length > 0) {
   }
 }
 
-// Check merge threshold: [reviewer] LGTM + [qa] PASS both posted AFTER the last commit + CI passing.
-// Comments predating new commits are stale — both agents must re-approve after each push.
-// lgtmComments / qaPassComments / lastCommitDate are computed above with the other verdicts.
+// CI_FAILING — once per head commit. A new push resets it (new sha), so a fix that still fails
+// CI is reported again, while an unchanged failing head is not re-reported every poll.
+if (failingChecks.length > 0 && headSha && prState.ciFailedSha !== headSha) {
+  out.push('CI_FAILING')
+  for (const c of failingChecks) {
+    out.push(`---\ncheck: ${c.name}  state: ${c.state}\n  ${c.link ?? ''}`)
+  }
+  prState.ciFailedSha = headSha
+}
+
+// Check merge threshold: [reviewer] LGTM posted AFTER the last commit (+ [qa] PASS with
+// --require-qa) + CI passing. Comments predating new commits are stale — agents must
+// re-approve after each push.
 const lastLgtm = lgtmComments.at(-1)
 const lastQaPass = qaPassComments.at(-1)
 let hasReviewerLgtm = false
@@ -214,32 +265,20 @@ if (lastCommitDate) {
   if (lastLgtm) hasReviewerLgtm = new Date(lastLgtm.created_at) > lastCommitDate
   if (lastQaPass) hasQaPass = new Date(lastQaPass.created_at) > lastCommitDate
 }
-if (hasReviewerLgtm && hasQaPass && unansweredInline.length === 0) {
-  const checks = JSON.parse(
-    execSync(
-      `gh pr checks ${prNumber} --repo ${repo} --json name,state`,
-      { encoding: 'utf8' }
-    )
-  )
-  const failStates = new Set(['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'failure', 'error'])
-  const pendingStates = new Set(['PENDING', 'IN_PROGRESS', 'QUEUED', 'pending', 'in_progress', 'queued'])
-  const ciPassed =
-    checks.length === 0 ||
-    checks.every((c) => !failStates.has(c.state) && !pendingStates.has(c.state))
-  if (ciPassed) {
-    out.push('MERGE_READY')
-  }
+const qaSatisfied = requireQa ? hasQaPass : true
+if (hasReviewerLgtm && qaSatisfied && unansweredInline.length === 0 && ciPassed) {
+  out.push('MERGE_READY')
 }
 
 // Persist state only after all signals are collected.
 // Use Math.max, not .at(-1): liveBlocking / unansweredInline append cursor-independent items
 // that may be older than the newest, so .at(-1) could regress the cursor and re-emit comments.
-if (newComments.length > 0)
-  prState.comments = Math.max(prState.comments ?? 0, ...newComments.map((c) => c.id))
+// Own [executor] posts were filtered out of newComments/newInline, so also advance past the newest
+// item of each list — otherwise an own post would sit above the cursor and never be skipped.
+prState.comments = Math.max(prState.comments ?? 0, ...newComments.map((c) => c.id), issueComments.at(-1)?.id ?? 0)
 if (newReviews.length > 0)
   prState.reviews = Math.max(prState.reviews ?? 0, ...newReviews.map((r) => r.id))
-if (newInline.length > 0)
-  prState.reviewComments = Math.max(prState.reviewComments ?? 0, ...newInline.map((c) => c.id))
+prState.reviewComments = Math.max(prState.reviewComments ?? 0, ...newInline.map((c) => c.id), inlineComments.at(-1)?.id ?? 0)
 state[prNumber] = prState
 writeFileSync(STATE_FILE, JSON.stringify(state))
 
