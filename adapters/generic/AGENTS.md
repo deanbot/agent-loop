@@ -32,9 +32,10 @@ reviewer looks at code. Prompt: `adapters/generic/qa.md`. Its own clone and sess
 
 ### Scheduling
 
-No native scheduling here. Between cycles: executor ~60s; reviewer and QA ~120s after `NONE` or
-`MERGE_CONFLICT`, ~300s after posting. Stop a loop by writing `.agent-loop/<role>-stop` in its
-clone; each cycle checks for that file first and exits when it exists.
+No native scheduling here. Between cycles: executor ~60s; reviewer and QA ~60s after posting
+findings (`[qa] BLOCKED`) or a question, ~300s after LGTM or `[qa] PASS`, ~120s otherwise; the
+shortest wins across PRs. Stop a loop by writing `.agent-loop/<role>-stop` in its clone; each
+cycle checks for that file first and exits when it exists.
 
 ### Protocol reference
 

@@ -17,4 +17,4 @@ complexity: intermediate
 
 Follow the QA prompt in `adapters/generic/qa.md` from the agent-loop repo.
 
-One cycle = one invocation. Between cycles: wait ~120s (NONE/MERGE_CONFLICT) or ~300s (after verdict).
+One cycle = one invocation. Between cycles: wait ~60s after `[qa] BLOCKED` or a question, ~300s after `[qa] PASS`, ~120s otherwise.

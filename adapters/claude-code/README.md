@@ -55,7 +55,10 @@ bump needed), then restart running loop sessions.
 
 Each cycle runs the signal script once, handles the signals, prints a status line and calls
 `ScheduleWakeup({ delaySeconds, noop, prompt, reason })`; the wakeup re-enters the loop. Delays:
-executor 60s; reviewer and QA 300s after posting, 120s otherwise. `stop: true` ends a loop.
+executor 60s; reviewer and QA 60s after posting findings (`[qa] BLOCKED`) or a question, 300s
+after LGTM or `[qa] PASS`, 120s otherwise; the shortest wins when a cycle touched several PRs.
+Wakeups fire on minute boundaries, so real delays run longer than requested. `stop: true` ends
+a loop.
 `gh` 2.43 or newer is required (`gh api --slurp`). The
 loop also works when started as `/loop /agent-loop:start-reviewer` (Esc cancels a pending wakeup).
 Claude Code fires one fallback wakeup about 20 minutes after an iteration that forgot to

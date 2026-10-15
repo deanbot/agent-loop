@@ -53,4 +53,5 @@ QA."` Wait ~120s.
 ```
 
 No criteria found → `[qa] BLOCKED: no acceptance criteria found …`. Never pass silently.
-Wait ~300s after a verdict.
+Wait ~60s after `[qa] BLOCKED` or a question, ~300s after `[qa] PASS`. Several PRs: the
+shortest wait wins.
