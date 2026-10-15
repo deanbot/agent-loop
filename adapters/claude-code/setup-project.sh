@@ -47,6 +47,7 @@ agent_loop_value() {  # key → value from the "## Agent loop" block (first matc
 [ -n "$REPO" ] || { echo "cannot determine repo: pass --repo owner/repo" >&2; exit 1; }
 IN_PROGRESS="$(agent_loop_value in-progress-label)"; IN_PROGRESS="${IN_PROGRESS:-in-progress}"
 BLOCKED="$(agent_loop_value blocked-label)"; BLOCKED="${BLOCKED:-is-blocked}"
+NEEDS_OP="$(agent_loop_value needs-operator-label)"; NEEDS_OP="${NEEDS_OP:-needs-operator}"
 
 echo "agent-loop setup: repo=$REPO role=$ROLE"
 
@@ -62,6 +63,7 @@ ensure_label() {  # name color description
 }
 ensure_label "$IN_PROGRESS" 0075ca "Executor claimed"
 ensure_label "$BLOCKED" b60205 "Blocked; the operator unblocks"
+ensure_label "$NEEDS_OP" fbca04 "Waits on the operator: a question, or a PR reviewed and green"
 
 # --- ignores ----------------------------------------------------------------------------------
 # Never dirty an agent clone's working tree: what .gitignore lacks goes into the clone-local
@@ -164,5 +166,7 @@ Done. Next:
   executor clone:  /agent-loop:start-executor [issue-or-PR]
   reviewer clone:  /agent-loop:start-reviewer
   qa clone:        /agent-loop:start-qa            (only with qa-gate: on)
-Say "stop" in a loop's session to end it; the operator merges on MERGE_READY.
+Say "stop" in a loop's session to end it. Your inbox:
+  gh pr list --repo $REPO --label $NEEDS_OP      (a question for you, or a PR ready to merge)
+  gh issue list --repo $REPO --label $NEEDS_OP   (a question asked before a PR exists)
 NEXT

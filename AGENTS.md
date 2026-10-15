@@ -56,7 +56,8 @@ An adapter is valid if:
 6. `MERGE_READY` threshold: `[reviewer] LGTM` + CI passing, plus `[qa] PASS` when `qa-gate: on`.
    Agents never merge; adapters enforce it structurally where the tool allows
 7. Executor prompt includes the pre-PR self-check: each criterion mapped to a test CI runs, or
-   marked for the operator to confirm with exact steps
+   given the exact steps the operator runs by hand. A hand check never blocks an approval; the
+   operator confirms by a comment or by merging
 8. Prompts give shell commands as single plain commands (no `$(…)`, `;`, pipes) so permission
    allowlists can match them
 

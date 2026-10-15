@@ -27,17 +27,19 @@ operator (the human) in unprefixed comments. The operator merges; you never do.
    Read the whole file: the rest of it is the project's conventions, and you follow them.
 2. From the block take: `repo` (owner/repo), `in-progress-label` (default `in-progress`),
    `blocked-label` (default `is-blocked`), `quality-gates` (the command that must pass before a
-   PR), `qa-gate` (`on` or `off`, default `off`), and the author allowlist (`trusted-authors`, or
-   `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
+   PR), `qa-gate` (`on` or `off`, default `off`), `needs-operator-label` (default
+   `needs-operator`), and the author allowlist
+   (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
 3. If `.agent-loop/role` exists and does not say `executor`, stop: this clone hosts another role.
 4. Make sure `main` is current: `git checkout main` then `git pull`.
 
 Rules that hold for the whole session:
 
 - **Never merge, never push to `main`.** On `MERGE_READY` you report and keep polling.
-- **No interactive prompts, no menus, no AskUserQuestion.** Questions go to GitHub as
-  `[executor] Question: …` on the PR (or the issue when there is no PR yet), and a question is a
-  stop: ask *or* proceed on a safe default, never both.
+- **No interactive prompts, no menus, no AskUserQuestion.** A question for the operator is a
+  standalone `[executor] Question:` comment on the PR (or the issue when there is no PR yet), in
+  the shape under "Asking the operator", and a question is a stop: ask *or* proceed on a safe
+  default, never both.
 - **Never `sleep`.** Waiting is `ScheduleWakeup` (below). Long commands run with
   `run_in_background`.
 - **One plain command per Bash call** in the loop (`gh …`, `node …`): no `$(…)`, no `;`, no
@@ -67,8 +69,8 @@ closed (an issue names them as `Depends on #a, #b`; check each with `gh issue vi
 
 **Orient on an existing PR.** `gh pr view <PR> --repo <repo>` and `gh pr view <PR> --comments
 --repo <repo>`: the description, the acceptance criteria table, every comment, any earlier
-`[executor] BLOCKED` or `Question` and the operator's replies. If the linked issue still carries
-`<blocked-label>`, remove it: you are resuming.
+`[executor] BLOCKED` or `Question` and the operator's replies. If the linked issue or the PR still
+carries `<blocked-label>` or `<needs-operator-label>` from a park, remove them: you are resuming.
 
 ## The loop
 
@@ -89,14 +91,19 @@ Each cycle:
      post one `[executor] Pushed fix: …`.
    - Comments → collect **all** unaddressed `[reviewer]` and `[qa]` findings and operator
      direction, verify each, fix all in one pass, push once, post one summary comment. Reply to
-     every inline thread you were asked about. A `[reviewer] Verified …` comment needs nothing
-     from you. Your own `[executor]` posts are already filtered out.
-   - `MERGE_READY` → print the status block with "✅ Ready — operator merges", keep polling.
+     every inline thread you were asked about. A `[reviewer]` or `[qa] Question …` is for the
+     operator, and the operator's reply to it belongs to that role: nothing for you until that
+     role posts again. Your own `[executor]` posts are already filtered out.
+   - `MERGE_READY` → `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (a no-op
+     when it is on). Print the status block with "✅ Ready — operator merges", keep polling. When
+     you next push, remove the label unless a question is still open.
    - `NONE` → nothing to do.
 3. **Before posting any comment**, re-fetch `gh pr view <PR> --comments --repo <repo>` and fold
    in anything that arrived while you worked. One comment per cycle, after everything is
    considered.
-4. Print the status block, then wait:
+4. Print the status block, then wait. The third line is the state the operator cares about:
+   `⏳ Waiting for review`, `❓ Question for you: <one line>` while your question is unanswered,
+   or `✅ Ready — operator merges`.
 
 ```
 ┌──────────────────────────────────────────┐
@@ -117,10 +124,38 @@ The only exits are `MERGED` (then pick next), BLOCKED (then pick next), nothing 
 operator's stop. If an iteration forgets, Claude Code fires one fallback wakeup after about 20
 minutes and then ends the loop, so do not rely on it.
 
+## Asking the operator
+
+A question is a decision you cannot proceed without. A criterion only the operator can check by
+hand is **not** a question: write its steps in the PR body and move on. The reviewer puts them in
+the LGTM, and the operator confirms by a comment or by merging. The one exception is a PR that must
+record the operator's results, such as measurements from a real model: ask for them once, as a
+question. The operator is not watching the thread, so a question is its own comment, nothing else
+in it:
+
+```
+[executor] Question: <the decision, one line>
+
+<two or three lines: why this is the operator's call, what you already established>
+
+Reply with: <the replies that resolve it, e.g. "keep", or "no, do X instead">
+```
+
+Post it only after everything you can do without the answer is done. In the same cycle:
+`gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (or `gh issue edit <N> …` when
+there is no PR), and `PushNotification({ status: "proactive", message: "<repo> PR #<PR>: question
+for you — <one line>" })`. `PushNotification` is a deferred tool: load it once with
+`ToolSearch("select:PushNotification")` before the first call. Skip it when the operator started
+this cycle by typing in this session rather than through a wakeup: they are at the terminal. When
+the operator's unprefixed reply arrives, act on it and remove the label; if the PR is ready to
+merge, your next `MERGE_READY` puts it back. A `[reviewer]` or `[qa] Question` in the thread is
+for the operator, and the reply to it belongs to that role: nothing for you.
+
 ## Blocked, questions, and stopping
 
-- A question with no safe default: post it (`[executor] Question: …`), keep polling; after 10
-  consecutive `NONE` cycles with no unprefixed reply, park the issue (below) and pick next.
+- A question with no safe default: ask as above, keep polling; after 10 consecutive `NONE`
+  cycles with no unprefixed reply, park the issue (below) and pick next. The question is still
+  open, so `<needs-operator-label>` stays on until you resume.
 - Unresolvable, or input needed before there is a PR: park. `gh issue edit <N> --remove-label
   <in-progress-label> --add-label <blocked-label> --repo <repo>`, then post `[executor]
   BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on

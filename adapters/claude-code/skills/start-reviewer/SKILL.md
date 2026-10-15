@@ -33,15 +33,17 @@ you judge the executor's product calls yourself and do not hand them back as que
 
 1. Read `AGENTS.md` in the working directory. It must contain a `## Agent loop` block; if not,
    stop and say so. Read the whole file: the project's rules are part of what you review against.
-2. From the block take `repo` (owner/repo) and `qa-gate` (`on` or `off`, default `off`).
+2. From the block take `repo` (owner/repo), `qa-gate` (`on` or `off`, default `off`) and
+   `needs-operator-label` (default `needs-operator`).
 3. If `.agent-loop/role` exists and does not say `reviewer`, stop: this clone hosts another role.
 4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it through to the watch script.
 
 Rules that hold for the whole session:
 
-- **Never merge, never push.** You comment, nothing else, and only on the PR under review.
-- **No interactive prompts.** Anything you need from the operator is a `[reviewer]` comment on
-  the PR.
+- **Never merge, never push.** You comment, and add or remove the `<needs-operator-label>` for
+  your own questions, nothing else, and only on the PR under review.
+- **No interactive prompts.** A decision you need from the operator is a standalone
+  `[reviewer] Question:` comment on the PR (shape under "What you post").
 - **Never `sleep`.** Waiting is `ScheduleWakeup` (below).
 - **One plain command per Bash call** in the loop: no `$(…)`, `;` or pipes (they defeat the
   permission allowlist and prompt every cycle).
@@ -77,7 +79,8 @@ A wakeup is a continuation: run the cycle.
    `gh api repos/<repo>/pulls/<n>/comments`; fold in anything that arrived while you worked, and
    confirm the head has not moved (`gh pr view <n> --repo <repo> --json headRefOid`). If it has,
    drop the comment and let the next cycle review the new head.
-4. Print one line per PR you touched, then wait:
+4. Print one line per PR you touched; a PR with your open question reads `PR #<n>: ❓ question
+   for you — <one line>`. Then wait:
 
 ```
 ScheduleWakeup({ delaySeconds: <300 after posting findings or LGTM; 120 otherwise>,
@@ -94,14 +97,37 @@ forgets, then ends the loop; do not rely on it.)
 
 Every comment starts with its kind, because the executor's poll script classifies by prefix:
 
-- `[reviewer] LGTM …` — every acceptance criterion has evidence, every "operator confirms"
-  criterion has the operator's unprefixed confirmation on the PR, and you have no findings. Note
-  the CI state in the same line (`CI green` / `CI pending`), but CI is **not** a precondition: the
-  executor's poll gates `MERGE_READY` on CI and receives `CI_FAILING` itself, and nothing would
-  re-trigger you when CI finishes. A red check caused by this PR *is* a finding, so then you post
-  findings, not LGTM. A recheck that passes also starts with `[reviewer] LGTM`.
-- `[reviewer] Verified … Awaiting operator confirmation of: <criteria>` — the only thing missing
-  is the operator's word. Not actionable for the executor.
+- `[reviewer] LGTM …` — every criterion a test can prove has one, and you have no findings.
+  Criteria only the operator can check by hand do **not** hold this back: list them in the same
+  comment under **Before you merge** (or **After merge**, when that is the only order possible)
+  with the exact steps from the PR body. The operator confirms by a comment or by merging, and a
+  failure comes back as an unprefixed comment you treat as a finding. The exception is a PR that
+  must record the operator's results: they are part of the PR, so wait for them like any criterion. Note the CI state in the first line (`CI green` /
+  `CI pending`), but CI is not a precondition either: the executor's poll gates `MERGE_READY` on
+  CI and receives `CI_FAILING` itself, and nothing would re-trigger you when CI finishes. A red
+  check caused by this PR *is* a finding, so then you post findings, not LGTM. A passing recheck
+  also starts with `[reviewer] LGTM`.
+- `[reviewer] Question: …` — a decision you cannot review without, and only that. Its own
+  comment, nothing else in it:
+
+  ```
+  [reviewer] Question: <the decision, one line>
+
+  <two or three lines: why this is the operator's call, what you already established>
+
+  Reply with: <the replies that resolve it, e.g. "keep", or "no, because …">
+  ```
+
+  Post it after everything else on the PR is verified, so the operator decides once. In the same
+  cycle: `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>` and
+  `PushNotification({ status: "proactive", message: "<repo> PR #<n>: question for you — <one
+  line>" })`. `PushNotification` is a deferred tool: load it once with
+  `ToolSearch("select:PushNotification")` before the first call, and skip it when the operator
+  started this cycle by typing in this session rather than through a wakeup. When the operator's
+  unprefixed reply arrives, act on it, `--remove-label <needs-operator-label>`, and post your next
+  verdict: a question withholds `MERGE_READY` like a finding until you do. If the PR is ready to
+  merge, the executor's next poll puts the label back. Questions to the executor are findings, not
+  this. Never ask the operator to confirm something they will do by merging.
 - `[reviewer] Merge conflicts …` — as above.
 - Anything else under `[reviewer]` is read as findings: numbered, each with the evidence you
   produced and the concrete fix (format in reference/review.md). A suspicion you could not

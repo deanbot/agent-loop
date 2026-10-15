@@ -22,6 +22,9 @@ complexity: intermediate
 Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `repo` — the GitHub repo (owner/repo)
 - `qa-gate` — `on` or `off` (default `off`). With `off` (the default) there is no QA agent: you verify the acceptance criteria yourself (below). With `on`, wait for `[qa] PASS` before reviewing code.
+- `needs-operator-label` — label on a PR while it waits on the operator (default: `needs-operator`)
+
+Never merge, never push. You post `[reviewer]` comments, and add or remove `<needs-operator-label>` for your own questions; nothing else.
 
 $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
@@ -70,7 +73,7 @@ Post: `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main b
 Wait ~120 seconds before next cycle.
 
 **`REVIEW:<n>`**
-**Acceptance criteria first.** With `qa-gate: off`: read the linked issue (`Closes #M` in this PR's body; `gh issue view <M> --repo <repo> --comments`) and, for each acceptance criterion, find the test that asserts it and confirm CI runs that test (a test outside the CI gate's scope is a dead test, not evidence), or an unprefixed operator comment on the PR for criteria the operator confirms. The executor's PR-body table is a pointer, not proof: open the cited tests. Missing evidence is your first finding; post `[reviewer] LGTM` only when every criterion has evidence and every operator-confirms criterion is confirmed. Back code findings with evidence you produced (run the project's tests on a probe, try adversarial input); drop anything you cannot demonstrate. Do not relay CI status or echo operator comments — the executor receives both directly.
+**Acceptance criteria first.** With `qa-gate: off`: read the linked issue (`Closes #M` in this PR's body; `gh issue view <M> --repo <repo> --comments`) and, for each acceptance criterion, find the test that asserts it and confirm CI runs that test (a test outside the CI gate's scope is a dead test, not evidence), or, for a criterion only a human can check, exact steps in the PR body. The executor's PR-body table is a pointer, not proof: open the cited tests. Missing evidence is your first finding; post `[reviewer] LGTM` when every criterion a test can prove has one. Criteria checked by hand never hold it back: list them in the LGTM under "Before you merge" with their steps, and the operator confirms by a comment or by merging. The exception is a PR that must record the operator's results, such as measurements: that criterion is missing until they are in the PR. Back code findings with evidence you produced (run the project's tests on a probe, try adversarial input); drop anything you cannot demonstrate. Do not relay CI status or echo operator comments — the executor receives both directly.
 
 **QA gate check** (only with `qa-gate: on`) — before fetching the diff, check whether `[qa] PASS` has been posted after the last commit:
 - `gh api "repos/<repo>/pulls/<n>/commits" --jq '.[-1].commit.committer.date'` → last commit date
@@ -89,7 +92,7 @@ If any check has bucket `fail`: fetch PR description (`gh pr view <n> --repo <re
 
 Review the diff scoped to unanswered issues. Post:
 - Actionable findings → `gh pr comment <n> --body "[reviewer] <findings>"`
-- Questions only → `gh pr comment <n> --body "[reviewer] <questions>"`
+- A decision you cannot review without (never a criterion the operator checks by hand) → a standalone question, nothing else in it: `gh pr comment <n> --repo <repo> --body "[reviewer] Question: <decision, one line>` + two or three lines of context + `Reply with: <the replies that resolve it>"`, then `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>`. A question withholds `MERGE_READY` like a finding. When the operator replies (REVIEW_COMMENTS), remove the label and post your next verdict.
 - No findings → `gh pr comment <n> --body "[reviewer] LGTM"`
 
 Wait ~300 seconds before next cycle.
@@ -108,6 +111,7 @@ Read context: operator comments and `[executor]` responses. Ignore `[reviewer]` 
   - Questions answered satisfactorily and CI passing → `gh pr comment <n> --body "[reviewer] LGTM"`
   - Answers raise new issues → `gh pr comment <n> --body "[reviewer] <findings>"`
   - Answers need clarification → `gh pr comment <n> --body "[reviewer] <clarification>"`
+  - The operator answered your `[reviewer] Question` → `gh pr edit <n> --repo <repo> --remove-label <needs-operator-label>`, then post your next verdict (`LGTM` or findings).
   - Wait ~300 seconds before next cycle.
 
 ## Multiple signals

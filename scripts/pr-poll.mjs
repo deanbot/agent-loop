@@ -32,8 +32,8 @@
  *
  * A role's verdict is its NEWEST [role] comment posted after the last commit: a later finding revokes
  * an earlier LGTM/PASS without a push. Reviewer comment kinds by prefix: "[reviewer] LGTM" (verdict),
- * "[reviewer] Verified" (awaiting the operator; not actionable for the executor), anything else is a
- * finding. CI is evaluated here only: if the checks cannot be read (auth, network, old gh), MERGE_READY
+ * "[reviewer] Question" (for the operator; not actionable for the executor), anything else is a
+ * finding. "[reviewer] Verified" (a 0.2 draft kind) is tolerated the same way. CI is evaluated here only: if the checks cannot be read (auth, network, old gh), MERGE_READY
  * is withheld and the error is passed through on stderr; "no checks reported" counts as no CI.
  *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-poll-state.json across sessions.
@@ -185,9 +185,11 @@ const reviewerComments = issueComments.filter((c) => /^\[reviewer\]/.test(c.body
 const qaComments = issueComments.filter((c) => /^\[qa\]/.test(c.body ?? ''))
 const isLgtm = (b) => /^\[reviewer\] LGTM/.test(b ?? '')
 const isQaPass = (b) => /^\[qa\] PASS/.test(b ?? '')
-// "[reviewer] Verified …" = criteria and code verified, awaiting the operator's confirmation. Not a
-// finding: nothing for the executor to do, so it must not re-surface as a live blocker.
-const isReviewerFinding = (b) => /^\[reviewer\]/.test(b ?? '') && !isLgtm(b) && !/^\[reviewer\] Verified/.test(b ?? '')
+// "[reviewer] Question …" (a question for the operator) is not a finding: nothing for the executor
+// to do, so it must not re-surface as a live blocker. Reviewer → executor communication is always
+// findings; reviewer → operator is Question. "Verified" is a retired kind, tolerated for old threads.
+const isReviewerFinding = (b) =>
+  /^\[reviewer\]/.test(b ?? '') && !isLgtm(b) && !/^\[reviewer\] (Verified|Question)\b/.test(b ?? '')
 const isQaBlocked = (b) => /^\[qa\] BLOCKED/.test(b ?? '')
 const blockingCandidates = issueComments.filter((c) => isQaBlocked(c.body) || isReviewerFinding(c.body))
 

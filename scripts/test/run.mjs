@@ -246,14 +246,33 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
 }
 {
   const ctx = makeEnv()
-  const verified = { ...BASE, comments: [comment('[reviewer] Verified abc123 against #4: criteria covered. Awaiting operator confirmation of: the real-model check.', T('2026-01-01T12:00:00Z'))] }
-  const first = poll(ctx, verified)
-  check('poll: [reviewer] Verified (awaiting operator) is not a live blocker', !first.includes('Awaiting operator'), first)
-  const out = poll(ctx, verified)
-  check('poll: [reviewer] Verified does not count as LGTM → no MERGE_READY', !signals(out).includes('MERGE_READY'), out)
-  const confirmed = { ...verified, comments: [...verified.comments, comment('ran it, both models load', T('2026-01-01T13:00:00Z')), comment('[reviewer] LGTM — operator confirmed the real-model check.', T('2026-01-01T13:05:00Z'))] }
-  const out2 = poll(ctx, confirmed)
-  check('poll: Verified → operator confirms → LGTM → MERGE_READY', signals(out2).includes('MERGE_READY'), out2)
+  poll(ctx, BASE) // seed the cursors first, so the question arrives as new activity
+  const asked = { ...BASE, comments: [comment('[reviewer] Question: keep the launcher on --no-sync, or follow the plan literally?\n\nThe plan says bare `uv run loom`; the PR uses --no-sync so starting never reaches the network.\n\nReply with: "keep", or "follow the plan".', T('2026-01-01T12:00:00Z'))] }
+  const first = poll(ctx, asked)
+  check('poll: a new [reviewer] Question surfaces once as new activity, not as MERGE_READY', signals(first).includes('NEW_COMMENT') && first.includes('launcher') && !signals(first).includes('MERGE_READY'), first)
+  const out = poll(ctx, asked)
+  check('poll: [reviewer] Question is not a live blocker: it does not re-surface and is not an LGTM', !out.includes('launcher') && !signals(out).includes('MERGE_READY'), out)
+  const legacy = { ...asked, comments: [...asked.comments, comment('[reviewer] Verified abc123 against #4: criteria covered.', T('2026-01-01T12:10:00Z'))] }
+  poll(ctx, legacy) // seen once as an ordinary new comment, like any thread activity
+  const outL = poll(ctx, legacy)
+  check('poll: retired [reviewer] Verified kind is tolerated (not re-surfaced, not an LGTM)', !outL.includes('Verified abc123') && !signals(outL).includes('MERGE_READY'), outL)
+  const answered = { ...legacy, comments: [...legacy.comments, comment('keep', T('2026-01-01T13:00:00Z')), comment('[reviewer] LGTM — abc123 against #4. Before you merge: run ./loom check on the Mac.', T('2026-01-01T13:05:00Z'))] }
+  const out2 = poll(ctx, answered)
+  check('poll: Question → operator answers → LGTM with a before-merge note → MERGE_READY', signals(out2).includes('MERGE_READY'), out2)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  poll(ctx, BASE)
+  const lgtmThenQuestion = { ...BASE, comments: [
+    comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z')),
+    comment('[reviewer] Question: ship the old default?\n\nThe issue is silent on it.\n\nReply with: "yes", or "no, use X".', T('2026-01-01T12:30:00Z')),
+  ] }
+  const out = poll(ctx, lgtmThenQuestion)
+  check('poll: a later [reviewer] Question withholds MERGE_READY until the next verdict', !signals(out).includes('MERGE_READY'), out)
+  const relgtm = { ...lgtmThenQuestion, comments: [...lgtmThenQuestion.comments, comment('yes', T('2026-01-01T13:00:00Z')), comment('[reviewer] LGTM — recheck', T('2026-01-01T13:05:00Z'))] }
+  const out2 = poll(ctx, relgtm)
+  check('poll: the operator answers and the reviewer re-approves → MERGE_READY', signals(out2).includes('MERGE_READY'), out2)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {

@@ -33,7 +33,9 @@ verifiable by a test CI runs, or marked for the operator to confirm), Reference 
   post a question for something a default covers.
 - **Ask (and stop) only** when no safe default exists, or the call is security- or
   privacy-relevant in the loosening direction, or it is an outward-facing action beyond your own
-  branch and PR. Post `[executor] Question: …` as an issue comment, then park (SKILL.md).
+  branch and PR. Post the question as an issue comment in the shape of "Asking the operator"
+  (SKILL.md), add `<needs-operator-label>` to the issue, then park (SKILL.md). The label stays on
+  while the question is open; you remove it when you resume.
 
 ## 3. Build it the project's way
 
@@ -57,9 +59,12 @@ Re-read the acceptance criteria and the project conventions. For each criterion 
 - **Code-verifiable**: a specific test asserts it. Name the test. A green suite is not enough;
   the test must assert *this* criterion. Where it is cheap, break the behaviour on purpose and
   confirm the test fails, then restore it.
-- **Operator confirms**: only a human can observe it (a real model, a device, a UI judgement).
-  Write the exact steps or commands the operator runs into the PR body and mark the criterion
-  "operator confirms". Do not pretend a test covers it.
+- **By hand**: only a human can observe it, such as a real model, a device, or a workflow that
+  exists only after merge. Write the exact steps or commands the operator runs into the PR body.
+  Do not pretend a test covers it, and do not ask the operator about it: the reviewer lists it in
+  the LGTM under "Before you merge", and the operator confirms by a comment or by merging. The one
+  exception is a PR that must record the operator's results, such as measurements: ask for them
+  once as a question (SKILL.md, "Asking the operator").
 
 Fix every unsatisfied code-verifiable criterion before opening the PR.
 
@@ -76,7 +81,7 @@ terse and stays true after merge:
 | Criterion | Evidence |
 |---|---|
 | <criterion, quoted or named> | `<test file>::<test name>` |
-| <criterion> | operator confirms: <exact command or steps> |
+| <criterion> | by hand, before merge: <exact command or steps> |
 
 ## Decisions
 - <call you made>: <what and why, one line each>
