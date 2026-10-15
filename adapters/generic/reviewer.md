@@ -47,8 +47,12 @@ post nothing, wait ~120s. Otherwise the full review:
      criterion or rule it breaks, the concrete fix and the regression test to add;
    - or `[reviewer] Verified <sha> against #<M>: criteria covered, CI green, no findings.
      Awaiting operator confirmation of: <criterion>, by <steps>.`;
-   - or `[reviewer] LGTM — <sha> against #<M>.` only when every criterion has evidence, every
-     operator-confirms criterion is confirmed, CI is green and you have no findings.
+   - or `[reviewer] LGTM — <sha> against #<M>, CI <green | pending>.` only when every criterion
+     has evidence, every operator-confirms criterion is confirmed and you have no findings. CI is
+     not a precondition (the executor's poll gates `MERGE_READY` on it and nothing re-triggers you
+     when a check finishes); a red check caused by the PR is a finding. Every comment starts with
+     its kind — `LGTM`, `Verified`, `Merge conflicts`, or findings — because the executor's poll
+     classifies by prefix, and a finding posted after an LGTM revokes it.
 
    Wait ~300s.
 

@@ -6,7 +6,8 @@ description: >
   hosts (executor, reviewer, qa, or operator for your own clone).
 argument-hint: "<executor|reviewer|qa|operator> [--repo owner/repo]"
 disable-model-invocation: true
-allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/setup-project.sh *)
+allowed-tools:
+  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/setup-project.sh *)
 ---
 
 Run the setup script for this clone. The first argument is the role (`executor`, `reviewer`,
@@ -14,7 +15,7 @@ Run the setup script for this clone. The first argument is the role (`executor`,
 `--repo owner/repo`, is passed through unchanged:
 
 ```
-bash ${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/setup-project.sh --role <role> <remaining arguments>
+bash ${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/setup-project.sh --role <role> --plugin-root ${CLAUDE_PLUGIN_ROOT} <remaining arguments>
 ```
 
 Arguments given: `$ARGUMENTS`. The script determines the repo from the `## Agent loop` block in
@@ -28,7 +29,7 @@ show the template the script printed and say the project owner adds it (this ski
 
 What the script does, for reference: creates the `in-progress` and `is-blocked` labels if missing;
 ignores `.agent-loop/` and `.claude/settings.local.json` (clone-local `.git/info/exclude` when `.gitignore` lacks them, so the working tree stays clean); writes `.agent-loop/role`
-(or removes it for `operator`), which is what makes the plugin's merge guard refuse `gh pr merge`
-in agent clones; adds the role's Bash allow rules to `.claude/settings.local.json` so the loop
-runs without permission prompts; runs `git config core.hooksPath .githooks` when the project ships
+(or removes it for `operator`), which is what makes the plugin's guard hook refuse `gh pr merge` and
+`git push` to main in agent clones; adds the role's Bash allow rules to `.claude/settings.local.json` so the loop
+runs without permission prompts (agent roles only; the operator clone gets none); runs `git config core.hooksPath .githooks` when the project ships
 hooks. Full adapter notes: `${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/README.md`.

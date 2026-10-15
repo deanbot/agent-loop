@@ -26,10 +26,12 @@ ask and stop — never both.
 
 - PR number → orient (read the description and the whole thread; remove a lingering
   `blocked-label` from the issue), enter the poll loop.
-- Issue number → look for an open PR whose body has `Closes #N`; found → orient and poll; not
+- Issue number → look for an open PR whose body has `Closes #N` (`gh pr list --state open
+  --limit 100 --json number,body`; treat a missing body as empty); found → orient and poll; not
   found → implement.
-- Nothing → pick next: lowest-numbered open issue without `in-progress-label` or `blocked-label`
-  whose `Depends on #…` issues are all closed.
+- Nothing → pick next: `gh issue list --state open --limit 200 --json number,labels,body`, then the
+  lowest-numbered issue without `in-progress-label` or `blocked-label` whose `Depends on #…`
+  issues are all closed.
 
 ## Implement
 
@@ -70,7 +72,8 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 - `NEW_REVIEW_SUBMISSION` / `NEW_COMMENT` → collect **all** unaddressed `[reviewer]` and `[qa]`
   findings and operator direction; verify each; fix all in one pass; push once; post one
   `[executor] Pushed fix in <sha>: …`. Operator comments are direction or questions; answer them.
-  Re-read the thread immediately before posting and fold in anything new.
+  `[reviewer] Verified …` (awaiting the operator) needs nothing from you. Re-read the thread
+  immediately before posting and fold in anything new.
 - `MERGE_READY` → notify the operator; keep polling. Never merge.
 - `NONE` → wait.
 - Question with no safe default → `[executor] Question: …`; after 10 consecutive `NONE` cycles

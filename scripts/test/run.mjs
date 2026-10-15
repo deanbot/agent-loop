@@ -194,6 +194,79 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+{
+  const ctx = makeEnv()
+  const errored = { ...BASE, checks: 'error', comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+  const first = poll(ctx, errored)
+  check('poll: unreadable CI (auth/network) does not crash', !first.startsWith('EXIT'), first)
+  const out = poll(ctx, errored)
+  check('poll: unreadable CI fails closed → no MERGE_READY, no CI_FAILING', !signals(out).includes('MERGE_READY') && !signals(out).includes('CI_FAILING'), out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const cancelled = { ...BASE, checks: [{ name: 'check', state: 'CANCELLED', bucket: 'cancel', link: 'https://ci/5' }], comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+  const out = poll(ctx, cancelled)
+  check('poll: cancelled check → CI_FAILING and no MERGE_READY (not a silent stall)', signals(out).includes('CI_FAILING') && !signals(out).includes('MERGE_READY'), out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const failing = (completedAt) => ({ ...BASE, checks: [{ name: 'lint', state: 'FAILURE', bucket: 'fail', link: 'https://ci/9', completedAt }] })
+  poll(ctx, failing('2026-01-01T10:05:00Z'))
+  const same = poll(ctx, failing('2026-01-01T10:05:00Z'))
+  check('poll: unchanged failing run not re-reported', !signals(same).includes('CI_FAILING'), same)
+  const rerun = poll(ctx, failing('2026-01-01T10:20:00Z'))
+  check('poll: a re-run that fails again on the same head → CI_FAILING again', signals(rerun).includes('CI_FAILING'), rerun)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  poll(ctx, BASE)
+  const lgtmThenFinding = { ...BASE, comments: [
+    comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z')),
+    comment('also handle the empty case please', T('2026-01-01T12:10:00Z')),
+    comment('[reviewer] Recheck: 1. **Empty input still crashes.** …', T('2026-01-01T12:20:00Z')),
+  ] }
+  const out = poll(ctx, lgtmThenFinding)
+  check('poll: a later [reviewer] finding revokes an earlier LGTM without a push → no MERGE_READY', !signals(out).includes('MERGE_READY') && signals(out).includes('NEW_COMMENT'), out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  poll(ctx, BASE, ['--require-qa'])
+  const passThenBlocked = { ...BASE, comments: [
+    comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z')),
+    comment('[qa] PASS', T('2026-01-01T12:01:00Z')),
+    comment('[qa] BLOCKED\n\n| x | none | ❌ |', T('2026-01-01T12:30:00Z')),
+  ] }
+  const out = poll(ctx, passThenBlocked, ['--require-qa'])
+  check('poll --require-qa: a later [qa] BLOCKED revokes an earlier PASS → no MERGE_READY', !signals(out).includes('MERGE_READY'), out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const verified = { ...BASE, comments: [comment('[reviewer] Verified abc123 against #4: criteria covered. Awaiting operator confirmation of: the real-model check.', T('2026-01-01T12:00:00Z'))] }
+  const first = poll(ctx, verified)
+  check('poll: [reviewer] Verified (awaiting operator) is not a live blocker', !first.includes('Awaiting operator'), first)
+  const out = poll(ctx, verified)
+  check('poll: [reviewer] Verified does not count as LGTM → no MERGE_READY', !signals(out).includes('MERGE_READY'), out)
+  const confirmed = { ...verified, comments: [...verified.comments, comment('ran it, both models load', T('2026-01-01T13:00:00Z')), comment('[reviewer] LGTM — operator confirmed the real-model check.', T('2026-01-01T13:05:00Z'))] }
+  const out2 = poll(ctx, confirmed)
+  check('poll: Verified → operator confirms → LGTM → MERGE_READY', signals(out2).includes('MERGE_READY'), out2)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  poll(ctx, BASE)
+  const page1 = Array.from({ length: 30 }, (_, i) => comment(`older comment ${i}`, T('2026-01-01T09:00:00Z')))
+  const page2 = [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))]
+  const paged = { ...BASE, comments_pages: [page1, page2] }
+  const out = poll(ctx, paged)
+  check('poll: comments beyond the first API page are read (paginate + slurp)', signals(out).includes('MERGE_READY') && out.includes('[reviewer] LGTM'), out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- pr-watch.mjs / pr-qa.mjs smoke
 {
   const ctx = makeEnv()
@@ -212,6 +285,10 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   const opComment = { ...reviewed, comments: [...reviewed.comments, comment('looks good, one more thing', T('2026-01-01T12:30:00Z'))] }
   const out4 = run(ctx, 'pr-watch.mjs', ['--repo', REPO], opComment)
   check('watch: new operator comment → REVIEW_COMMENTS:7', out4.trim() === 'REVIEW_COMMENTS:7', out4)
+  const page1 = Array.from({ length: 30 }, (_, i) => comment(`old ${i}`, T('2026-01-01T09:00:00Z')))
+  const paged = { ...opComment, comments_pages: [page1, [...opComment.comments, comment('and one on page two', T('2026-01-01T12:40:00Z'))]] }
+  const out4b = run(ctx, 'pr-watch.mjs', ['--repo', REPO], paged)
+  check('watch: a new comment on the second API page is seen → REVIEW_COMMENTS:7', out4b.trim() === 'REVIEW_COMMENTS:7', out4b)
   const conflict = { ...opComment, prs: [{ number: 7, headRefOid: 'zzz999', mergeable: 'CONFLICTING' }] }
   const out5 = run(ctx, 'pr-watch.mjs', ['--repo', REPO], conflict)
   check('watch: new commit on conflicting branch → MERGE_CONFLICT:7', out5.trim() === 'MERGE_CONFLICT:7', out5)

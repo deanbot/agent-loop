@@ -7,7 +7,12 @@ description: >
   invocation only; runs headless in its own clone.
 argument-hint: "[issue-or-PR-number]"
 disable-model-invocation: true
-allowed-tools: Bash(gh issue *) Bash(gh pr *) Bash(gh api *) Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/*)
+allowed-tools:
+  - Bash(gh issue *)
+  - Bash(gh pr *)
+  - Bash(gh api *)
+  - Bash(gh run *)
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/*)
 ---
 
 You are the **executor** of the agent-loop protocol (spec: `${CLAUDE_PLUGIN_ROOT}/spec/SPEC.md`).
@@ -46,15 +51,16 @@ Rules that hold for the whole session:
 
 - Run `gh pr view $ARGUMENTS --repo <repo> --json number,body,headRefName`. If it succeeds,
   this is a PR: note its linked issue (`Closes #N` in the body), orient (below), enter the loop.
-- Otherwise, with an issue number: `gh pr list --repo <repo> --state open --json number,body
-  --jq '[.[] | select(.body | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`. A PR
-  found → orient on it and enter the loop (do not re-claim). None → claim and implement
+- Otherwise, with an issue number: `gh pr list --repo <repo> --state open --limit 100 --json
+  number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first |
+  .number'`. A PR found → orient on it and enter the loop (do not re-claim). None → claim and
+  implement
   (read [reference/implement.md](reference/implement.md) now; it covers the author check, the
   label claim, dependencies, tests-first, the pre-PR self-check and the PR body).
 - Empty → pick the next issue (below), then treat it as an issue number.
 
-**Pick next.** `gh issue list --state open --repo <repo> --json number,title,body,labels --jq
-'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and
+**Pick next.** `gh issue list --state open --repo <repo> --limit 200 --json number,title,body,labels
+--jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and
 (index("<blocked-label>") | not)))'`, then take the first candidate whose dependencies are all
 closed (an issue names them as `Depends on #a, #b`; check each with `gh issue view <a> --repo
 <repo> --json state`). None → say there is nothing to pick and end without a wakeup.
@@ -83,7 +89,8 @@ Each cycle:
      post one `[executor] Pushed fix: …`.
    - Comments → collect **all** unaddressed `[reviewer]` and `[qa]` findings and operator
      direction, verify each, fix all in one pass, push once, post one summary comment. Reply to
-     every inline thread you were asked about. Skip your own `[executor]` posts.
+     every inline thread you were asked about. A `[reviewer] Verified …` comment needs nothing
+     from you. Your own `[executor]` posts are already filtered out.
    - `MERGE_READY` → print the status block with "✅ Ready — operator merges", keep polling.
    - `NONE` → nothing to do.
 3. **Before posting any comment**, re-fetch `gh pr view <PR> --comments --repo <repo>` and fold
@@ -119,7 +126,7 @@ minutes and then ends the loop, so do not rely on it.
   BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on
   <PR #n | issue #N>.` on the PR if one exists, else on the issue. Then pick next. Never open a
   speculative PR and never keep building a blocked issue.
-- **Operator says "stop"** (any message containing it): remove `<in-progress-label>` from the
+- **Operator says "stop"** (a message that is, or begins with, the word stop): remove `<in-progress-label>` from the
   issue if you are mid-implementation (leave it when a PR exists — the PR is the claim), say
   "Executor stopped", and call `ScheduleWakeup({ stop: true })`. Nothing else.
 

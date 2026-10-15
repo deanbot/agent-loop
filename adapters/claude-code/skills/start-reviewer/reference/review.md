@@ -87,12 +87,15 @@ Awaiting operator confirmation of: <criterion>, by running <steps from the PR bo
 Nothing missing:
 
 ```
-[reviewer] LGTM — <short sha> against #<M>. <One line on what the evidence was.>
+[reviewer] LGTM — <short sha> against #<M>, CI <green | pending>. <One line on what the evidence was.>
 ```
 
-For a follow-up after the executor's fix: "Recheck of <sha>." plus only what is still wrong, or
-`LGTM`. Repo conventions apply to your comments (for example, no tool attribution). Never call a
-PR good while CI is pending or red for a reason in this PR. Never ask first; post.
+For a follow-up after the executor's fix: findings start `[reviewer] Recheck of <sha>.` and list
+only what is still wrong; a passing recheck starts `[reviewer] LGTM — recheck of <sha>: …`. The
+first word after the prefix is what the executor's poll classifies, so an LGTM never hides behind
+other text. Repo conventions apply to your comments (for example, no tool attribution). A red check
+caused by this PR is a finding, not an LGTM; a pending check is noted, not waited for. Never ask
+first; post.
 
 ## 5. Report to the operator
 

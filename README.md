@@ -103,7 +103,8 @@ trusted-authors: [your-login]
 Make one clone per role (for example `proj`, `proj-exec`, `proj-review`) and run
 `/agent-loop:setup <operator|executor|reviewer|qa>` inside each. It creates the labels, ignores
 `.agent-loop/` and `.claude/settings.local.json`, writes the clone's role marker (which makes the
-plugin's hook refuse `gh pr merge` there), and adds the role's permission rules.
+plugin's hook refuse `gh pr merge` and pushes to `main` there), and adds the role's permission
+rules. Needs `gh` 2.43+ and Node 18+.
 
 Run, one session per clone: `/agent-loop:start-executor [issue-or-PR]`,
 `/agent-loop:start-reviewer`, and with `qa-gate: on` `/agent-loop:start-qa`. Say `stop` to end a

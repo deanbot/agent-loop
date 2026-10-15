@@ -55,7 +55,8 @@ bump needed), then restart running loop sessions.
 
 Each cycle runs the signal script once, handles the signals, prints a status line and calls
 `ScheduleWakeup({ delaySeconds, noop, prompt, reason })`; the wakeup re-enters the loop. Delays:
-executor 60s; reviewer and QA 300s after posting, 120s otherwise. `stop: true` ends a loop. The
+executor 60s; reviewer and QA 300s after posting, 120s otherwise. `stop: true` ends a loop.
+`gh` 2.43 or newer is required (`gh api --slurp`). The
 loop also works when started as `/loop /agent-loop:start-reviewer` (Esc cancels a pending wakeup).
 Claude Code fires one fallback wakeup about 20 minutes after an iteration that forgot to
 reschedule, then ends the loop. Loops are session-scoped: they do not survive closing the
@@ -70,11 +71,14 @@ and pipes are not statically matchable and would prompt every cycle. `find` is n
 prefix-approvable either, which is one reason the stop-sentinel mechanism was dropped in favour
 of `ScheduleWakeup({ stop: true })`.
 
-## Merge guard
+## Guard hook
 
-`hooks/guard.mjs` runs on `PreToolUse` for `gh …` commands. When the working directory holds
-`.agent-loop/role` it denies `gh pr merge` and the REST merge route with a reason the agent reads.
-The operator's clone has no marker, so nothing changes there.
+`hooks/guard.mjs` runs on every `PreToolUse` for Bash. When the working directory holds
+`.agent-loop/role` it denies, anywhere in the command text, `gh pr merge`, the REST and GraphQL
+merge routes, and `git push` to `main`/`master`, with a reason the agent reads. The operator's
+clone has no marker, so nothing changes there. It is a safety net behind the prompt rule, not a
+security boundary: the same action through another program (a script, `sh -c`, the API from node)
+is not caught. A comment body that quotes the literal phrase `gh pr merge` is refused too; reword.
 
 ## Known limitations
 

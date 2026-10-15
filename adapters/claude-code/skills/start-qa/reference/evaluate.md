@@ -1,16 +1,12 @@
 # QA: evaluating a PR
 
-## Step 0 — CI gate
+## Step 0 — CI is not your gate
 
-`gh pr checks <n> --repo <repo> --json name,state,bucket` as one plain command; read the JSON
-(do not pipe to `jq`). With `--json` the command exits 0 while checks are pending or failing; a
-non-zero exit with empty output means no checks or no such PR, not a CI state.
-
-- Empty or no checks → continue.
-- Any `"bucket": "pending"` → post `[qa] Waiting: CI still running — <N> check(s) pending.` and
-  stop here for this PR.
-- Any `"bucket": "fail"` → post `[qa] BLOCKED: CI failing — <names>. Fix CI before A.C.
-  evaluation.` and stop here.
+Do not wait for or block on CI. The executor receives `CI_FAILING` from its own poll and
+`MERGE_READY` requires green checks; a `[qa] Waiting` comment would never be re-triggered when the
+checks finish, because your own `[qa]` comments do not count as activity. Evidence for a criterion
+is a test that asserts it **and** is in the CI gate's scope, not the colour of the current run.
+You may note the CI state in the verdict line.
 
 ## Step 1 — gather, in parallel
 

@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
 # Set up the current project checkout for agent-loop (Claude Code adapter).
 #
-#   setup-project.sh [--role executor|reviewer|qa|operator] [--repo owner/repo]
+#   setup-project.sh [--role executor|reviewer|qa|operator] [--repo owner/repo] [--plugin-root <dir>]
 #
 # Idempotent. Run it once in every clone that hosts a role:
 #   - creates the in-progress / blocked labels if missing
 #   - ignores .agent-loop/ and .claude/settings.local.json (via .git/info/exclude when .gitignore lacks them)
 #   - writes the role marker .agent-loop/role (removed for --role operator)
-#   - adds the role's permission allow rules to .claude/settings.local.json
+#   - adds the role's permission allow rules to .claude/settings.local.json (agent roles only;
+#     --plugin-root names the installed plugin so its scripts are allowed wherever they live)
 #   - enables .githooks if the project ships one
 #   - checks AGENTS.md for the "## Agent loop" block and prints the template if missing
 set -euo pipefail
 
 ROLE=operator
 REPO=""
+PLUGIN_ROOT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --role) ROLE="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
+    --plugin-root) PLUGIN_ROOT="$2"; shift 2 ;;
     -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -50,7 +53,7 @@ echo "agent-loop setup: repo=$REPO role=$ROLE"
 # --- labels -----------------------------------------------------------------------------------
 existing_labels="$(gh label list --repo "$REPO" --limit 200 --json name --jq '.[].name')"
 ensure_label() {  # name color description
-  if printf '%s\n' "$existing_labels" | grep -qx -- "$1"; then
+  if printf '%s\n' "$existing_labels" | grep -qxF -- "$1"; then
     echo "  label exists: $1"
   else
     gh label create "$1" --repo "$REPO" --color "$2" --description "$3" >/dev/null
@@ -86,28 +89,31 @@ if [ "$ROLE" = operator ]; then
   echo "  role marker: none (operator clone — gh pr merge allowed here)"
 else
   printf '%s\n' "$ROLE" > .agent-loop/role
-  echo "  role marker: .agent-loop/role = $ROLE (gh pr merge is refused in this clone)"
+  echo "  role marker: .agent-loop/role = $ROLE (gh pr merge and git push to main are refused in this clone)"
 fi
 
 # --- permissions ------------------------------------------------------------------------------
+# Agent roles only: the operator's clone keeps its normal prompts (and has no merge guard).
 # Rules are literal text matches against the command Claude writes. The plugin scripts run as
-# node <absolute cache path>/scripts/<name>.mjs, so the rule names that path with a wildcard
-# over the version segment.
-PLUGIN_CACHE="$HOME/.claude/plugins/cache/agent-loop/agent-loop"
-mkdir -p .claude
-node - "$ROLE" "$PLUGIN_CACHE" <<'NODE'
+# node <plugin root>/scripts/<name>.mjs; the installed root is the versioned cache directory, so
+# the rule covers that with a wildcard, plus the exact root the setup skill saw (--plugin-root),
+# which differs for a --plugin-dir development run.
+if [ "$ROLE" = operator ]; then
+  echo "  permissions: none written for the operator clone"
+else
+  PLUGIN_CACHE="$HOME/.claude/plugins/cache/agent-loop/agent-loop"
+  mkdir -p .claude
+  node - "$ROLE" "$PLUGIN_CACHE" "$PLUGIN_ROOT" <<'NODE'
 const fs = require('fs')
-const [role, cache] = process.argv.slice(2)
+const [role, cache, pluginRoot] = process.argv.slice(2)
 const file = '.claude/settings.local.json'
 const common = ['Bash(gh *)', `Bash(node ${cache}/*)`]
+if (pluginRoot && !pluginRoot.startsWith(cache)) common.push(`Bash(node ${pluginRoot.replace(/\/$/, '')}/scripts/*)`)
+const git = (...sub) => sub.map((s) => `Bash(git ${s} *)`)
 const byRole = {
-  executor: ['Bash(git status *)', 'Bash(git log *)', 'Bash(git diff *)', 'Bash(git show *)', 'Bash(git fetch *)',
-    'Bash(git pull *)', 'Bash(git checkout *)', 'Bash(git switch *)', 'Bash(git branch *)', 'Bash(git add *)',
-    'Bash(git commit *)', 'Bash(git push *)', 'Bash(git rebase *)', 'Bash(git stash *)'],
-  reviewer: ['Bash(git status *)', 'Bash(git log *)', 'Bash(git diff *)', 'Bash(git show *)', 'Bash(git fetch *)',
-    'Bash(git checkout *)', 'Bash(git switch *)', 'Bash(git branch *)'],
+  executor: git('status', 'log', 'diff', 'show', 'fetch', 'pull', 'checkout', 'switch', 'branch', 'add', 'commit', 'push', 'rebase', 'stash'),
+  reviewer: git('status', 'log', 'diff', 'show', 'fetch', 'checkout', 'switch', 'branch'),
   qa: [],
-  operator: [],
 }
 let settings = {}
 try { settings = JSON.parse(fs.readFileSync(file, 'utf8')) } catch {}
@@ -120,6 +126,7 @@ for (const rule of [...common, ...byRole[role]]) {
 fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n')
 console.log(added.length ? `  permissions: added ${added.length} rule(s) to ${file}` : `  permissions: ${file} already up to date`)
 NODE
+fi
 
 # --- project hooks ----------------------------------------------------------------------------
 if [ -d .githooks ]; then

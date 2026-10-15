@@ -24,10 +24,9 @@ QA."` Wait ~120s.
 
 **`QA_READY:<n>`** (new commits, or a new operator comment such as a manual confirmation):
 
-0. CI gate, one plain command: `gh pr checks <n> --repo <repo> --json name,state,bucket`. Read the
-   JSON. Any `pending` → post `[qa] Waiting: CI still running — <N> check(s) pending.`, stop
-   (~120s). Any `fail` → post `[qa] BLOCKED: CI failing — <names>. Fix CI before A.C. evaluation.`,
-   stop (~120s). Empty or no checks → continue.
+0. CI is not your gate: the executor receives `CI_FAILING` and its poll withholds `MERGE_READY`
+   until checks are green, and nothing would re-trigger you when a check finishes. Evidence is a
+   test in the CI gate's scope, not the colour of the current run.
 1. Gather: `gh pr view <n> --json body,title`, `gh pr diff <n>`, `gh pr view <n> --comments`,
    project convention files. Fetch first, then write: never compose the verdict in the same
    batch.

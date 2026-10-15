@@ -43,7 +43,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
 - If it succeeds: $ARGUMENTS is a PR — note linked issue from PR body (`Closes #<N>`), orient (step 6b), enter executor loop (step 7).
 - If it fails or $ARGUMENTS is empty: treat as issue number or pick next.
   - **Empty $ARGUMENTS:** run pick-next query (step 8), use result as issue number.
-  - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --json number,body --jq '[.[] | select(.body | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
+  - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
     - Not found: immediately before claiming, re-fetch: `gh issue view <N> --repo <repo> --json labels,author,authorAssociation --jq '{labels: [.labels[].name], login: .author.login, assoc: .authorAssociation}'`
       - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8. **Do not infer staleness — absence of an open PR is not evidence the claim is stale. The label is authoritative.**
@@ -142,6 +142,6 @@ Signal handling:
 
 ## Pick next item (step 8)
 
-`gh issue list --state open --repo <repo> --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and (index("<blocked-label>") | not))) | first'`
+`gh issue list --state open --repo <repo> --limit 200 --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and (index("<blocked-label>") | not))) | first'`
 
 Take the first result whose dependencies (`Depends on #a, #b` in the body) are all closed (`gh issue view <a> --repo <repo> --json state`); skip the others. If one is found: restart from detect input type with that issue number. If none: STOP and notify user.

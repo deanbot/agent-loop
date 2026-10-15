@@ -48,6 +48,12 @@ if (!repo) {
   process.exit(1)
 }
 
+// `gh api --paginate` prints one JSON document per page; `--slurp` wraps them in one array (gh ≥ 2.43).
+function ghApiAll(path) {
+  const pages = JSON.parse(execSync(`gh api --paginate --slurp "${path}"`, { encoding: 'utf8' }))
+  return pages.flat()
+}
+
 const repoSlug = repo.replace('/', '-')
 const STATE_DIR = path.join(homedir(), '.agent-loop', 'state')
 const STATE_FILE = path.join(STATE_DIR, `${repoSlug}-pr-state.json`)
@@ -112,22 +118,14 @@ for (const { number, headRefOid, mergeable } of prs) {
     }
     // Advance comment cursors — reviewer reads thread during REVIEW, so seeding here
     // prevents pre-REVIEW comments from re-firing as REVIEW_COMMENTS next run.
-    const comments = JSON.parse(
-      execSync(`gh api "repos/${repo}/issues/${number}/comments"`, { encoding: 'utf8' })
-    )
-    const inlineComments = JSON.parse(
-      execSync(`gh api "repos/${repo}/pulls/${number}/comments"`, { encoding: 'utf8' })
-    )
+    const comments = ghApiAll(`repos/${repo}/issues/${number}/comments`)
+    const inlineComments = ghApiAll(`repos/${repo}/pulls/${number}/comments`)
     entry.lastComment = comments.length > 0 ? comments.at(-1).id : (entry.lastComment ?? 0)
     entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : (entry.lastReviewComment ?? 0)
   } else {
     // No new commits — check for new non-reviewer comments (timeline + inline review)
-    const comments = JSON.parse(
-      execSync(`gh api "repos/${repo}/issues/${number}/comments"`, { encoding: 'utf8' })
-    )
-    const inlineComments = JSON.parse(
-      execSync(`gh api "repos/${repo}/pulls/${number}/comments"`, { encoding: 'utf8' })
-    )
+    const comments = ghApiAll(`repos/${repo}/issues/${number}/comments`)
+    const inlineComments = ghApiAll(`repos/${repo}/pulls/${number}/comments`)
     const hasReviewerPost = comments.some((c) => /^\[reviewer\]/.test(c.body ?? ''))
     if (!hasReviewerPost) {
       // Reviewer has never posted — PR needs initial review regardless of session

@@ -8,7 +8,17 @@ description: >
   runs headless in its own clone until stopped.
 argument-hint: "[--skip n,n]"
 disable-model-invocation: true
-allowed-tools: Bash(gh pr *) Bash(gh issue *) Bash(gh api *) Bash(gh run *) Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/*) Bash(git fetch *) Bash(git switch *) Bash(git show *) Bash(git diff *) Bash(git log *)
+allowed-tools:
+  - Bash(gh pr *)
+  - Bash(gh issue *)
+  - Bash(gh api *)
+  - Bash(gh run *)
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/*)
+  - Bash(git fetch *)
+  - Bash(git switch *)
+  - Bash(git show *)
+  - Bash(git diff *)
+  - Bash(git log *)
 ---
 
 You are the **reviewer** of the agent-loop protocol (spec: `${CLAUDE_PLUGIN_ROOT}/spec/SPEC.md`).
@@ -79,20 +89,27 @@ forgets, then ends the loop; do not rely on it.)
 
 ## What you post
 
-- `[reviewer] LGTM` only when every acceptance criterion has evidence, every "operator confirms"
-  criterion has the operator's unprefixed confirmation on the PR, CI is green on the current head,
-  and you have no findings. `LGTM` is what lets the executor report `MERGE_READY`.
-- Findings, numbered, each with the evidence you produced and the concrete fix (format in
-  reference/review.md). A suspicion you could not demonstrate is not a finding; drop it.
-- `[reviewer] Verified: … Awaiting operator confirmation of: <criteria>` when the only thing
-  missing is the operator's word.
+Every comment starts with its kind, because the executor's poll script classifies by prefix:
+
+- `[reviewer] LGTM …` — every acceptance criterion has evidence, every "operator confirms"
+  criterion has the operator's unprefixed confirmation on the PR, and you have no findings. Note
+  the CI state in the same line (`CI green` / `CI pending`), but CI is **not** a precondition: the
+  executor's poll gates `MERGE_READY` on CI and receives `CI_FAILING` itself, and nothing would
+  re-trigger you when CI finishes. A red check caused by this PR *is* a finding, so then you post
+  findings, not LGTM. A recheck that passes also starts with `[reviewer] LGTM`.
+- `[reviewer] Verified … Awaiting operator confirmation of: <criteria>` — the only thing missing
+  is the operator's word. Not actionable for the executor.
+- `[reviewer] Merge conflicts …` — as above.
+- Anything else under `[reviewer]` is read as findings: numbered, each with the evidence you
+  produced and the concrete fix (format in reference/review.md). A suspicion you could not
+  demonstrate is not a finding; drop it. A finding posted after an LGTM revokes it.
 - Do **not** relay CI status or echo operator comments: the executor receives `CI_FAILING` and
   operator comments directly. Translate an operator comment into a finding only when it needs
   analysis the operator did not give.
 
 ## Stopping
 
-Operator says "stop" (any message containing it): say "Reviewer stopped" and call
+Operator says "stop" (a message that is, or begins with, the word stop): say "Reviewer stopped" and call
 `ScheduleWakeup({ stop: true })`. Nothing else.
 
 ## Permissions
