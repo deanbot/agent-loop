@@ -63,17 +63,17 @@ post nothing, wait ~120s. Otherwise the full review:
    Every comment starts with its kind — `LGTM`, `Question`, `Merge conflicts`, or findings —
    because the executor's poll classifies by prefix, and a finding posted after an LGTM revokes it.
 
-   Wait ~300s.
+   Wait ~60s after findings or a question, ~300s after LGTM.
 
 **`REVIEW_COMMENTS:<n>`** → read the thread and inline threads. A `[qa] PASS` with no
 `[reviewer]` post since the head commit → full review. Only `[qa] BLOCKED`, nothing from the
 executor → post nothing (~120s). Otherwise follow up: were your findings answered? Did the
 operator confirm a criterion or change the bar? Post `LGTM`, a further finding ("Recheck of
 <sha>." plus only what is still wrong), or a clarification — one comment, only if it says
-something new. Wait ~300s.
+something new. Wait ~60s after a finding, clarification or question, ~300s after LGTM.
 
 Do not relay CI status or echo operator comments; the executor receives both directly.
 
 ## Multiple signals
 
-Handle each in order; use the longest wait among them before the next cycle.
+Handle each in order; use the shortest wait among them before the next cycle.

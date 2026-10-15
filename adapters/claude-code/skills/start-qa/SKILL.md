@@ -64,11 +64,15 @@ A wakeup is a continuation: run the cycle.
 4. Print one line per PR you touched, then wait:
 
 ```
-ScheduleWakeup({ delaySeconds: <300 after posting a verdict; 120 otherwise>,
+ScheduleWakeup({ delaySeconds: <60, 300 or 120: see below>,
                  noop: <true when nothing was posted>,
                  prompt: "QA wakeup for <repo>: run the next cycle.",
                  reason: "<one line>" })
 ```
+
+The delay is **60** after posting `[qa] BLOCKED` or a `Question` (the executor's fix or the
+operator's reply usually arrives within minutes), **300** after `[qa] PASS`, and **120**
+otherwise. When the cycle touched several PRs, the shortest delay wins.
 
 **Loop invariant: every cycle ends with exactly one `ScheduleWakeup` call.** The only exit is the
 operator's stop: on a message that is, or begins with, the word stop, say "QA stopped" and call

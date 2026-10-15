@@ -13,7 +13,8 @@ complexity: intermediate
 > arrive as PR comments. `[reviewer]` prefix on all posts from this agent.
 
 > **Scheduling note:** Kiro has no native loop primitive. After each poll cycle, wait
-> ~120s (NONE/MERGE_CONFLICT) or ~300s (after posting findings) then re-invoke this skill.
+> ~60s after posting findings or a question, ~300s after LGTM, ~120s otherwise, then
+> re-invoke this skill.
 > For autonomous operation, see the agent-loop repo's `adapters/kiro/README.md`.
 
 **Prerequisite check — do this first, before any other step:** Read `AGENTS.md` in the current working directory and verify a `## Agent loop` section exists. If not found, stop immediately — do not proceed. Tell the user:
@@ -55,8 +56,10 @@ If the operator sends a message containing "stop" at any point during the cycle:
 Run `node scripts/pr-watch.mjs --repo <repo> $ARGUMENTS` from the repo root and handle each signal below.
 
 **After handling any signal (including NONE), wait before the next cycle:**
-- After NONE or MERGE_CONFLICT: wait ~120 seconds
-- After posting findings or LGTM: wait ~300 seconds (give executor time to respond)
+- After posting findings, a clarification or a question: wait ~60 seconds (the
+  executor's fix or the operator's reply usually arrives within minutes)
+- After posting LGTM: wait ~300 seconds (the operator merges next; nothing is urgent)
+- Otherwise (NONE, MERGE_CONFLICT, nothing posted): wait ~120 seconds
 
 Then re-invoke this skill to start the next cycle.
 
@@ -95,7 +98,7 @@ Review the diff scoped to unanswered issues. Post:
 - A decision you cannot review without (never a criterion the operator checks by hand) → a standalone question, nothing else in it: `gh pr comment <n> --repo <repo> --body "[reviewer] Question: <decision, one line>` + two or three lines of context + `Reply with: <the replies that resolve it>"`, then `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>`. A question withholds `MERGE_READY` like a finding. When the operator replies (REVIEW_COMMENTS), remove the label and post your next verdict.
 - No findings → `gh pr comment <n> --body "[reviewer] LGTM"`
 
-Wait ~300 seconds before next cycle.
+Wait ~60 seconds after findings or a question, ~300 seconds after LGTM.
 
 **`REVIEW_COMMENTS:<n>`**
 Fetch:
@@ -104,7 +107,7 @@ Fetch:
 
 Read context: operator comments and `[executor]` responses. Ignore `[reviewer]` own posts. Then:
 
-- **If new comments include `[qa] PASS` and no `[reviewer]` post exists after the last commit:** QA gate just cleared — fetch `gh pr diff <n> --repo <repo>` and do a full code review (same as REVIEW above, [qa] PASS already confirmed). Wait ~300s.
+- **If new comments include `[qa] PASS` and no `[reviewer]` post exists after the last commit:** QA gate just cleared — fetch `gh pr diff <n> --repo <repo>` and do a full code review (same as REVIEW above, [qa] PASS already confirmed). Wait as after REVIEW.
 - **If new comments include only `[qa] BLOCKED` with no executor responses:** A.C. gate not cleared — post nothing; wait ~120s.
 - **Otherwise** (executor/operator responses to existing findings):
   - CI still failing with unfinished "Human setup required" steps: re-surface steps, add any code findings
@@ -112,8 +115,8 @@ Read context: operator comments and `[executor]` responses. Ignore `[reviewer]` 
   - Answers raise new issues → `gh pr comment <n> --body "[reviewer] <findings>"`
   - Answers need clarification → `gh pr comment <n> --body "[reviewer] <clarification>"`
   - The operator answered your `[reviewer] Question` → `gh pr edit <n> --repo <repo> --remove-label <needs-operator-label>`, then post your next verdict (`LGTM` or findings).
-  - Wait ~300 seconds before next cycle.
+  - Wait ~60 seconds after findings, a clarification or a question; ~300 seconds after LGTM.
 
 ## Multiple signals
 
-Signals are space-separated on one line. Handle each in order. Use the longest wait of all signals handled when deciding the delay before the next cycle.
+Signals are space-separated on one line. Handle each in order. Use the shortest wait of all signals handled when deciding the delay before the next cycle.

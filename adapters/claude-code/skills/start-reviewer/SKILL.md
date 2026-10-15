@@ -83,11 +83,21 @@ A wakeup is a continuation: run the cycle.
    for you — <one line>`. Then wait:
 
 ```
-ScheduleWakeup({ delaySeconds: <300 after posting findings or LGTM; 120 otherwise>,
+ScheduleWakeup({ delaySeconds: <60, 300 or 120: see below>,
                  noop: <true when nothing was posted>,
                  prompt: "Reviewer wakeup for <repo>: run the next watch cycle.",
                  reason: "<one line>" })
 ```
+
+The delay follows who moves next:
+
+- **60** after posting findings, a follow-up finding, a clarification or a `Question`: the
+  executor's fix or the operator's reply usually arrives within minutes.
+- **300** after posting LGTM: the next move is the operator's merge, and `CLOSED` or a new PR is
+  not urgent.
+- **120** otherwise (nothing posted, or only `Merge conflicts`).
+
+When the cycle touched several PRs, the shortest delay wins.
 
 **Loop invariant: every cycle ends with exactly one `ScheduleWakeup` call.** The only exit is the
 operator's stop. (Claude Code fires one fallback wakeup about 20 minutes after an iteration that
