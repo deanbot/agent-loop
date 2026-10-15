@@ -19,6 +19,7 @@
  *   REVIEW:<n>                    PR has new commits; ready for code review
  *   MERGE_CONFLICT:<n>            PR has new commits but branch has merge conflicts
  *   REVIEW_COMMENTS:<n>           PR has new operator (unprefixed) comments or inline review comments
+ *   CLOSED:<n>                    PR the script was tracking is no longer open (merged or closed); emitted once
  *
  * Multiple signals are space-separated on one line.
  * REVIEW:<n> takes precedence over REVIEW_COMMENTS:<n> for the same PR.
@@ -167,15 +168,21 @@ for (const { number, headRefOid, mergeable } of prs) {
   }
 }
 
-// Remove state for PRs no longer open (merged or closed)
+// PRs the script was tracking that are no longer open (merged or closed): say so once, then forget
+// them. Without this a merged PR silently vanishes and the agent's status never acknowledges it.
 const openNumbers = new Set(prs.map((p) => String(p.number)))
+const closed = []
 for (const key of Object.keys(state)) {
-  if (!openNumbers.has(key)) delete state[key]
+  if (!openNumbers.has(key)) {
+    closed.push(Number(key))
+    delete state[key]
+  }
 }
 
 writeFileSync(STATE_FILE, JSON.stringify(state))
 
 const signals = [
+  ...closed.sort((a, b) => a - b).map((n) => `CLOSED:${n}`),
   ...mergeConflicts.map((n) => `MERGE_CONFLICT:${n}`),
   ...toReview.map((n) => `REVIEW:${n}`),
   ...reviewComments.map((n) => `REVIEW_COMMENTS:${n}`),

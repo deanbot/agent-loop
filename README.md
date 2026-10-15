@@ -61,8 +61,8 @@ Three scripts emit signals. Agents handle signals and post prefixed comments. Lo
 
 ```
 pr-poll.mjs   (executor)  →  NEW_COMMENT, NEW_INLINE_COMMENT, NEW_REVIEW_SUBMISSION, CI_FAILING, MERGE_READY, MERGED, NONE
-pr-watch.mjs  (reviewer)  →  REVIEW:<n>, REVIEW_COMMENTS:<n>, MERGE_CONFLICT:<n>, NONE
-pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, NONE
+pr-watch.mjs  (reviewer)  →  REVIEW:<n>, REVIEW_COMMENTS:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NONE
+pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NONE
 ```
 
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green (+ `[qa] PASS` with

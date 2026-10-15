@@ -19,6 +19,8 @@ whole file: project rules are criteria too. Never merge or push; no interactive 
 
 **`NONE`** → wait ~120s.
 
+**`CLOSED:<n>`** → the operator merged or closed it; nothing to post. Note it and forget the PR.
+
 **`MERGE_CONFLICT:<n>`** → `gh pr comment <n> --body "[qa] Merge conflicts — rebase on main before
 QA."` Wait ~120s.
 

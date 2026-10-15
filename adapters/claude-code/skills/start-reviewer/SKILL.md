@@ -53,9 +53,12 @@ Rules that hold for the whole session:
 A wakeup is a continuation: run the cycle.
 
 1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> $ARGUMENTS`, once per cycle.
-   One line, space-separated signals: `NONE`, `MERGE_CONFLICT:<n>`, `REVIEW:<n>`,
+   One line, space-separated signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`, `REVIEW:<n>`,
    `REVIEW_COMMENTS:<n>`.
 2. Handle each signal:
+   - **`CLOSED:<n>`** (the operator merged or closed it) → nothing to post, whatever was
+     outstanding; the operator's merge is the final word. Say "PR #<n> merged or closed; dropped"
+     in the status line and forget it.
    - **`MERGE_CONFLICT:<n>`** → `gh pr comment <n> --repo <repo> --body "[reviewer] Merge
      conflicts — rebase on main before review."` Do not review the diff.
    - **`REVIEW:<n>`** (new commits, or a PR you have never posted on) → a full review. With

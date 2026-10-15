@@ -22,6 +22,8 @@ Take `repo` and `qa-gate` (default `off`). Never merge, never push.
 
 **`NONE`** → wait ~120s.
 
+**`CLOSED:<n>`** → the operator merged or closed it; nothing to post. Note it and forget the PR.
+
 **`MERGE_CONFLICT:<n>`** → `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main
 before review."` Wait ~120s.
 

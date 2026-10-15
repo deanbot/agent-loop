@@ -292,6 +292,11 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   const conflict = { ...opComment, prs: [{ number: 7, headRefOid: 'zzz999', mergeable: 'CONFLICTING' }] }
   const out5 = run(ctx, 'pr-watch.mjs', ['--repo', REPO], conflict)
   check('watch: new commit on conflicting branch → MERGE_CONFLICT:7', out5.trim() === 'MERGE_CONFLICT:7', out5)
+  const gone = { ...conflict, prs: [] }
+  const out6 = run(ctx, 'pr-watch.mjs', ['--repo', REPO], gone)
+  check('watch: tracked PR merged or closed → CLOSED:7 once', out6.trim() === 'CLOSED:7', out6)
+  const out7 = run(ctx, 'pr-watch.mjs', ['--repo', REPO], gone)
+  check('watch: closed PR not reported again → NONE', signals(out7).join() === 'NONE', out7)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
@@ -304,6 +309,8 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   const op = { ...fx, comments: [comment('verified by hand on my Mac', T('2026-01-01T12:00:00Z'))] }
   const out3 = run(ctx, 'pr-qa.mjs', ['--repo', REPO], op)
   check('qa: operator comment without a push → QA_READY:7', out3.trim() === 'QA_READY:7', out3)
+  const out4 = run(ctx, 'pr-qa.mjs', ['--repo', REPO], { ...op, prs: [] })
+  check('qa: tracked PR merged or closed → CLOSED:7 once', out4.trim() === 'CLOSED:7', out4)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 

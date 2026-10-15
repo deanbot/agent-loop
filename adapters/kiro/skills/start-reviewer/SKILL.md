@@ -62,6 +62,9 @@ Then re-invoke this skill to start the next cycle.
 **`NONE`**
 No activity. Wait ~120 seconds before next cycle.
 
+**`CLOSED:<n>`**
+The operator merged or closed the PR; nothing to post. Note it and forget the PR.
+
 **`MERGE_CONFLICT:<n>`**
 Post: `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main before review."`
 Wait ~120 seconds before next cycle.
