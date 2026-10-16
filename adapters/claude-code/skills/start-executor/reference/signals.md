@@ -1,14 +1,14 @@
 # Executor: signal handling
 
 `pr-poll.mjs` prints signal lines followed by content blocks indented two spaces. Your own
-`[executor]` posts are already filtered out. Handle every signal in a cycle before the single
-`ScheduleWakeup` call.
+`[executor]` posts are already filtered out. Handle every signal in a cycle before starting the
+waiter and the single `ScheduleWakeup` call.
 
 ## MERGED
 
 `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, then `git checkout main`,
 `git pull`. Tell the operator in one line. Pick next (SKILL.md); if there is a next issue, go
-straight into implementing it. No wakeup is scheduled for the merged PR.
+straight into implementing it. No waiter or wakeup for the merged PR.
 
 ## CI_FAILING
 
@@ -81,9 +81,10 @@ Nothing new. Wait with `noop: true`.
 ## Questions and blocks in the loop
 
 - Ask only when no safe default exists, in the shape of "Asking the operator" (SKILL.md): the
-  standalone comment, the `<needs-operator-label>`, the push notification. Then keep polling.
-  Count `NONE` cycles since the question; at 10 with no unprefixed reply, park (the question is
-  still open, so `<needs-operator-label>` stays on until you resume):
+  standalone comment, the `<needs-operator-label>`, the push notification. Then keep polling,
+  with `--max 600` waiters while the question is open. When a cycle's poll is `NONE` and the
+  question has had no unprefixed reply for 10 minutes, park (the question is still open, so
+  `<needs-operator-label>` stays on until you resume):
   `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label> --repo <repo>`
   and `gh pr comment <PR> --repo <repo> --body "[executor] BLOCKED: no response — moving on. To
   resume: remove the \`<blocked-label>\` label and re-run start-executor on PR #<PR>."`, then pick

@@ -22,6 +22,9 @@ Three layers. Boundaries are strict.
 - `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]`.
   Signals then content blocks, exits.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
+- `scripts/lib/wait.mjs` — shared driver. Every script also takes `--wait [secs] [--max secs]`: a
+  waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:
+  "Waiting for events").
 - `scripts/test/run.mjs` — contract tests for all three against a fake `gh`
   (`scripts/test/fake-gh.mjs`). Run `node scripts/test/run.mjs` before any script change lands.
 - `spec/SPEC.md` — the protocol contract: roles, config keys, signals, merge policy, collision
@@ -68,9 +71,10 @@ reviewer agent are impossible when reviewer and executor share one account. The 
 protocol is the workaround. A second account unlocks formal signals — documented in the spec, not
 implemented.
 
-**Scheduling is adapter-specific.** Claude Code: `ScheduleWakeup({ delaySeconds, prompt, reason,
-noop })` ends every cycle and `ScheduleWakeup({ stop: true })` ends the loop; the skill works
-whether started bare or under `/loop`. Generic/Kiro: external cron, `sleep`, or manual re-trigger,
+**Scheduling is adapter-specific.** Claude Code: every cycle runs the role's script once and ends by
+starting a `--wait` waiter under Bash `run_in_background` (its exit re-invokes the session) plus a
+fallback `ScheduleWakeup({ delaySeconds: 1800, … })`; "stop" is `TaskStop` on the waiter and
+`ScheduleWakeup({ stop: true })`; the skill works whether started bare or under `/loop`. Generic/Kiro: external cron, `sleep`, or manual re-trigger,
 with a sentinel file under `.agent-loop/` as the stop signal.
 
 **Permissions are the recurring failure.** An unattended loop dies on a permission prompt. The
@@ -111,8 +115,10 @@ isolated, and lets the reviewer run probes against the PR branch without disturb
 
 ## Roadmap (design decisions, not filed issues)
 
-- **Monitor-based loops**: Claude Code's `Monitor` tool streams a background script's output; a
-  long-running `pr-poll` mode could replace polling-by-wakeup. Not started.
+- **Event-driven waits**: done with `--wait` and background Bash (#25). `Monitor` (30-minute
+  maximum, re-armed) is the alternative carrier if background exits stop re-invoking sessions.
+- **Conditional requests**: `If-None-Match` on the waiter's polls (a 304 is free against the rate
+  limit). Not started; at 30s polls three roles stay well under 5,000 requests an hour.
 - **Kiro adapter**: ported from the Claude Code prompts, manual scheduling; not exercised.
 - **Gemini adapter**: stub until explored.
 - **Multi-account upgrade path**: what changes with a second GitHub account (formal review

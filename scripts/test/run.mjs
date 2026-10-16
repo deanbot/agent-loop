@@ -2,10 +2,10 @@
 // Contract tests for the signal scripts, run against a fake `gh` (fake-gh.mjs).
 //   node scripts/test/run.mjs
 // No dependencies. Each case gets a fresh HOME (so state files start empty) and a fixture.
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync } from 'fs'
+import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
+import { execFileSync, spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -330,6 +330,164 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   check('qa: operator comment without a push → QA_READY:7', out3.trim() === 'QA_READY:7', out3)
   const out4 = run(ctx, 'pr-qa.mjs', ['--repo', REPO], { ...op, prs: [] })
   check('qa: tracked PR merged or closed → CLOSED:7 once', out4.trim() === 'CLOSED:7', out4)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
+// ---------------------------------------------------------------- --wait (lib/wait.mjs)
+// The waiter runs in the background so a test can change the fixture mid-wait. Intervals are 1s.
+function start(ctx, script, args) {
+  const t0 = Date.now()
+  const child = spawn('node', [path.join(scripts, script), ...args], { env: ctx.env })
+  let out = ''
+  let err = ''
+  child.stdout.on('data', (d) => (out += d))
+  child.stderr.on('data', (d) => (err += d))
+  const done = new Promise((resolve) => child.on('close', (code) => resolve({ out, err, code, ms: Date.now() - t0 })))
+  return { child, done }
+}
+const setFixture = (ctx, fixture) => {
+  writeFileSync(`${ctx.fixture}.tmp`, JSON.stringify(fixture))
+  renameSync(`${ctx.fixture}.tmp`, ctx.fixture)
+}
+const pause = (ms) => new Promise((r) => setTimeout(r, ms))
+const stateText = (ctx, name) => {
+  try {
+    return readFileSync(path.join(ctx.home, '.agent-loop', 'state', name), 'utf8')
+  } catch {
+    return null
+  }
+}
+const WATCH_STATE = 'acme-widgets-pr-state.json'
+const POLL_STATE = 'acme-widgets-pr-poll-state.json'
+const watchFx = {
+  ...BASE,
+  prs: [{ number: 7, headRefOid: 'abc123', mergeable: 'MERGEABLE' }],
+  prView: { reviewDecision: '' },
+}
+const watchReviewed = { ...watchFx, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+const watchArgs = (...extra) => ['--repo', REPO, ...extra]
+{
+  const ctx = makeEnv()
+  setFixture(ctx, watchFx)
+  const r = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '5', '--max', '20')).done
+  check('wait: a signal already pending → PENDING at once, exit 0', r.out === 'PENDING\n' && r.code === 0 && r.ms < 4000, `${r.ms}ms code ${r.code}\n${r.out}${r.err}`)
+  check('wait: the waiter writes no state', stateText(ctx, WATCH_STATE) === null, stateText(ctx, WATCH_STATE))
+  const after = run(ctx, 'pr-watch.mjs', watchArgs(), watchFx)
+  check('wait: … and the one-shot run that follows delivers the signal', after.trim() === 'REVIEW:7', after)
+  const standing = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
+  check('wait: a standing REVIEW:<n> (no reviewer post yet) is not news → NONE at --max', signals(standing.out).join() === 'NONE' && standing.ms >= 2000, `${standing.ms}ms\n${standing.out}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  const before = stateText(ctx, WATCH_STATE)
+  const r = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
+  check('wait: --max expiry prints NONE and exits 0', signals(r.out).join() === 'NONE' && r.code === 0 && r.ms >= 2000, `${r.ms}ms code ${r.code}\n${r.out}${r.err}`)
+  check('wait: --max expiry leaves the state file byte-for-byte unchanged', stateText(ctx, WATCH_STATE) === before, `${before}\n${stateText(ctx, WATCH_STATE)}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  const before = stateText(ctx, WATCH_STATE)
+  const w = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '15'))
+  await pause(1500)
+  const later = { ...watchReviewed, comments: [...watchReviewed.comments, comment('one more thing', T('2026-01-01T12:30:00Z'))] }
+  setFixture(ctx, later)
+  const r = await w.done
+  check('wait: a signal that arrives mid-wait → PENDING, state untouched', r.out === 'PENDING\n' && r.ms < 10000 && stateText(ctx, WATCH_STATE) === before, `${r.ms}ms\n${r.out}${r.err}`)
+  const first = run(ctx, 'pr-watch.mjs', watchArgs(), later)
+  const second = run(ctx, 'pr-watch.mjs', watchArgs(), later)
+  check('wait: … the next one-shot run prints it once, and the run after sees nothing new', first.trim() === 'REVIEW_COMMENTS:7' && signals(second).join() === 'NONE', `${first}${second}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const lgtm = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+  poll(ctx, BASE)
+  const first = poll(ctx, lgtm)
+  check('wait (poll): setup — MERGE_READY delivered by a one-shot run', signals(first).includes('MERGE_READY'), first)
+  const before = stateText(ctx, POLL_STATE)
+  setFixture(ctx, lgtm)
+  const r = await start(ctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--wait', '1', '--max', '3']).done
+  check('wait (poll): a standing MERGE_READY does not return before --max', signals(r.out).join() === 'NONE' && r.ms >= 3000, `${r.ms}ms\n${r.out}${r.err}`)
+  check('wait (poll): the waiter leaves the state file byte-for-byte unchanged', stateText(ctx, POLL_STATE) === before, stateText(ctx, POLL_STATE))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const pending = { ...BASE, checks: [{ name: 'check', state: 'IN_PROGRESS', bucket: 'pending' }], comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+  poll(ctx, pending)
+  poll(ctx, pending)
+  setFixture(ctx, pending)
+  const w = start(ctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--wait', '1', '--max', '15'])
+  await pause(1500)
+  const green = { ...pending, checks: BASE.checks }
+  setFixture(ctx, green)
+  const r = await w.done
+  const out = poll(ctx, green)
+  check('wait (poll): CI turning green under an LGTM is news → PENDING, then MERGE_READY', r.out === 'PENDING\n' && r.ms < 10000 && out.trim() === 'MERGE_READY', `${r.ms}ms\n${r.out}${r.err}${out}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  setFixture(ctx, watchReviewed)
+  const first = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4'))
+  await pause(1000)
+  const second = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4')).done
+  check('wait: a second waiter on the same state → WATCHER_RUNNING <pid>, exit 3', /^WATCHER_RUNNING \d+\n$/.test(second.out) && second.code === 3, `code ${second.code}\n${second.out}${second.err}`)
+  await first.done
+  const third = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '1')).done
+  check('wait: the lock is released when a waiter exits', signals(third.out).join() === 'NONE', `${third.out}${third.err}`)
+  const killed = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
+  await pause(1000)
+  killed.child.kill('SIGTERM')
+  const k = await killed.done
+  const fourth = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '1')).done
+  check('wait: a stopped waiter (SIGTERM) prints nothing and releases the lock', k.out === '' && signals(fourth.out).join() === 'NONE', `${k.out}|${fourth.out}${fourth.err}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  setFixture(ctx, { fail: true })
+  const w = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '15'))
+  await pause(1500)
+  setFixture(ctx, watchFx)
+  const r = await w.done
+  check('wait: a transient API error is retried, not fatal', r.out === 'PENDING\n' && r.code === 0 && /retrying/.test(r.err), `code ${r.code}\n${r.out}${r.err}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const bad = run(ctx, 'pr-watch.mjs', watchArgs('--wait', 'abc'), watchFx)
+  check('wait: a non-numeric --wait → usage error, exit 1', bad.startsWith('EXIT 1') && bad.includes('Usage'), bad)
+  const noWait = run(ctx, 'pr-watch.mjs', watchArgs('--max', '5'), watchFx)
+  check('wait: --max without --wait → usage error, exit 1', noWait.startsWith('EXIT 1'), noWait)
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  setFixture(ctx, watchReviewed)
+  const r = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '--max', '1')).done
+  check('wait: bare --wait takes the default interval and does not swallow --max', signals(r.out).join() === 'NONE' && r.ms < 5000, `${r.ms}ms\n${r.out}${r.err}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const fx = { ...BASE, prs: [{ number: 7, headRefOid: 'abc123', mergeable: 'MERGEABLE' }] }
+  setFixture(ctx, fx)
+  const r = await start(ctx, 'pr-qa.mjs', ['--repo', REPO, '--wait', '5', '--max', '20']).done
+  check('wait (qa): a pending QA_READY → PENDING at once', r.out === 'PENDING\n' && r.ms < 4000, `${r.ms}ms\n${r.out}${r.err}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchFx)
+  const calls = readFileSync(ctx.log, 'utf8').trim().split('\n')
+  check('one-shot: the baseline pass reuses the gh responses (no command runs twice)', new Set(calls).size === calls.length, calls.join('\n'))
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
