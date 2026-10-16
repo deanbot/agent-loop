@@ -125,15 +125,12 @@ If the operator sends a message containing "stop" at any point during the loop:
 3. Notify: "Executor stopped. Issue #<N> unclaimed. Sentinel written in case a cron invocation fires within 10 minutes. If using external cron, also pause it."
 4. Exit without re-invoking this skill.
 
-Output the waiting status block:
+Output the waiting status block: three lines, each starting `▌ `, with no box, no right border and no padding, so it wraps cleanly at any terminal width (the second line starts with `<milestone> · ` when you have one):
 
 ```
-┌─────────────────────────────────────┐
-│  PR #N — <issue title>              │
-│  https://github.com/…/pull/N        │
-│                                     │
-│  ⏳ Waiting for review              │
-└─────────────────────────────────────┘
+▌ PR #N — <issue title>
+▌ https://github.com/<repo>/pull/N
+▌ ⏳ Waiting for review
 ```
 
 Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` from the repo root **once per poll cycle** (append `--require-qa` when `qa-gate` is `on`). Your own `[executor]` posts are already filtered out by the script.
