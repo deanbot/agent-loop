@@ -34,7 +34,16 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 
 Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Executor sentinel path: `.agent-loop/<slug>-executor-stop-<N>` where `<N>` is the issue number (project-local; gitignored).
 
+**First line you print:** `Executor · <model> · <effort>`, as far as you know them, so a loop that came up on the wrong model is seen at once. If the `## Agent loop` block has `models:` (comma-separated `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `executor` entry does not match, add `⚠ AGENTS.md expects <entry> for the executor; this session runs <model>.` and carry on: a mismatch never stops the loop.
+
 **Clear stale claims:** `gh issue list --repo <repo> --state closed --label <in-progress-label> --limit 100 --json number --jq '.[].number'`, then `gh issue edit <n> --repo <repo> --remove-label <in-progress-label>` for each number, one command per issue. The label is removed on `MERGED`, but a loop stopped after `MERGE_READY` never sees the merge. A closed issue has no claim to protect, so this is safe while other executors run, and safe to repeat on every invocation.
+
+**Resume your own issue — check before touching `main`:** `git branch --show-current` and `git status --porcelain`. On `main` with a clean tree, carry on. Otherwise take `<N>` from the branch name (`issue-<N>-…` or the project's convention), else from the number in $ARGUMENTS, and list its claim comments (the command in the claim step below; `<clone>` is the base name of your working directory):
+- **You hold #<N>** (open, carries `<in-progress-label>`, and the newest `[executor] Claimed by` comment names `<clone>` exactly; with no claim comment at all, only when $ARGUMENTS names it) → resume: stay on the branch, keep the working tree, read the issue and its comments, see what is done (`git log --oneline main..HEAD`, `git diff HEAD`), and continue the implement flow from there (or orient on its PR, step 6b, if one has `Closes #<N>`). Do not re-claim.
+- **Open with neither `<in-progress-label>` nor `<blocked-label>`** → claim it (the claim step below); win → resume; lose → as the next bullet.
+- **Anything else** → clean tree: `git checkout main`, `git pull`; uncommitted changes: STOP and say `<branch> has uncommitted changes and this clone does not hold #<N>: commit, stash or discard them, then restart.` Never switch branches over uncommitted work.
+
+To restart for a plugin update, end the session without "stop" and invoke again: the claim and the working tree stay.
 
 Then proceed with $ARGUMENTS.
 
@@ -51,7 +60,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first (skip it when $ARGUMENTS is empt
   - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
     - Not found: immediately before claiming, re-fetch: `gh issue view <N> --repo <repo> --json labels,author,authorAssociation --jq '{labels: [.labels[].name], login: .author.login, assoc: .authorAssociation}'`
-      - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8. **Do not infer staleness — absence of an open PR is not evidence the claim is stale. The label is authoritative.**
+      - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8 — unless the newest `[executor] Claimed by` comment names `<clone>` exactly: then it is yours, so resume (above). **Do not infer staleness — absence of an open PR is not evidence the claim is stale. The label is authoritative.**
       - If `<blocked-label>` now present in labels: issue is blocked; go to step 8 silently.
       - **Author check — apply in order:**
         1. If `trusted-authors` is set: skip unless `login` is in that list. Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: @<login> is not in \`trusted-authors\`. Add login to AGENTS.md to allow. See README Security section."` — do not claim — go to step 8.

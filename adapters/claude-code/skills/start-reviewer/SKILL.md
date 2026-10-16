@@ -38,6 +38,15 @@ you judge the executor's product calls yourself and do not hand them back as que
    `in-progress`).
 3. If `.agent-loop/role` exists and does not say `reviewer`, stop: this clone hosts another role.
 4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it through to the watch script.
+5. **Say what you run on**, as the first line you print: `Reviewer · <model> · ${CLAUDE_EFFORT}`,
+   with the model as your system prompt names it (`Reviewer · Opus 5.5 · high`). `/model` and
+   `/effort` set the default for every new session, so a loop restarted after the operator
+   switched another one can come up on the wrong model. If the block has `models:` (comma-separated
+   `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `reviewer` entry
+   does not match (the model word is not in your model's name, or the effort differs), add a
+   second line: `⚠ AGENTS.md expects <entry> for the reviewer; this session runs <model> ·
+   ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is wrong.` Then carry on: a
+   mismatch never stops the loop.
 
 Rules that hold for the whole session:
 

@@ -12,6 +12,7 @@ blocked-label: is-blocked
 quality-gates: npm test && npm run lint
 qa-gate: off
 trusted-authors: [your-login]
+models: executor=opus, reviewer=opus
 
 ### Executor
 

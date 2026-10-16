@@ -7,8 +7,11 @@ Read this when you are about to claim and implement an issue. `<N>` is the issue
 Re-fetch immediately before claiming: `gh issue view <N> --repo <repo> --json
 labels,author,authorAssociation,body,title`.
 
-- `<in-progress-label>` present → another executor has it. The label is authoritative; the absence
-  of an open PR is not evidence the claim is stale. Pick next.
+- `<in-progress-label>` present → another executor has it, unless the newest `[executor] Claimed
+  by` comment (step 2 of the claim below) names `<clone>` exactly: then it is yours, so resume (SKILL.md,
+  "Resume"). If you are not on its branch, find it with `git branch --list "issue-<N>-*"` and
+  switch to it first (`git switch <branch>`, only with a clean tree). Someone else's: the label is
+  authoritative and the absence of an open PR is not evidence the claim is stale. Pick next.
 - `<blocked-label>` present → pick next, silently.
 - Dependencies (`Depends on #a, #b` in the body) not all closed → pick next.
 - **Author check.** With `trusted-authors` set: the author's login must be in the list. Otherwise
