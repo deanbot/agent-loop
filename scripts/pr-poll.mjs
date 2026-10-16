@@ -37,8 +37,10 @@
  * finding. "[reviewer] Verified" (a 0.2 draft kind) is tolerated the same way. CI is evaluated here only: if the checks cannot be read (auth, network, old gh), MERGE_READY
  * is withheld and the error is passed through on stderr; "no checks reported" counts as no CI.
  *
- * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-poll-state.json across sessions.
- * Keyed by PR number → { comments, reviews, reviewComments, ciFailedKey } last-seen IDs.
+ * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json across sessions, one file
+ * per PR so two executors never write the same file: { comments, reviews, reviewComments,
+ * ciFailedKey } last-seen IDs. A PR with no file yet takes its entry from the shared file earlier
+ * versions kept (<owner>-<repo>-pr-poll-state.json, keyed by PR number), which is left alone.
  */
 
 import { readFileSync, mkdirSync } from 'fs'
@@ -61,6 +63,7 @@ const prNumber = arg('--pr')
 const requireQa = flag('--require-qa')
 
 if (!repo || !prNumber) usageError(USAGE)
+if (!/^\d+$/.test(prNumber)) usageError(USAGE, `--pr: expected a PR number, got "${prNumber}"`)
 
 // `gh api --paginate` prints one JSON document per page; `--slurp` wraps them in one array (gh ≥ 2.43).
 function ghApiAll(gh, path) {
@@ -70,20 +73,24 @@ function ghApiAll(gh, path) {
 
 const repoSlug = repo.replace('/', '-')
 const STATE_DIR = path.join(homedir(), '.agent-loop', 'state')
-const STATE_FILE = path.join(STATE_DIR, `${repoSlug}-pr-poll-state.json`)
+const STATE_FILE = path.join(STATE_DIR, `${repoSlug}-pr-poll-${prNumber}.json`)
+const SHARED_STATE_FILE = path.join(STATE_DIR, `${repoSlug}-pr-poll-state.json`)
 
 mkdirSync(STATE_DIR, { recursive: true })
 
-function pass({ gh, save, dry }) {
-  let state = {}
+function readJson(file) {
   try {
-    state = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
+    return JSON.parse(readFileSync(file, 'utf8'))
   } catch {
-    // no prior state
+    return undefined
   }
+}
+
+function pass({ gh, save, dry }) {
+  let prState = readJson(STATE_FILE)
+  if (prState === undefined) prState = readJson(SHARED_STATE_FILE)?.[prNumber]
 
   // Migrate state written by the initial pr-poll.mjs version (plain databaseId number → typed object)
-  let prState = state[prNumber]
   if (typeof prState === 'number') {
     prState = { comments: prState, reviews: null, reviewComments: null }
   } else if (!prState) {
@@ -283,10 +290,9 @@ function pass({ gh, save, dry }) {
   if (newReviews.length > 0)
     prState.reviews = Math.max(prState.reviews ?? 0, ...newReviews.map((r) => r.id))
   prState.reviewComments = Math.max(prState.reviewComments ?? 0, ...newInline.map((c) => c.id), inlineComments.at(-1)?.id ?? 0)
-  state[prNumber] = prState
-  save(JSON.stringify(state))
+  save(JSON.stringify(prState))
 
   return out.length === 0 ? `NONE ${new Date().toISOString()}\n` : out.join('\n') + '\n'
 }
 
-await runSignalScript({ argv: process.argv, usage: USAGE, stateFile: STATE_FILE, key: prNumber, pass })
+await runSignalScript({ argv: process.argv, usage: USAGE, stateFile: STATE_FILE, pass })

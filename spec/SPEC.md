@@ -329,7 +329,7 @@ the waiter's exit and its next run.
   Standing signals (`MERGE_READY`, a re-surfaced live verdict or unanswered inline thread,
   `REVIEW:<n>` for a PR with no reviewer post) are in the baseline, so they wake the agent when
   they appear or change, not on every poll.
-- **One waiter per state file** (per PR for `pr-poll`). A second waiter while the first is alive
+- **One waiter per state file** (so per PR for `pr-poll`). A second waiter while the first is alive
   prints `WATCHER_RUNNING <pid>` and exits 3. A stopped waiter prints nothing.
 - A failed poll (network, rate limit, auth) is reported on stderr and retried on the next
   interval.
@@ -398,12 +398,17 @@ refuse to run in a clone marked for another role.
 | Script | Default state path |
 |---|---|
 | `pr-watch.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-state.json` |
-| `pr-poll.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-poll-state.json` |
+| `pr-poll.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json` (one per PR) |
 | `pr-qa.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json` |
 
-Per-repo paths prevent collisions when running agent-loop on several repos. Next to each state
-file, `<state>-wait.json` holds the baseline a one-shot run records for waiters and
-`<state>-wait.lock` the running waiter's pid (`pr-poll` adds `-<pr>` to both names). State is safe to delete: the next run
+Per-repo paths prevent collisions when running agent-loop on several repos, and per-PR paths for
+`pr-poll` let two executors run on one repo without writing the same file. A PR with no `pr-poll`
+file yet takes its entry from the shared `<owner>-<repo>-pr-poll-state.json` that 0.2 scripts
+before per-PR files kept; that file is only read, never written. Once every executor runs a
+version with per-PR files, delete the shared file: while it exists, deleting a PR's file restores
+that PR's old cursors instead of re-seeding. Next to each state file,
+`<state>-wait.json` holds the baseline a one-shot run records for waiters and `<state>-wait.lock`
+the running waiter's pid. State is safe to delete: the next run
 re-seeds cursors and treats current activity as baseline (live verdicts and unanswered inline
 threads are still surfaced).
 

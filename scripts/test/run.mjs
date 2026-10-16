@@ -358,7 +358,7 @@ const stateText = (ctx, name) => {
   }
 }
 const WATCH_STATE = 'acme-widgets-pr-state.json'
-const POLL_STATE = 'acme-widgets-pr-poll-state.json'
+const POLL_STATE = 'acme-widgets-pr-poll-7.json'
 const watchFx = {
   ...BASE,
   prs: [{ number: 7, headRefOid: 'abc123', mergeable: 'MERGEABLE' }],
@@ -489,6 +489,53 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   const calls = readFileSync(ctx.log, 'utf8').trim().split('\n')
   check('one-shot: the baseline pass reuses the gh responses (no command runs twice)', new Set(calls).size === calls.length, calls.join('\n'))
   rmSync(ctx.home, { recursive: true, force: true })
+}
+
+// ---------------------------------------------------------------- pr-poll: one state file per PR (#29)
+// Two executors on one repo: a run for PR 7 reads its state, a run for PR 8 reads and saves, then
+// the PR 7 run saves. Neither may put back the other's older entry.
+{
+  const ctx = makeEnv()
+  const pollPr = (c, pr, fixture) => run(c, 'pr-poll.mjs', ['--repo', REPO, '--pr', pr], fixture)
+  pollPr(ctx, '7', BASE)
+  pollPr(ctx, '8', BASE)
+  const fx = { ...BASE, comments: [comment('please also handle the empty case', T('2026-01-01T11:00:00Z'))] }
+  const slow = { ...fx, delayMs: 400 }
+  setFixture(ctx, slow)
+  const a = start(ctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7'])
+  await pause(600)
+  const fastFixture = path.join(ctx.home, 'fixture-fast.json')
+  const fast = { ...ctx, fixture: fastFixture, env: { ...ctx.env, FAKE_GH_FIXTURE: fastFixture } }
+  const b = pollPr(fast, '8', fx)
+  const ra = await a.done
+  check('poll per PR: setup — both overlapping runs deliver NEW_COMMENT, the PR 7 run finishing last', signals(ra.out).includes('NEW_COMMENT') && signals(b).includes('NEW_COMMENT') && ra.ms > 1500, `${ra.ms}ms\n${ra.out}${b}`)
+  const again7 = pollPr(ctx, '7', fx)
+  const again8 = pollPr(ctx, '8', fx)
+  check('poll per PR: after interleaved runs neither PR re-emits the handled comment', signals(again7).join() === 'NONE' && signals(again8).join() === 'NONE', `${again7}${again8}`)
+  check('poll per PR: each PR has its own state file', stateText(ctx, 'acme-widgets-pr-poll-7.json') !== null && stateText(ctx, 'acme-widgets-pr-poll-8.json') !== null, '')
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+// Migration: a PR with no per-PR file takes its entry from the shared file earlier versions kept.
+{
+  const fresh = makeEnv()
+  const migrated = makeEnv()
+  poll(fresh, BASE)
+  const entry = JSON.parse(stateText(fresh, POLL_STATE))
+  const shared = path.join(migrated.home, '.agent-loop', 'state', 'acme-widgets-pr-poll-state.json')
+  mkdirSync(path.dirname(shared), { recursive: true })
+  const sharedText = JSON.stringify({ 7: entry, 8: { comments: 1, reviews: null, reviewComments: null } })
+  writeFileSync(shared, sharedText)
+  const fx = { ...BASE, comments: [comment('please also handle the empty case', T('2026-01-01T11:00:00Z'))] }
+  const want = poll(fresh, fx)
+  const got = poll(migrated, fx)
+  check('poll migration: the shared file\'s entry gives the same output as before', got === want && signals(got).includes('NEW_COMMENT'), `${want}---\n${got}`)
+  check('poll migration: the per-PR file is written and the shared file is left alone', stateText(migrated, POLL_STATE) === stateText(fresh, POLL_STATE) && readFileSync(shared, 'utf8') === sharedText, `${stateText(migrated, POLL_STATE)}\n${stateText(fresh, POLL_STATE)}`)
+  const quiet = poll(migrated, fx)
+  check('poll migration: the next run reads the per-PR file → NONE', signals(quiet).join() === 'NONE', quiet)
+  const bad = run(migrated, 'pr-poll.mjs', ['--repo', REPO, '--pr', '../x'], fx)
+  check('poll: a --pr that is not a number → usage error, exit 1', bad.startsWith('EXIT 1') && bad.includes('Usage'), bad)
+  rmSync(fresh.home, { recursive: true, force: true })
+  rmSync(migrated.home, { recursive: true, force: true })
 }
 
 console.log(`\n${passes} passed, ${failures} failed`)
