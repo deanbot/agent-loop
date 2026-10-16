@@ -97,7 +97,8 @@ wrong-clone check) and, for adapters that need one, stop sentinels.
 
 **Script state** persists to `~/.agent-loop/state/` with per-repo paths: `<slug>-pr-state.json`
 (reviewer), `<slug>-pr-poll-<pr>.json` (executor, one per PR, so two executors never share a file;
-the older shared `<slug>-pr-poll-state.json` is read once per PR as a migration source),
+the older shared `<slug>-pr-poll-state.json` is read once per PR as a migration source; delete it
+once every executor runs per-PR files, or deleting a PR's file restores that PR's old cursors),
 `<slug>-pr-qa-state.json` (QA). Safe to delete.
 
 ## One clone per role

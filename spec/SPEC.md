@@ -404,7 +404,9 @@ refuse to run in a clone marked for another role.
 Per-repo paths prevent collisions when running agent-loop on several repos, and per-PR paths for
 `pr-poll` let two executors run on one repo without writing the same file. A PR with no `pr-poll`
 file yet takes its entry from the shared `<owner>-<repo>-pr-poll-state.json` that 0.2 scripts
-before per-PR files kept; that file is only read, never written. Next to each state file,
+before per-PR files kept; that file is only read, never written. Once every executor runs a
+version with per-PR files, delete the shared file: while it exists, deleting a PR's file restores
+that PR's old cursors instead of re-seeding. Next to each state file,
 `<state>-wait.json` holds the baseline a one-shot run records for waiters and `<state>-wait.lock`
 the running waiter's pid. State is safe to delete: the next run
 re-seeds cursors and treats current activity as baseline (live verdicts and unanswered inline
