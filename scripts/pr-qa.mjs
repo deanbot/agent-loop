@@ -10,8 +10,7 @@
  *   Operator comment (unprefixed) — may be manual-verification confirmation for
  *                   observation-required items; triggers QA_READY so QA can re-evaluate
  *
- * [qa] own posts are not tracked as operator comments (own prefix filtered). An operator comment
- * older than QA's newest [qa] post was already read (QA re-reads the thread before posting).
+ * [qa] own posts are not tracked as operator comments (own prefix filtered).
  * [executor] and [reviewer] comments do not trigger re-evaluation (executor fixes
  * produce SHA changes; reviewer findings are irrelevant to A.C. evaluation).
  *
@@ -109,11 +108,8 @@ function pass({ gh, save }) {
         // First comment tracking run — seed cursor, emit nothing.
         entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
       } else {
-        // QA re-reads the thread immediately before it posts, so an operator comment older than
-        // its newest [qa] post was already read, even when it landed after this script's last run.
-        const ownLastId = Math.max(0, ...comments.filter((c) => /^\[qa\]/.test(c.body ?? '')).map((c) => c.id))
         const newOperator = comments.filter(
-          (c) => c.id > entry.lastComment && c.id > ownLastId && !/^\[/.test(c.body ?? '')
+          (c) => c.id > entry.lastComment && !/^\[/.test(c.body ?? '')
         )
         if (newOperator.length > 0) {
           qaReady.push(number)

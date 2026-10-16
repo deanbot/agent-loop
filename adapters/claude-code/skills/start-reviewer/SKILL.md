@@ -88,8 +88,8 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
 3. **Immediately before posting**, re-fetch `gh pr view <n> --comments --repo <repo>` and
    `gh api repos/<repo>/pulls/<n>/comments`; fold in anything that arrived while you worked, and
    confirm the head has not moved (`gh pr view <n> --repo <repo> --json headRefOid`). If it has,
-   drop the comment and let the next cycle review the new head. The watch script counts every
-   comment older than your newest post as read, so this re-fetch is where you see them.
+   drop the comment and let the next cycle review the new head. The watch script counts an
+   `[executor]` comment older than your newest post as read, so this re-fetch is where you see it.
 4. Print one line per PR you touched; a PR with your open question reads `PR #<n>: ❓ question
    for you — <one line>`.
 5. Wait. Start the waiter with Bash `run_in_background: true`, then schedule the fallback:

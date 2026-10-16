@@ -575,9 +575,28 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   const op = { ...later, comments: [...later.comments, comment('[reviewer] LGTM', T('2026-01-01T12:12:00Z')), comment('one more thing before I merge', T('2026-01-01T12:20:00Z'))] }
   const opRun = run(ctx, 'pr-watch.mjs', watchArgs(), op)
   check('seen: an operator comment after the [reviewer] post → REVIEW_COMMENTS:7', opRun.trim() === 'REVIEW_COMMENTS:7', opRun)
-  const inlineNew = { ...op, inline: [...op.inline, { id: 9001, body: 'why this constant?', created_at: T('2026-01-01T12:12:00Z'), in_reply_to_id: 9000, user: user('acme') }] }
+  const inlineNew = { ...op, inline: [...op.inline, { id: 9001, body: '[executor] renamed it', created_at: T('2026-01-01T12:12:00Z'), in_reply_to_id: 9000, user: user('acme') }] }
   const tieRun = run(ctx, 'pr-watch.mjs', watchArgs(), inlineNew)
-  check('seen: an inline comment at the same second as the [reviewer] post counts as news', tieRun.trim() === 'REVIEW_COMMENTS:7', tieRun)
+  check('seen: an inline [executor] comment at the same second as the [reviewer] post counts as news', tieRun.trim() === 'REVIEW_COMMENTS:7', tieRun)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+// Only [executor] comments are covered: an operator (or [qa]) comment that lands between the
+// reviewer's re-read and its post is older than the post but was never read, so it stays news.
+{
+  const ctx = makeEnv()
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  const raced = {
+    ...watchReviewed,
+    comments: [...watchReviewed.comments, comment('hold off, I want to rename this first', T('2026-01-01T12:30:00Z')), comment('[reviewer] LGTM — recheck', T('2026-01-01T12:30:04Z'))],
+  }
+  setFixture(ctx, raced)
+  const w = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '5')).done
+  const out = run(ctx, 'pr-watch.mjs', watchArgs(), raced)
+  check('seen: an unseen operator comment older than the [reviewer] post → PENDING, then REVIEW_COMMENTS:7', w.out === 'PENDING\n' && out.trim() === 'REVIEW_COMMENTS:7', `${w.out}${out}`)
+  const inlineRaced = { ...raced, inline: [{ id: 9099, body: '[executor] kept the constant', created_at: T('2026-01-01T12:00:20Z'), user: user('acme') }, { id: 9100, body: 'why this constant?', created_at: T('2026-01-01T12:00:30Z'), in_reply_to_id: 9099, user: user('acme') }] }
+  const inlineOut = run(ctx, 'pr-watch.mjs', watchArgs(), inlineRaced)
+  check('seen: an unseen inline operator comment older than the [reviewer] post → REVIEW_COMMENTS:7', inlineOut.trim() === 'REVIEW_COMMENTS:7', inlineOut)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
@@ -586,12 +605,9 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   run(ctx, 'pr-qa.mjs', ['--repo', REPO], fx)
   const answered = { ...fx, comments: [comment('verified by hand on my Mac', T('2026-01-01T12:00:05Z')), comment('[qa] PASS\n\n| a | b |', T('2026-01-01T12:00:40Z'))] }
   setFixture(ctx, answered)
-  const w = await start(ctx, 'pr-qa.mjs', ['--repo', REPO, '--wait', '1', '--max', '2']).done
+  const w = await start(ctx, 'pr-qa.mjs', ['--repo', REPO, '--wait', '1', '--max', '5']).done
   const out = run(ctx, 'pr-qa.mjs', ['--repo', REPO], answered)
-  check('seen (qa): an operator comment older than the [qa] post → waiter NONE, one-shot NONE', signals(w.out).join() === 'NONE' && signals(out).join() === 'NONE', `${w.out}${out}`)
-  const op = { ...answered, comments: [...answered.comments, comment('also checked on Linux', T('2026-01-01T12:30:00Z'))] }
-  const out2 = run(ctx, 'pr-qa.mjs', ['--repo', REPO], op)
-  check('seen (qa): an operator comment after the [qa] post → QA_READY:7', out2.trim() === 'QA_READY:7', out2)
+  check('qa: an unseen operator comment older than the [qa] post still counts → PENDING, then QA_READY:7', w.out === 'PENDING\n' && out.trim() === 'QA_READY:7', `${w.out}${out}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
