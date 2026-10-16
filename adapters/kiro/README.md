@@ -101,12 +101,12 @@ After each cycle, re-invoke with the PR number to continue polling.
 
 | Requirement | Status |
 |---|---|
-| All executor signals from `pr-poll.mjs` implemented (incl. `CI_FAILING`) | ✅ |
+| All executor signals from `pr-poll.mjs` implemented (incl. `CI_FAILING`, `MERGE_CONFLICT`) | ✅ |
 | QA skill gated on `qa-gate: on` | ✅ (stub delegating to the generic prompt) |
 | All reviewer signals from `pr-watch.mjs` implemented; acceptance criteria verified when `qa-gate: off` | ✅ |
 | Prefix convention (`[executor]`, `[reviewer]`) | ✅ |
 | Loop invariant (wait between polls) | ✅ — manual or cron |
-| MERGE_READY threshold (LGTM + CI passing; + `[qa] PASS` with `--require-qa`) | ✅ |
+| MERGE_READY threshold (LGTM + CI passing + no conflict; + `[qa] PASS` with `--require-qa`) | ✅ |
 | Spec version | v0.2 |
 
 ## Known limitations

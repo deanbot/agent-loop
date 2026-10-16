@@ -51,14 +51,16 @@ clone, not the installed plugin.
 
 An adapter is valid if:
 
-1. Executor prompt implements all signals from `pr-poll.mjs` output, including `CI_FAILING`
+1. Executor prompt implements all signals from `pr-poll.mjs` output, including `CI_FAILING` and
+   `MERGE_CONFLICT`
 2. Reviewer prompt implements all signals from `pr-watch.mjs` output, and verifies acceptance
    criteria itself when `qa-gate` is off
 3. QA prompt implements all signals from `pr-qa.mjs` output and refuses to run unless `qa-gate: on`
 4. All roles respect the prefix convention: `[executor]`, `[reviewer]`, `[qa]`, never bare
 5. Loop invariant: every iteration ends with a wait before the next poll (mechanism is
    adapter-specific), and the operator can stop a loop
-6. `MERGE_READY` threshold: `[reviewer] LGTM` + CI passing, plus `[qa] PASS` when `qa-gate: on`.
+6. `MERGE_READY` threshold: `[reviewer] LGTM` + CI passing + no conflict with the base, plus
+   `[qa] PASS` when `qa-gate: on`.
    Agents never merge; adapters enforce it structurally where the tool allows
 7. Executor prompt includes the pre-PR self-check: each criterion mapped to a test CI runs, or
    given the exact steps the operator runs by hand. A hand check never blocks an approval; the

@@ -60,13 +60,14 @@ private repo with trusted collaborators.
 Three scripts emit signals. Agents handle signals and post prefixed comments. Loop.
 
 ```
-pr-poll.mjs   (executor)  →  NEW_COMMENT, NEW_INLINE_COMMENT, NEW_REVIEW_SUBMISSION, CI_FAILING, MERGE_READY, MERGED, NONE
+pr-poll.mjs   (executor)  →  NEW_COMMENT, NEW_INLINE_COMMENT, NEW_REVIEW_SUBMISSION, CI_FAILING, MERGE_CONFLICT, MERGE_READY, MERGED, NONE
 pr-watch.mjs  (reviewer)  →  REVIEW:<n>, REVIEW_COMMENTS:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NONE
 pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NONE
 ```
 
-`MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green (+ `[qa] PASS` with
-`qa-gate: on`). The operator merges.
+`MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green + no conflict with `main` (+
+`[qa] PASS` with `qa-gate: on`). The operator merges. A PR that falls into conflict after its
+LGTM (another PR merged) gets `MERGE_CONFLICT` instead, and the executor resolves it.
 
 Each script runs once and exits. With `--wait` it becomes a waiter that polls in place and exits once
 a run would have news, so an agent can sleep until something happens instead of polling on a timer.

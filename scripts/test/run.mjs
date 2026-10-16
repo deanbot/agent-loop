@@ -378,6 +378,42 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// MERGE_CONFLICT (#46): a PR that falls into conflict after its LGTM, e.g. when another PR merges.
+{
+  const ctx = makeEnv()
+  const lgtm = { ...BASE, pr: { ...BASE.pr, mergeable: true, mergeable_state: 'clean' }, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+  poll(ctx, BASE)
+  const ready = poll(ctx, lgtm)
+  check('poll: mergeable PR with LGTM + green CI → MERGE_READY, no MERGE_CONFLICT', signals(ready).includes('MERGE_READY') && !signals(ready).includes('MERGE_CONFLICT'), ready)
+  const conflicting = { ...lgtm, pr: { ...lgtm.pr, mergeable: false, mergeable_state: 'dirty' } }
+  const out = poll(ctx, conflicting)
+  check('poll: conflicting PR with a current LGTM + green CI → MERGE_CONFLICT, not MERGE_READY', out.trim() === 'MERGE_CONFLICT', out)
+  const again = poll(ctx, conflicting)
+  check('poll: MERGE_CONFLICT repeats on every run while the conflict holds', again.trim() === 'MERGE_CONFLICT', again)
+  const unknown = { ...lgtm, pr: { ...lgtm.pr, mergeable: null, mergeable_state: 'unknown' } }
+  const out2 = poll(ctx, unknown)
+  check('poll: mergeable UNKNOWN (null) changes nothing → MERGE_READY, no MERGE_CONFLICT', out2.trim() === 'MERGE_READY', out2)
+  const resolved = poll(ctx, lgtm)
+  check('poll: … and once mergeable again, MERGE_READY', resolved.trim() === 'MERGE_READY', resolved)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const fx = { ...BASE, pr: { ...BASE.pr, mergeable: false, mergeable_state: 'dirty' } }
+  poll(ctx, BASE)
+  const out = poll(ctx, fx)
+  check('poll: conflict without an LGTM → MERGE_CONFLICT alone', out.trim() === 'MERGE_CONFLICT', out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const fx = { ...BASE, pr: { ...BASE.pr, mergeable: null, mergeable_state: 'unknown' } }
+  poll(ctx, BASE)
+  const out = poll(ctx, fx)
+  check('poll: mergeable UNKNOWN without an LGTM → NONE', signals(out).join() === 'NONE', out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- --wait (lib/wait.mjs)
 // The waiter runs in the background so a test can change the fixture mid-wait. Intervals are 1s.
 function start(ctx, script, args) {
@@ -460,6 +496,21 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   const r = await start(ctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--wait', '1', '--max', '3']).done
   check('wait (poll): a standing MERGE_READY does not return before --max', signals(r.out).join() === 'NONE' && r.ms >= 3000, `${r.ms}ms\n${r.out}${r.err}`)
   check('wait (poll): the waiter leaves the state file byte-for-byte unchanged', stateText(ctx, POLL_STATE) === before, stateText(ctx, POLL_STATE))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const lgtm = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+  poll(ctx, BASE)
+  poll(ctx, lgtm)
+  setFixture(ctx, lgtm)
+  const w = start(ctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--wait', '1', '--max', '15'])
+  await pause(1500)
+  const conflicting = { ...lgtm, pr: { ...lgtm.pr, mergeable: false, mergeable_state: 'dirty' } }
+  setFixture(ctx, conflicting)
+  const r = await w.done
+  const out = poll(ctx, conflicting)
+  check('wait (poll): a standing MERGE_READY falling into conflict is news → PENDING, then MERGE_CONFLICT', r.out === 'PENDING\n' && r.ms < 10000 && out.trim() === 'MERGE_CONFLICT', `${r.ms}ms\n${r.out}${r.err}${out}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {

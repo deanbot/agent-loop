@@ -135,6 +135,13 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 - `CI_FAILING` → read the failing log (`gh run view <id> --log-failed`), fix at the root, run
   `quality-gates`, push once, post one `[executor] Pushed fix: …`. A failure `main` shares, or a
   documented flake: say so with evidence and re-run; never call a real failure a flake.
+- `MERGE_CONFLICT` → the branch conflicts with `main` (often another PR merged after the LGTM);
+  it repeats every poll while it holds and withholds `MERGE_READY`. Remove the
+  `needs-operator-label` unless a question is still open, bring `main` in the project's way (none
+  → `git merge origin/main`, no force-push), resolve keeping both sides' intent (a contradiction
+  you cannot settle is a question for the operator), run `quality-gates`, push once, post one
+  `[executor] Pushed fix: resolved conflicts with main in <files>`. The review follows the new
+  head.
 - `NEW_INLINE_COMMENT` → verify, fix in the batch, reply to every thread with
   `gh api repos/<repo>/pulls/<PR>/comments -X POST -f body="[executor] …" -f in_reply_to_id=<id>`
   (unanswered threads re-surface every poll).

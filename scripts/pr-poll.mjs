@@ -13,7 +13,10 @@
  *   NEW_INLINE_COMMENT          new line-level review comment(s); content follows
  *   CI_FAILING                  a CI check failed or was cancelled on the current head; emitted once per
  *                               distinct failure set (re-emitted when a re-run fails again); content follows
- *   MERGE_READY                 [reviewer] LGTM posted after last commit + CI passing (+ [qa] PASS with --require-qa); no content block
+ *   MERGE_CONFLICT              the PR's branch conflicts with its base (GitHub reports it unmergeable); emitted on
+ *                               every run while it holds, so it can fall into conflict after an LGTM; no content block
+ *   MERGE_READY                 [reviewer] LGTM posted after last commit + CI passing (+ [qa] PASS with --require-qa),
+ *                               and the PR not in conflict; no content block
  *   MERGED                      PR is merged; executor should stop
  *
  * Content block format (after each signal line):
@@ -35,7 +38,10 @@
  * an earlier LGTM/PASS without a push. Reviewer comment kinds by prefix: "[reviewer] LGTM" (verdict),
  * "[reviewer] Question" (for the operator; not actionable for the executor), anything else is a
  * finding. "[reviewer] Verified" (a 0.2 draft kind) is tolerated the same way; a "[reviewer] Reviewing
- * (<clone>)" claim is ignored. CI is evaluated here only: if the checks cannot be read (auth, network, old gh), MERGE_READY
+ * (<clone>)" claim is ignored. Mergeability comes from the REST PR's `mergeable` / `mergeable_state`:
+ * `false` / "dirty" is a conflict; `null` means GitHub has not computed it yet (the request starts
+ * the computation), which changes nothing: no MERGE_CONFLICT, MERGE_READY as if mergeable, and the
+ * next run looks again. CI is evaluated here only: if the checks cannot be read (auth, network, old gh), MERGE_READY
  * is withheld and the error is passed through on stderr; "no checks reported" counts as no CI.
  *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json across sessions, one file
@@ -102,6 +108,9 @@ function pass({ gh, save, dry }) {
   const pr = JSON.parse(gh(`gh api "repos/${repo}/pulls/${prNumber}"`))
   if (pr.merged) return 'MERGED\n'
   const headSha = pr.head?.sha ?? null
+  // A conflict with the base, which a merge into main can cause with no push here (#46). Unknown
+  // (mergeable null, still being computed) is not a conflict.
+  const conflicting = pr.mergeable === false || pr.mergeable_state === 'dirty'
 
   // Fetch all three signal sources via REST API
   // A reviewer's "[reviewer] Reviewing (<clone>)" claim (several reviewers, pr-watch.mjs) is neither a
@@ -281,16 +290,20 @@ function pass({ gh, save, dry }) {
     prState.ciFailedKey = ciFailedKey
   }
 
+  // MERGE_CONFLICT — a state, like MERGE_READY: reported on every run while the PR conflicts, so the
+  // executor sees it even when the conflict arrived after the LGTM (another PR merged into main).
+  if (conflicting) out.push('MERGE_CONFLICT')
+
   // Check merge threshold: the reviewer's NEWEST comment after the last commit is an LGTM (and with
-  // --require-qa, QA's newest is a PASS), + CI passing. Comments predating new commits are stale —
-  // agents must re-approve after each push — and a later finding from the same role revokes its
+  // --require-qa, QA's newest is a PASS), + CI passing, + not in conflict. Comments predating new
+  // commits are stale — agents must re-approve after each push — and a later finding from the same role revokes its
   // earlier approval even without a push.
   const newestAfterCommit = (list) =>
     lastCommitDate ? list.filter((c) => new Date(c.created_at) > lastCommitDate).at(-1) : undefined
   const hasReviewerLgtm = isLgtm(newestAfterCommit(reviewerComments)?.body)
   const hasQaPass = isQaPass(newestAfterCommit(qaComments)?.body)
   const qaSatisfied = requireQa ? hasQaPass : true
-  if (hasReviewerLgtm && qaSatisfied && unansweredInline.length === 0 && ciPassed) {
+  if (hasReviewerLgtm && qaSatisfied && unansweredInline.length === 0 && ciPassed && !conflicting) {
     out.push('MERGE_READY')
   }
 

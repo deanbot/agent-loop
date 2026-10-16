@@ -106,10 +106,12 @@ parked, has no executor at all. So with every LGTM, check the `MERGE_READY` thre
 your LGTM is on the head commit, CI is green (every check `pass` or `skipping`, or no checks at
 all), `[qa] PASS` after the last commit when `qa-gate: on`, and no inline thread is unanswered.
 
-- All hold → post the LGTM, then `gh pr view <n> --repo <repo> --json headRefOid`. Still the sha
-  you reviewed → `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>` (when the label
-  is already on, this does nothing). The head moved → skip the label: a push landed after your
-  LGTM, and the new head is unreviewed.
+- All hold → post the LGTM, then `gh pr view <n> --repo <repo> --json headRefOid,mergeable`.
+  Still the sha you reviewed and `mergeable` not `CONFLICTING` → `gh pr edit <n> --repo <repo>
+  --add-label <needs-operator-label>` (when the label is already on, this does nothing). The head
+  moved → skip the label: a push landed after your LGTM, and the new head is unreviewed.
+  `CONFLICTING` → skip it too: the executor's poll reports `MERGE_CONFLICT` and resolves it.
+  `UNKNOWN` (GitHub still computing) does not hold the label back.
 - CI is pending (everything else holds) → end the LGTM with `CI is pending, so this PR does not
   have the <needs-operator-label> label yet: a running executor adds it when CI is green; with
   none, merge it once CI is green.` A failing check caused by the PR is a finding, not an LGTM.

@@ -23,6 +23,27 @@ Emitted once per head commit, with the failing check names and links. `gh run vi
 - The project's PR body or docs name a human setup step (a secret, an external service): post
   the exact step for the operator and keep polling.
 
+## MERGE_CONFLICT
+
+The PR's branch conflicts with `main`, usually because another PR merged after this one's LGTM. It
+is reported on every poll while the conflict holds, and it withholds `MERGE_READY`, so the PR is
+not ready whatever the verdicts say.
+
+1. `gh pr edit <PR> --repo <repo> --remove-label <needs-operator-label>` unless a question is still
+   open: the operator cannot merge a conflicting PR.
+2. `git fetch origin`, then bring `main` in the way the project's conventions say. With no
+   convention, `git merge origin/main`: a merge needs no force-push. A rebase needs `git push
+   --force-with-lease`, and only on this PR's branch.
+3. Resolve each conflict by reading both sides: keep what `main` added and what this PR adds.
+   When a resolution needs a decision you cannot make (the two changes contradict each other),
+   it is a question for the operator (SKILL.md, "Asking the operator"), not a guess.
+4. Run `quality-gates`, push once (with any other fix from this cycle), and post `[executor]
+   Pushed fix: resolved conflicts with main in <files>; <anything notable>`.
+
+The push makes every verdict stale. The reviewer's watch sees the new head and reviews it, and
+`MERGE_READY` comes back with its next LGTM. When GitHub has not yet computed whether the PR
+merges cleanly, the poll reports nothing about it and looks again next cycle.
+
 ## NEW_INLINE_COMMENT
 
 Each block carries `id`, `path`, `line` and the body. Unanswered top-level threads keep
@@ -67,8 +88,9 @@ After posting, the PR body may be stale: update it (`gh pr edit <PR> --repo <rep
 
 ## MERGE_READY
 
-`[reviewer] LGTM` is newer than the last commit, CI is green, no inline thread is unanswered
-(and with `qa-gate: on`, `[qa] PASS` is newer than the last commit). Every cycle it holds:
+`[reviewer] LGTM` is newer than the last commit, CI is green, no inline thread is unanswered,
+the PR does not conflict with `main` (and with `qa-gate: on`, `[qa] PASS` is newer than the last
+commit). Every cycle it holds:
 `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (a no-op when it is on). Print
 the status block with "✅ Ready — operator merges when ready", then wait as usual. Do not merge,
 do not offer to, do not ask. If the operator comments after this, handle it. When you push again,

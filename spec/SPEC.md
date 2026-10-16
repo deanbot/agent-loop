@@ -150,7 +150,7 @@ stopped polls nothing (its issue keeps `in-progress-label`), and a PR the operat
 opened, or one whose executor parked it, has no executor; neither gets `MERGE_READY` from a poll.
 So with every LGTM the reviewer checks the `MERGE_READY` threshold itself (its LGTM on the head
 commit, CI green, `[qa] PASS` after the last commit when `qa-gate: on`, no unanswered inline
-thread) and adds the label when it holds; adding it twice does nothing. With CI still pending the
+thread, no conflict with the base) and adds the label when it holds; adding it twice does nothing. With CI still pending the
 executor's poll remains the path, and the LGTM says in one line that a stopped or absent executor
 leaves the PR unlabelled until the operator merges it. When the reviewer later posts findings on a
 labelled PR, it removes the label unless a question is still open. The executor still removes the
@@ -283,7 +283,8 @@ pass `--require-qa` when `qa-gate: on`.
 | `NEW_REVIEW_SUBMISSION` | New formal review (APPROVED / CHANGES_REQUESTED / COMMENTED) |
 | `NEW_INLINE_COMMENT` | New or still-unanswered line-level comment(s), not the executor's own |
 | `CI_FAILING` | A check failed or was cancelled on the current head; emitted once per distinct failure set (a re-run that fails again is reported again) |
-| `MERGE_READY` | the reviewer's newest comment after the head commit is an LGTM, CI green, no unanswered inline threads (and QA's newest is a PASS with `--require-qa`) |
+| `MERGE_CONFLICT` | the PR conflicts with its base (GitHub reports it unmergeable); repeated on every run while it holds, whether or not the head moved |
+| `MERGE_READY` | the reviewer's newest comment after the head commit is an LGTM, CI green, no unanswered inline threads, not in conflict (and QA's newest is a PASS with `--require-qa`) |
 | `MERGED` | PR is merged |
 
 Content blocks follow signal lines, indented two spaces. `CI_FAILING` blocks carry the check name,
@@ -294,7 +295,10 @@ the executor's first poll is never lost, even when a commit that fixes nothing l
 `[reviewer] Question …` is not a finding and is not re-surfaced. If the CI checks cannot be read
 (auth, network, an old `gh`), `MERGE_READY` is withheld and the error is passed through on
 stderr; "no checks reported" counts as no CI. Scripts page through the API (`gh api --paginate
---slurp`, gh 2.43+), so long threads are read whole.
+--slurp`, gh 2.43+), so long threads are read whole. Mergeability comes from the PR's REST
+`mergeable` / `mergeable_state`: `false` / `dirty` is a conflict; `null` (GitHub still computing)
+changes nothing, neither `MERGE_CONFLICT` nor withholding `MERGE_READY`, and the next run looks
+again.
 
 ### Executor handling per signal
 
@@ -302,6 +306,10 @@ stderr; "no checks reported" counts as no CI. Scripts page through the API (`gh 
 - `CI_FAILING` — read the failing log, fix at the root, run quality gates, push once, post one
   `[executor] Pushed fix: …`. A failure `main` shares or a documented flake: say so with evidence
   and re-run; never call a real failure a flake.
+- `MERGE_CONFLICT` — remove `needs-operator-label` unless a question is still open, bring the
+  base in (the project's way; a merge by default, which needs no force-push), resolve, run quality
+  gates, push once, post one `[executor] Pushed fix: …`. The push makes the verdicts stale; the
+  review follows the new head.
 - `NEW_INLINE_COMMENT` — verify, fix in the batch, and reply to every thread (`in_reply_to_id`);
   unanswered threads re-surface every poll.
 - `NEW_REVIEW_SUBMISSION` / `NEW_COMMENT` — collect **all** unaddressed `[reviewer]` and `[qa]`
@@ -430,6 +438,7 @@ GitHub blocks self-approval; formal `APPROVED` is not achievable. `MERGE_READY` 
 2. with `qa-gate: on`: QA's newest comment after the last commit is `[qa] PASS`
 3. no unanswered top-level inline comments
 4. no failing, cancelled, pending or unreadable CI checks (no checks at all is fine)
+5. the PR does not conflict with its base (not yet computed counts as no conflict)
 
 A "Before you merge" note in the LGTM or PASS does not hold `MERGE_READY` back: it tells the
 operator what to run before clicking merge.
@@ -499,7 +508,8 @@ threads are still surfaced).
 0.2 — QA optional, `CI_FAILING`, `CLOSED`, own-prefix filtering everywhere, newest-comment
 verdicts, CI gated in the executor's poll only, adapter-specific stop. Later in 0.2, with no
 change to signal format: the `Question` kind, the `needs-operator-label` key, hand checks that
-never block, the retired `[reviewer] Verified` kind (tolerated by `pr-poll`), and `--wait` waiters
-(their own output, `PENDING` / `NONE` / `WATCHER_RUNNING <pid>`, never a signal line). Breaking
+never block, the retired `[reviewer] Verified` kind (tolerated by `pr-poll`), `--wait` waiters
+(their own output, `PENDING` / `NONE` / `WATCHER_RUNNING <pid>`, never a signal line), and
+`pr-poll`'s `MERGE_CONFLICT` (a new signal line; `MERGE_READY` now also requires no conflict). Breaking
 changes to signal format or prefix convention increment the version. Adapters note which version
 they implement. `scripts/test/run.mjs` holds the contract tests for the three scripts.
