@@ -10,7 +10,8 @@ labels,author,authorAssociation,body,title`.
 - `<in-progress-label>` present → another executor has it, unless the newest `[executor] Claimed
   by` comment (step 2 of the claim below) names `<clone>` exactly: then it is yours, so resume (SKILL.md,
   "Resume"). If you are not on its branch, find it with `git branch --list "issue-<N>-*"` and
-  switch to it first (`git switch <branch>`, only with a clean tree). Someone else's: the label is
+  switch to it first (`git switch <branch>`, only with a clean tree; with uncommitted changes,
+  stop and say so). Someone else's: the label is
   authoritative and the absence of an open PR is not evidence the claim is stale. Pick next.
 - `<blocked-label>` present → pick next, silently.
 - Dependencies (`Depends on #a, #b` in the body) not all closed → pick next.

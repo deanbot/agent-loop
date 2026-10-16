@@ -32,7 +32,8 @@ operator (the human) in unprefixed comments. The operator merges; you never do.
    (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
 3. If `.agent-loop/role` exists and does not say `executor`, stop: this clone hosts another role.
 4. **See where this clone is before touching `main`.** `git branch --show-current` and `git
-   status --porcelain`. On `main` with a clean tree → `git pull`. Otherwise (another branch, or
+   status --porcelain`. On `main` with a clean tree → `git pull` (an issue you hold that
+   `$ARGUMENTS` names is resumed later, from reference/implement.md §1). Otherwise (another branch, or
    uncommitted changes anywhere) you may have stopped mid-implementation, for example for a plugin
    update. Take `<N>` from the branch name (`issue-<N>-…`, or the project's issue-branch
    convention), else from the number in `$ARGUMENTS`, and decide (`<clone>` is the base name of
@@ -41,10 +42,15 @@ operator (the human) in unprefixed comments. The operator merges; you never do.
      Claimed by` comment on it names `<clone>` exactly (list them with the command in
      [reference/implement.md](reference/implement.md) §1; a losing claim is deleted, so the newest
      one left is the holder's). An issue claimed before claim comments existed has none: it is
-     yours only when `$ARGUMENTS` names it. → **Resume** (below). No `git checkout main`, no
-     `git pull`.
+     yours only when `$ARGUMENTS` names it. On its branch (`issue-<N>-…`) → **Resume** (below),
+     with no `git checkout main` and no `git pull`. On another branch (including `main` with
+     uncommitted changes): with a clean tree, find its branch (`git branch --list
+     "issue-<N>-*"`), `git switch <branch>` and resume; with uncommitted changes, **stop** and say
+     `<branch> has uncommitted changes, and #<N>'s work is on <its branch>: commit, stash or
+     discard them, then restart.` Never resume on a branch that is not the issue's.
    - **Open, without `<in-progress-label>` or `<blocked-label>`** (you released it, say on a
-     "stop") → claim it again (implement.md §1). You win → resume. You lose → as the next bullet.
+     "stop") → claim it again (implement.md §1). You win → you hold it: go on as in the first
+     bullet. You lose → as the next bullet.
    - **Anything else** (another clone holds it, it is closed or blocked, or there is no `<N>`):
      with a clean tree, `git checkout main` then `git pull` (committed work stays on its
      branch); with uncommitted changes, **stop** and say `<branch> has uncommitted changes and
@@ -259,8 +265,10 @@ for the operator, and the reply to it belongs to that role: nothing for you.
   BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on
   <PR #n | issue #N>.` on the PR if one exists, else on the issue. Then pick next. Never open a
   speculative PR and never keep building a blocked issue.
-- **Restarting** (a plugin update, a new model): end the session without "stop" and start
-  `start-executor` again in this clone. The claim and the working tree stay, and step 4 resumes.
+- **Restarting** (a plugin update, a new model): with a PR open, say "stop" (the PR is the claim,
+  and it ends the waiter), then start `start-executor <PR>` in a fresh session. Mid-implementation,
+  before a PR exists, end the session without "stop" (no waiter runs yet) and start
+  `start-executor` again in this clone: the claim and the working tree stay, and step 4 resumes.
 - **Operator says "stop"** (a message that is, or begins with, the word stop): remove
   `<in-progress-label>` from the issue if you are mid-implementation (leave it when a PR exists —
   the PR is the claim), stop the running waiter with `TaskStop` (its task id is in the result

@@ -32,17 +32,22 @@ status --porcelain`. On `main` with a clean tree, carry on. Otherwise take `<N>`
 name (`issue-<N>-…` or the project's convention), else from the input, and list its claim
 comments (the claim command under "Implement"):
 - You hold #<N> (open, carries `in-progress-label`, newest `[executor] Claimed by` comment names
-  your clone exactly; with no claim comment at all, only when the input names it) → resume: stay on the
+  your clone exactly; with no claim comment at all, only when the input names it), and you are on
+  its branch → resume: stay on the
   branch, keep the working tree, read the issue, see what is done (`git log --oneline
   main..HEAD`, `git diff HEAD`), continue (or orient and poll if a PR has `Closes #<N>`). Do not
   re-claim.
-- Open with neither `in-progress-label` nor `blocked-label` → claim it; win → resume; lose → as
-  below.
+- You hold #<N> but are on another branch → clean tree: switch to its branch (`git branch --list
+  "issue-<N>-*"`) and resume; uncommitted changes: stop and say so. Never resume on a branch
+  that is not the issue's.
+- Open with neither `in-progress-label` nor `blocked-label` → claim it; win → you hold it, so as
+  the two bullets above; lose → as below.
 - Anything else → clean tree: `git checkout main`, `git pull`; uncommitted changes: stop and say
   so. Never switch branches over uncommitted work.
 
-To restart for a plugin update, end the session without the stop file: the claim and the working
-tree stay, and the next start resumes.
+To restart for a plugin update: with a PR open, use the stop file and re-run on the PR;
+mid-implementation, end the session without the stop file: the claim and the working tree stay,
+and the next start resumes.
 
 **No interactive prompts, ever.** A question for the operator is a decision you cannot proceed
 without, posted as its own GitHub comment on the PR (or the issue when there is no PR yet):

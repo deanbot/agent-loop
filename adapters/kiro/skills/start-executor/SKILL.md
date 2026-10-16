@@ -39,11 +39,12 @@ Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop`
 **Clear stale claims:** `gh issue list --repo <repo> --state closed --label <in-progress-label> --limit 100 --json number --jq '.[].number'`, then `gh issue edit <n> --repo <repo> --remove-label <in-progress-label>` for each number, one command per issue. The label is removed on `MERGED`, but a loop stopped after `MERGE_READY` never sees the merge. A closed issue has no claim to protect, so this is safe while other executors run, and safe to repeat on every invocation.
 
 **Resume your own issue — check before touching `main`:** `git branch --show-current` and `git status --porcelain`. On `main` with a clean tree, carry on. Otherwise take `<N>` from the branch name (`issue-<N>-…` or the project's convention), else from the number in $ARGUMENTS, and list its claim comments (the command in the claim step below; `<clone>` is the base name of your working directory):
-- **You hold #<N>** (open, carries `<in-progress-label>`, and the newest `[executor] Claimed by` comment names `<clone>` exactly; with no claim comment at all, only when $ARGUMENTS names it) → resume: stay on the branch, keep the working tree, read the issue and its comments, see what is done (`git log --oneline main..HEAD`, `git diff HEAD`), and continue the implement flow from there (or orient on its PR, step 6b, if one has `Closes #<N>`). Do not re-claim.
-- **Open with neither `<in-progress-label>` nor `<blocked-label>`** → claim it (the claim step below); win → resume; lose → as the next bullet.
+- **You hold #<N>** (open, carries `<in-progress-label>`, and the newest `[executor] Claimed by` comment names `<clone>` exactly; with no claim comment at all, only when $ARGUMENTS names it) and you are on its branch → resume: stay on the branch, keep the working tree, read the issue and its comments, see what is done (`git log --oneline main..HEAD`, `git diff HEAD`), and continue the implement flow from there (or orient on its PR, step 6b, if one has `Closes #<N>`). Do not re-claim.
+- **You hold #<N> but are on another branch** → clean tree: `git branch --list "issue-<N>-*"`, `git switch <branch>`, resume; uncommitted changes: STOP and say `<branch> has uncommitted changes, and #<N>'s work is on <its branch>: commit, stash or discard them, then restart.` Never resume on a branch that is not the issue's.
+- **Open with neither `<in-progress-label>` nor `<blocked-label>`** → claim it (the claim step below); win → you hold it, so as the two bullets above; lose → as the next bullet.
 - **Anything else** → clean tree: `git checkout main`, `git pull`; uncommitted changes: STOP and say `<branch> has uncommitted changes and this clone does not hold #<N>: commit, stash or discard them, then restart.` Never switch branches over uncommitted work.
 
-To restart for a plugin update, end the session without "stop" and invoke again: the claim and the working tree stay.
+To restart for a plugin update: with a PR open, stop the loop and re-run on the PR; mid-implementation, end the session without "stop" and invoke again: the claim and the working tree stay.
 
 Then proceed with $ARGUMENTS.
 
