@@ -113,7 +113,7 @@ const common = ['Bash(gh *)', `Bash(node ${cache}/*)`]
 if (pluginRoot && !pluginRoot.startsWith(cache)) common.push(`Bash(node ${pluginRoot.replace(/\/$/, '')}/scripts/*)`)
 const git = (...sub) => sub.map((s) => `Bash(git ${s} *)`)
 const byRole = {
-  executor: git('status', 'log', 'diff', 'show', 'fetch', 'pull', 'checkout', 'switch', 'branch', 'add', 'commit', 'push', 'rebase', 'stash'),
+  executor: git('status', 'log', 'diff', 'show', 'fetch', 'pull', 'checkout', 'switch', 'branch', 'add', 'commit', 'push', 'merge', 'rebase', 'stash'),
   reviewer: git('status', 'log', 'diff', 'show', 'fetch', 'checkout', 'switch', 'branch'),
   qa: [],
 }

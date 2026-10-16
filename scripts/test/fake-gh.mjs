@@ -3,7 +3,7 @@
 // FAKE_GH_FIXTURE. Every call is appended to FAKE_GH_LOG (one line of args per call).
 //
 // Fixture shape (all keys optional):
-//   pr        → gh api repos/o/r/pulls/N                    (object: { merged, head: { sha } })
+//   pr        → gh api repos/o/r/pulls/N                    (object: { merged, head: { sha }, mergeable, mergeable_state })
 //   comments  → gh api repos/o/r/issues/N/comments           (array)
 //   reviews   → gh api repos/o/r/pulls/N/reviews             (array)
 //   inline    → gh api repos/o/r/pulls/N/comments            (array)

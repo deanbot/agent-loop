@@ -174,14 +174,19 @@ Below, `<poll>` is `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo>
 Each cycle:
 
 1. Run `<poll>` in the foreground, once per cycle. You never need the waiter's own output.
-2. Handle every signal it printed, in this order: `MERGED`, `CI_FAILING`, `NEW_INLINE_COMMENT`,
-   `NEW_REVIEW_SUBMISSION`, `NEW_COMMENT`, `MERGE_READY`, `NONE`. Signal handling is in
-   [reference/signals.md](reference/signals.md); read it the first time a non-`NONE` signal
+2. Handle every signal it printed, in this order: `MERGED`, `CI_FAILING`, `MERGE_CONFLICT`,
+   `NEW_INLINE_COMMENT`, `NEW_REVIEW_SUBMISSION`, `NEW_COMMENT`, `MERGE_READY`, `NONE`. Signal
+   handling is in [reference/signals.md](reference/signals.md); read it the first time a non-`NONE` signal
    arrives and keep it in mind after that. The short form:
    - `MERGED` → remove `<in-progress-label>` from the issue, `git checkout main`, `git pull`,
      tell the operator, pick next (no wakeup for this PR).
    - `CI_FAILING` → read the failing job's log, fix at the root, run the quality gates, push once,
      post one `[executor] Pushed fix: …`.
+   - `MERGE_CONFLICT` → the branch conflicts with `main` (often another PR merged after the
+     LGTM). `--remove-label <needs-operator-label>` unless a question is still open, bring `main`
+     in, resolve, run the quality gates, push once (in the same push as any other fix this cycle),
+     post one `[executor] Pushed fix: resolved conflicts with main in <files>`. The review follows
+     the new head.
    - Comments → collect **all** unaddressed `[reviewer]` and `[qa]` findings and operator
      direction, verify each, fix all in one pass, push once, post one summary comment. Reply to
      every inline thread you were asked about. A `[reviewer]` or `[qa] Question …` is for the

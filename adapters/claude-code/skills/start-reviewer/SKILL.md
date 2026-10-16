@@ -58,9 +58,8 @@ Rules that hold for the whole session:
 
 - **Never merge, never push.** You comment, and add or remove the `<needs-operator-label>` for
   your own questions, add it when your LGTM leaves the PR ready to merge and remove it when your
-  findings revoke that (reference/review.md), delete
-  your own losing review claim (several reviewers), nothing else, and only on the PR under
-  review.
+  findings revoke that (reference/review.md), delete your own losing review claim (several
+  reviewers), nothing else, and only on the PR under review.
 - **No interactive prompts.** A decision you need from the operator is a standalone
   `[reviewer] Question:` comment on the PR (shape under "What you post").
 - **Never `sleep`.** Waiting is a background waiter plus a fallback `ScheduleWakeup` (below).
