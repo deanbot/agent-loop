@@ -7,7 +7,7 @@
 //
 // One-shot (no --wait): run the pass, write the state, print the output, exit. Output is unchanged
 // from the scripts' original behaviour. It also records the baseline (below) in a sidecar file
-// next to the state, `<state>[-<key>]-wait.json`: after a pass that changed the state, a dry pass
+// next to the state, `<state>-wait.json`: after a pass that changed the state, a dry pass
 // over the same cached responses (no API calls) gives what the next quiet run will print.
 //
 // --wait [secs] (default 30), --max <secs> (default 1500): a waiter. It never writes state. Every
@@ -21,7 +21,7 @@
 //     on every run, so without the baseline a waiter would return at once, every time.
 // No baseline yet (no one-shot run since this version) → any non-NONE output is news.
 //
-// One waiter per state file (and key): a pid lock (`<state>[-<key>]-wait.lock`). A second waiter
+// One waiter per state file: a pid lock (`<state>-wait.lock`). A second waiter
 // while the first is alive prints `WATCHER_RUNNING <pid>` and exits 3, so a harness that reports
 // only exit codes can tell it apart. A failed pass (network, rate limit, auth) is reported on
 // stderr and retried on the next interval; a one-shot run still fails as before.
@@ -87,17 +87,6 @@ function memoGh() {
   }
 }
 
-// The part of the state this run owns: all of it, or one key (pr-poll keeps every PR of a repo in
-// one file, and another executor's PR must not count as news here).
-function own(text, key) {
-  if (key === undefined || text === null) return text
-  try {
-    return JSON.stringify(JSON.parse(text)[key] ?? null)
-  } catch {
-    return text
-  }
-}
-
 // One dry evaluation: the output and the state text the pass would write (null: none).
 function dryPass(pass, gh) {
   let saved = null
@@ -141,9 +130,9 @@ function acquireLock(lockFile, max) {
   return null
 }
 
-export async function runSignalScript({ argv, usage, stateFile, key, pass }) {
+export async function runSignalScript({ argv, usage, stateFile, pass }) {
   const { wait, max } = waitArgs(argv, usage)
-  const base = `${stateFile.replace(/\.json$/, '')}${key === undefined ? '' : `-${key}`}`
+  const base = stateFile.replace(/\.json$/, '')
   const waitFile = `${base}-wait.json`
   const lockFile = `${base}-wait.lock`
   const loadBaseline = () => {
@@ -156,9 +145,9 @@ export async function runSignalScript({ argv, usage, stateFile, key, pass }) {
 
   if (wait === null) {
     const gh = memoGh()
-    const before = own(readOr(stateFile, null), key)
+    const before = readOr(stateFile, null)
     const out = pass({ gh, save: (text) => writeAtomic(stateFile, text), dry: false })
-    const changed = own(readOr(stateFile, null), key) !== before
+    const changed = readOr(stateFile, null) !== before
     const baseline = changed ? fingerprint(dryPass(pass, gh).out) : fingerprint(out)
     writeAtomic(waitFile, JSON.stringify({ baseline }))
     process.stdout.write(out)
@@ -188,7 +177,7 @@ export async function runSignalScript({ argv, usage, stateFile, key, pass }) {
     try {
       const current = readOr(stateFile, null)
       const { out, saved } = dryPass(pass, memoGh())
-      const wouldChange = saved !== null && own(saved, key) !== own(current, key)
+      const wouldChange = saved !== null && saved !== current
       if (!isNone(out) && (wouldChange || fingerprint(out) !== loadBaseline())) {
         process.stdout.write('PENDING\n')
         return

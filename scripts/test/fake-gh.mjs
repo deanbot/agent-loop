@@ -12,11 +12,13 @@
 //   prs       → gh pr list ... --json                        (array)
 //   prView    → gh pr view N ... --json                      (object)
 //   fail      → every call fails like a network error         (true)
+//   delayMs   → every call takes this long before answering    (number)
 import { readFileSync, appendFileSync } from 'fs'
 
 const args = process.argv.slice(2)
 const fixture = JSON.parse(readFileSync(process.env.FAKE_GH_FIXTURE, 'utf8'))
 if (process.env.FAKE_GH_LOG) appendFileSync(process.env.FAKE_GH_LOG, args.join(' ') + '\n')
+if (fixture.delayMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, fixture.delayMs)
 
 if (fixture.fail) {
   process.stderr.write('HTTP 502: Bad Gateway (https://api.github.com/)\n')
