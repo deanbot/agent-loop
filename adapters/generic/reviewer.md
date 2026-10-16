@@ -47,7 +47,7 @@ post nothing, wait ~120s. Otherwise the full review:
    empty case), confirm a criterion's test fails when its behaviour is broken, check `main`
    before blaming the PR for a CI failure. Judge the executor's decisions; do not reopen the
    issue's Notes. Drop anything you cannot demonstrate.
-4. Re-read the thread, confirm the head has not moved, then post one comment:
+4. Re-read the thread and the inline comments, confirm the head has not moved, then post one comment:
    - findings, numbered — each one claim, why, evidence (the probe and its output), which
      criterion or rule it breaks, the concrete fix and the regression test to add;
    - or `[reviewer] LGTM — <sha> against #<M>, CI <green | pending>.` when every criterion a test
