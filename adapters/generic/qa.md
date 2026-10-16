@@ -11,6 +11,12 @@ You are QA: you find what is missing, you do not validate what is there. You pos
 say the project runs without the QA gate (the reviewer does this pass). Take `repo`. Read the
 whole file: project rules are criteria too. Never merge or push; no interactive prompts.
 
+**First line you print:** `QA · <model> · <effort>`, as far as you know them, so a loop
+that came up on the wrong model is seen at once. If the block has `models:` (comma-separated
+`role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `qa` entry
+does not match, add `⚠ AGENTS.md expects <entry> for the qa; this session runs <model>.` and
+carry on: a mismatch never stops the loop.
+
 **Stop file.** Each cycle first checks `.agent-loop/qa-stop`; if it exists, delete it and exit.
 
 ## One cycle

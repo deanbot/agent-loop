@@ -31,12 +31,47 @@ operator (the human) in unprefixed comments. The operator merges; you never do.
    `needs-operator`), and the author allowlist
    (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
 3. If `.agent-loop/role` exists and does not say `executor`, stop: this clone hosts another role.
-4. Make sure `main` is current: `git checkout main` then `git pull`. Then clear stale claims:
+4. **See where this clone is before touching `main`.** `git branch --show-current` and `git
+   status --porcelain`. On `main` with a clean tree → `git pull` (an issue you hold that
+   `$ARGUMENTS` names is resumed later, from reference/implement.md §1). Otherwise (another branch, or
+   uncommitted changes anywhere) you may have stopped mid-implementation, for example for a plugin
+   update. Take `<N>` from the branch name (`issue-<N>-…`, or the project's issue-branch
+   convention), else from the number in `$ARGUMENTS`, and decide (`<clone>` is the base name of
+   your working directory):
+   - **You hold #<N>**: it is open, carries `<in-progress-label>`, and the newest `[executor]
+     Claimed by` comment on it names `<clone>` exactly (list them with the command in
+     [reference/implement.md](reference/implement.md) §1; a losing claim is deleted, so the newest
+     one left is the holder's). An issue claimed before claim comments existed has none: it is
+     yours only when `$ARGUMENTS` names it. On its branch (`issue-<N>-…`) → **Resume** (below),
+     with no `git checkout main` and no `git pull`. On another branch (including `main` with
+     uncommitted changes): with a clean tree, find its branch (`git branch --list
+     "issue-<N>-*"`), `git switch <branch>` and resume; with uncommitted changes, **stop** and say
+     `<branch> has uncommitted changes, and #<N>'s work is on <its branch>: commit, stash or
+     discard them, then restart.` Never resume on a branch that is not the issue's.
+   - **Open, without `<in-progress-label>` or `<blocked-label>`** (you released it, say on a
+     "stop") → claim it again (implement.md §1). You win → you hold it: go on as in the first
+     bullet. You lose → as the next bullet.
+   - **Anything else** (another clone holds it, it is closed or blocked, or there is no `<N>`):
+     with a clean tree, `git checkout main` then `git pull` (committed work stays on its
+     branch); with uncommitted changes, **stop** and say `<branch> has uncommitted changes and
+     this clone does not hold #<N>: commit, stash or discard them, then restart.` Never switch
+     branches over uncommitted work.
+
+   Then clear stale claims:
    `gh issue list --repo <repo> --state closed --label <in-progress-label> --limit 100 --json
    number --jq '.[].number'`, and for each number `gh issue edit <n> --repo <repo> --remove-label
    <in-progress-label>`, one call per issue. You remove the label on `MERGED`, but a loop stopped
    after `MERGE_READY` never sees the merge. A closed issue has no claim to protect, so this is
    safe while other executors run.
+5. **Say what you run on**, as the first line you print: `Executor · <model> · ${CLAUDE_EFFORT}`,
+   with the model as your system prompt names it (`Executor · Opus 5.5 · high`). `/model` and
+   `/effort` set the default for every new session, so a loop restarted after the operator
+   switched another one can come up on the wrong model. If the block has `models:` (comma-separated
+   `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `executor` entry
+   does not match (the model word is not in your model's name, or the effort differs), add a
+   second line: `⚠ AGENTS.md expects <entry> for the executor; this session runs <model> ·
+   ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is wrong.` Then carry on: a
+   mismatch never stops the loop.
 
 Rules that hold for the whole session:
 
@@ -53,6 +88,13 @@ Rules that hold for the whole session:
   `[reviewer]`, `[qa]` and operator comments after verifying them.
 
 ## Decide what you are working on
+
+**Resume** (step 4 found an issue you hold): skip the rest of this section. Stay on the branch and
+keep the working tree. If an open PR has `Closes #<N>` (the lookup below), orient on it and enter
+the loop. Otherwise read [reference/implement.md](reference/implement.md) from §2 (the issue and
+every comment), then see what is done: `git log --oneline main..HEAD`, `git status --porcelain`,
+`git diff HEAD`. Continue from there; do not re-claim and do not start over. Say `Resuming #<N> on
+<branch>` in the line after the model line (step 5).
 
 `$ARGUMENTS` may hold `--milestone "<title>"`: take it out first and keep it as `<milestone>`
 for the whole session (it decides every later pick). What remains, `<arg>`, is a PR number, an
@@ -223,6 +265,10 @@ for the operator, and the reply to it belongs to that role: nothing for you.
   BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on
   <PR #n | issue #N>.` on the PR if one exists, else on the issue. Then pick next. Never open a
   speculative PR and never keep building a blocked issue.
+- **Restarting** (a plugin update, a new model): with a PR open, say "stop" (the PR is the claim,
+  and it ends the waiter), then start `start-executor <PR>` in a fresh session. Mid-implementation,
+  before a PR exists, end the session without "stop" (no waiter runs yet) and start
+  `start-executor` again in this clone: the claim and the working tree stay, and step 4 resumes.
 - **Operator says "stop"** (a message that is, or begins with, the word stop): remove
   `<in-progress-label>` from the issue if you are mid-implementation (leave it when a PR exists —
   the PR is the claim), stop the running waiter with `TaskStop` (its task id is in the result

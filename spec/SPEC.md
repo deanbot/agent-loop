@@ -47,6 +47,11 @@ is the project's conventions, which the agents follow.
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
+| `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); a loop whose model or effort differs says so in its first status line and runs anyway |
+
+Every loop's first status line names its role, model and effort (`Reviewer · Opus 5.5 · high`)
+where the tool exposes them, so a loop that came up on another session's saved default is seen at
+once.
 
 Labels must exist before first use (`gh label create …`); adapters may ship a setup step.
 `.agent-loop/` in the project is agent-local state (gitignored).

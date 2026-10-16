@@ -15,11 +15,39 @@ whole file and follow the project's conventions. From the block take `repo`,
 `needs-operator-label` (default `needs-operator`), `quality-gates`, `qa-gate` (default `off`), and
 `trusted-authors` or `allow-author-associations` (default `[OWNER, MEMBER, COLLABORATOR]`).
 
+**First line you print:** `Executor · <model> · <effort>`, as far as you know them, so a loop
+that came up on the wrong model is seen at once. If the block has `models:` (comma-separated
+`role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `executor` entry
+does not match, add `⚠ AGENTS.md expects <entry> for the executor; this session runs <model>.` and
+carry on: a mismatch never stops the loop.
+
 **Clear stale claims on start.** `gh issue list --repo <repo> --state closed --label
 <in-progress-label> --limit 100 --json number --jq '.[].number'`, then `gh issue edit <n> --repo
 <repo> --remove-label <in-progress-label>` for each number, one command per issue. The label is
 removed on `MERGED`, but a loop stopped after `MERGE_READY` never sees the merge. A closed issue
 has no claim to protect, so this is safe while other executors run, and safe to repeat.
+
+**Resume your own issue on start, before touching `main`.** `git branch --show-current` and `git
+status --porcelain`. On `main` with a clean tree, carry on. Otherwise take `<N>` from the branch
+name (`issue-<N>-…` or the project's convention), else from the input, and list its claim
+comments (the claim command under "Implement"):
+- You hold #<N> (open, carries `in-progress-label`, newest `[executor] Claimed by` comment names
+  your clone exactly; with no claim comment at all, only when the input names it), and you are on
+  its branch → resume: stay on the
+  branch, keep the working tree, read the issue, see what is done (`git log --oneline
+  main..HEAD`, `git diff HEAD`), continue (or orient and poll if a PR has `Closes #<N>`). Do not
+  re-claim.
+- You hold #<N> but are on another branch → clean tree: switch to its branch (`git branch --list
+  "issue-<N>-*"`) and resume; uncommitted changes: stop and say so. Never resume on a branch
+  that is not the issue's.
+- Open with neither `in-progress-label` nor `blocked-label` → claim it; win → you hold it, so as
+  the two bullets above; lose → as below.
+- Anything else → clean tree: `git checkout main`, `git pull`; uncommitted changes: stop and say
+  so. Never switch branches over uncommitted work.
+
+To restart for a plugin update: with a PR open, use the stop file and re-run on the PR;
+mid-implementation, end the session without the stop file: the claim and the working tree stay,
+and the next start resumes.
 
 **No interactive prompts, ever.** A question for the operator is a decision you cannot proceed
 without, posted as its own GitHub comment on the PR (or the issue when there is no PR yet):
@@ -61,7 +89,8 @@ milestone is the first open one numbered after it; none → stop. List them with
 
 Re-fetch the issue immediately before claiming: `gh issue view <N> --repo <repo> --json
 labels,author,authorAssociation`. `in-progress-label` present → another executor has it (the
-label is authoritative; no PR is not evidence it is stale) → pick next. `blocked-label` → pick
+label is authoritative; no PR is not evidence it is stale) → pick next, unless the newest
+`[executor] Claimed by` comment names your clone exactly: then it is yours, so resume (above). `blocked-label` → pick
 next. Author not in `trusted-authors` (or association not allowed) → post `[executor] Skipped:
 @<login> is not in trusted-authors.` and pick next. Otherwise claim with a comment, then the label
 (two executors that pick at the same moment both see no label; `<clone>` is the base name of your

@@ -31,6 +31,15 @@ that want the two separated.
    Read the whole file: project rules are criteria too.
 3. If `.agent-loop/role` exists and does not say `qa`, stop: this clone hosts another role.
 4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it to the script.
+5. **Say what you run on**, as the first line you print: `QA · <model> · ${CLAUDE_EFFORT}`,
+   with the model as your system prompt names it (`QA · Opus 5.5 · high`). `/model` and
+   `/effort` set the default for every new session, so a loop restarted after the operator
+   switched another one can come up on the wrong model. If the block has `models:` (comma-separated
+   `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `qa` entry
+   does not match (the model word is not in your model's name, or the effort differs), add a
+   second line: `⚠ AGENTS.md expects <entry> for the qa; this session runs <model> ·
+   ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is wrong.` Then carry on: a
+   mismatch never stops the loop.
 
 Rules for the whole session: never merge or push; no interactive prompts (a decision you need from
 the operator is a standalone `[qa] Question: <one line>` comment with two or three lines of context

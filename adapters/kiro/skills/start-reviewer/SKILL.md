@@ -26,6 +26,8 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `needs-operator-label` — label on a PR while it waits on the operator (default: `needs-operator`)
 - `in-progress-label` — the executor's claim label (default: `in-progress`); an issue without it has no executor polling its PR
 
+**First line you print:** `Reviewer · <model> · <effort>`, as far as you know them, so a loop that came up on the wrong model is seen at once. If the `## Agent loop` block has `models:` (comma-separated `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `reviewer` entry does not match, add `⚠ AGENTS.md expects <entry> for the reviewer; this session runs <model>.` and carry on: a mismatch never stops the loop.
+
 Never merge, never push. You post `[reviewer]` comments, and add or remove `<needs-operator-label>` for your own questions and on a PR no executor polls (below); nothing else.
 
 Immediately before every post, re-fetch the thread (`gh pr view <n> --comments --repo <repo>`) and the inline threads (`gh api repos/<repo>/pulls/<n>/comments`) and fold in anything new: `pr-watch.mjs` treats an `[executor]` comment older than your newest `[reviewer]` post as already read.
