@@ -34,6 +34,8 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 
 Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Executor sentinel path: `.agent-loop/<slug>-executor-stop-<N>` where `<N>` is the issue number (project-local; gitignored).
 
+**Clear stale claims:** `gh issue list --repo <repo> --state closed --label <in-progress-label> --limit 100 --json number --jq '.[].number'`, then `gh issue edit <n> --repo <repo> --remove-label <in-progress-label>` for each number, one command per issue. The label is removed on `MERGED`, but a loop stopped after `MERGE_READY` never sees the merge. A closed issue has no claim to protect, so this is safe while other executors run, and safe to repeat on every invocation.
+
 Then proceed with $ARGUMENTS.
 
 **No interactive terminal prompts — ever** (no menus, no structured choices). Questions go to GitHub, channel by phase: **PR exists** → `gh pr comment <PR> --body "[executor] Question: <question>"`; **no PR yet** (implement phase) → `gh issue comment <N> --body "[executor] Question: <question>"`. A posted question is a **stop**: if a safe default exists, take the default and note the assumption instead of asking; only post a question when you genuinely cannot proceed correctly — and then stop, never ask and keep building in the same step (see implement-phase park-and-stop below and the loop's question handling).

@@ -31,7 +31,12 @@ operator (the human) in unprefixed comments. The operator merges; you never do.
    `needs-operator`), and the author allowlist
    (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
 3. If `.agent-loop/role` exists and does not say `executor`, stop: this clone hosts another role.
-4. Make sure `main` is current: `git checkout main` then `git pull`.
+4. Make sure `main` is current: `git checkout main` then `git pull`. Then clear stale claims:
+   `gh issue list --repo <repo> --state closed --label <in-progress-label> --limit 100 --json
+   number --jq '.[].number'`, and for each number `gh issue edit <n> --repo <repo> --remove-label
+   <in-progress-label>`, one call per issue. You remove the label on `MERGED`, but a loop stopped
+   after `MERGE_READY` never sees the merge. A closed issue has no claim to protect, so this is
+   safe while other executors run.
 
 Rules that hold for the whole session:
 
