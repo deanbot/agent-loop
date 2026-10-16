@@ -100,14 +100,16 @@ caused by this PR is a finding, not an LGTM; a pending check is noted, not waite
 first; post.
 
 **Label a ready PR with your LGTM**, whoever owns it. The executor adds `<needs-operator-label>`
-when its poll sees `MERGE_READY`, but an executor the operator stopped (its issue still carries
-`<in-progress-label>`) polls nothing, and a PR the operator or a monitor opened, or one an executor
+when its poll sees `MERGE_READY`, but an executor the operator stopped (its issue keeps its
+in-progress label) polls nothing, and a PR the operator or a monitor opened, or one an executor
 parked, has no executor at all. So with every LGTM, check the `MERGE_READY` threshold yourself:
 your LGTM is on the head commit, CI is green (every check `pass` or `skipping`, or no checks at
 all), `[qa] PASS` after the last commit when `qa-gate: on`, and no inline thread is unanswered.
 
-- All hold → post the LGTM, then `gh pr edit <n> --repo <repo> --add-label
-  <needs-operator-label>`. When the label is already on, this does nothing.
+- All hold → post the LGTM, then `gh pr view <n> --repo <repo> --json headRefOid`. Still the sha
+  you reviewed → `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>` (when the label
+  is already on, this does nothing). The head moved → skip the label: a push landed after your
+  LGTM, and the new head is unreviewed.
 - CI is pending (everything else holds) → end the LGTM with `CI is pending, so this PR does not
   have the <needs-operator-label> label yet: a running executor adds it when CI is green; with
   none, merge it once CI is green.` A failing check caused by the PR is a finding, not an LGTM.

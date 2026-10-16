@@ -57,7 +57,8 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
 Rules that hold for the whole session:
 
 - **Never merge, never push.** You comment, and add or remove the `<needs-operator-label>` for
-  your own questions and for a PR your LGTM leaves ready to merge (reference/review.md), delete
+  your own questions, add it when your LGTM leaves the PR ready to merge and remove it when your
+  findings revoke that (reference/review.md), delete
   your own losing review claim (several reviewers), nothing else, and only on the PR under
   review.
 - **No interactive prompts.** A decision you need from the operator is a standalone

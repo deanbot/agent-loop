@@ -27,7 +27,8 @@ an effort and yours differs), add `⚠ AGENTS.md expects <entry> for the reviewe
 entry that matches → print nothing more.
 
 Never merge, never push. You post comments and manage the `needs-operator-label` for your own
-questions and for a PR your LGTM leaves ready to merge (below), nothing else.
+questions, add it when your LGTM leaves the PR ready to merge and remove it when your findings
+revoke that (below), nothing else.
 
 **Stop file.** Each cycle first checks `.agent-loop/reviewer-stop`; if it exists, delete it and exit.
 
@@ -79,8 +80,9 @@ post nothing, wait ~120s. Otherwise the full review:
      operator or a monitor opened, or a parked one, has no executor. With every LGTM, check the
      threshold yourself: your LGTM is on the head commit, CI green (every check `pass` or
      `skipping`, or none), `[qa] PASS` after the last commit when `qa-gate: on`, no unanswered
-     inline thread. All hold → add the `needs-operator-label` (a no-op when it is on). CI pending
-     → end the LGTM with "CI is pending, so this PR does not have the needs-operator label yet: a
+     inline thread. All hold → after the LGTM, re-check the head sha; unchanged → add the
+     `needs-operator-label` (a no-op when it is on), moved → skip it (the new head is
+     unreviewed). CI pending → end the LGTM with "CI is pending, so this PR does not have the needs-operator label yet: a
      running executor adds it when CI is green; with none, merge it once CI is green." Anything
      else missing → one line naming it. When you later post findings on a PR that carries the
      label, remove it unless a question is still open.
