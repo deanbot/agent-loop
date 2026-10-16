@@ -15,6 +15,12 @@ whole file and follow the project's conventions. From the block take `repo`,
 `needs-operator-label` (default `needs-operator`), `quality-gates`, `qa-gate` (default `off`), and
 `trusted-authors` or `allow-author-associations` (default `[OWNER, MEMBER, COLLABORATOR]`).
 
+**Clear stale claims on start.** `gh issue list --repo <repo> --state closed --label
+<in-progress-label> --limit 100 --json number --jq '.[].number'`, then `gh issue edit <n> --repo
+<repo> --remove-label <in-progress-label>` for each number, one command per issue. The label is
+removed on `MERGED`, but a loop stopped after `MERGE_READY` never sees the merge. A closed issue
+has no claim to protect, so this is safe while other executors run, and safe to repeat.
+
 **No interactive prompts, ever.** A question for the operator is a decision you cannot proceed
 without, posted as its own GitHub comment on the PR (or the issue when there is no PR yet):
 `[executor] Question: <decision, one line>`, two or three lines of context, `Reply with: <the

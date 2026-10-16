@@ -299,7 +299,9 @@ nothing to pick, operator stop.
 The executor takes the lowest-numbered open issue without `in-progress-label` or `blocked-label`
 whose named dependencies (`Depends on #a, #b`) are closed, after the author check. The label is
 the claim: an issue carrying `in-progress-label` belongs to another executor even when no PR
-exists.
+exists. On start the executor removes `in-progress-label` from closed issues: it normally removes
+the label on `MERGED`, which a loop stopped after `MERGE_READY` never sees, and a closed issue has
+no claim to protect.
 
 ### Executor question / blocked protocol
 
