@@ -110,7 +110,10 @@ all), `[qa] PASS` after the last commit when `qa-gate: on`, and no inline thread
   Still the sha you reviewed and `mergeable` not `CONFLICTING` → `gh pr edit <n> --repo <repo>
   --add-label <needs-operator-label>` (when the label is already on, this does nothing). The head
   moved → skip the label: a push landed after your LGTM, and the new head is unreviewed.
-  `CONFLICTING` → skip it too: the executor's poll reports `MERGE_CONFLICT` and resolves it.
+  `CONFLICTING` → skip it too, and post `[reviewer] Merge conflicts — PR #<n> conflicts with
+  main, so it is not ready to merge. Whoever owns it: bring main in, resolve, push.` An executor
+  that polls gets `MERGE_CONFLICT` as well; a PR with none would otherwise sit unlabelled with
+  nobody told.
   `UNKNOWN` (GitHub still computing) does not hold the label back.
 - CI is pending (everything else holds) → end the LGTM with `CI is pending, so this PR does not
   have the <needs-operator-label> label yet: a running executor adds it when CI is green; with

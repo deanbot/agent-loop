@@ -41,7 +41,9 @@ bump needed), then restart running loop sessions.
 ## Per project
 
 1. Add the `## Agent loop` block to the project's `AGENTS.md` (keys in `spec/SPEC.md`).
-2. One clone per role, for example `proj` (yours), `proj-exec`, `proj-review`. Inside each, in
+2. One clone per role, for example `proj` (yours), `proj-exec`, `proj-review`, anywhere on disk
+   (the folder name must be unique per repo and stable: claims and reviewer state use it, and
+   renaming a clone that holds a claim orphans the claim). Inside each, in
    Claude Code: `/agent-loop:setup operator|executor|reviewer|qa`. It creates the labels, ignores
    `.agent-loop/` and `.claude/settings.local.json`, writes the role marker, adds the role's Bash
    allow rules to `.claude/settings.local.json`, and enables `.githooks` if the project has one.

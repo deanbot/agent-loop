@@ -14,7 +14,7 @@
  *
  * Usage:
  *   node scripts/pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>]]
- *                             [--wait [secs] [--max secs]]
+ *                             [--needs-operator-label <name>] [--wait [secs] [--max secs]]
  *   node scripts/pr-watch.mjs --repo owner/repo --reviewer <clone> --check-claim <n> [--stale-after <secs>]
  *
  * Several reviewers (--reviewer <clone>): each reviewer claims a PR with a "[reviewer] Reviewing
@@ -31,7 +31,10 @@
  * Output — one line, then exits (with --wait: the first line that is news, see lib/wait.mjs):
  *   NONE <timestamp>              no PRs changed since last run
  *   REVIEW:<n>                    PR has new commits; ready for code review
- *   MERGE_CONFLICT:<n>            PR has new commits but branch has merge conflicts
+ *   MERGE_CONFLICT:<n>            PR has new commits but branch has merge conflicts, or (standing) it carries
+ *                                 the needs-operator label and conflicts with its base: a PR that was ready
+ *                                 and fell into conflict when main moved. Repeated every run until the label
+ *                                 is off or the conflict is gone, whether or not an executor holds the PR.
  *   REVIEW_COMMENTS:<n>           PR has new operator (unprefixed) comments or inline review comments
  *   CLOSED:<n>                    PR the script was tracking is no longer open (merged or closed); emitted once
  *
@@ -42,6 +45,8 @@
  * State format: { [prNumber]: { sha: string, lastComment: number | null, lastReviewComment: number | undefined } }
  *   lastComment       — cursor for issues/{n}/comments (timeline comments)
  *   lastReviewComment — cursor for pulls/{n}/comments (inline diff review comments)
+ *
+ * --needs-operator-label <name> (default needs-operator): the label the standing MERGE_CONFLICT looks for.
  *
  * On first encounter of a PR, CHANGES_REQUESTED review suppresses the signal — the PR
  * already has a blocking review. A new commit re-triggers normally.
@@ -54,7 +59,7 @@ import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
 const USAGE =
-  'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--wait [secs] [--max secs]]'
+  'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--wait [secs] [--max secs]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -80,6 +85,10 @@ const staleArg = arg('--stale-after')
 if (process.argv.includes('--stale-after') && !/^\d+$/.test(staleArg ?? ''))
   usageError(USAGE, `--stale-after: expected seconds, got "${staleArg ?? ''}"`)
 const STALE_MS = Number(staleArg ?? 1800) * 1000
+const needsOperatorLabel = arg('--needs-operator-label')
+if (process.argv.includes('--needs-operator-label') && !needsOperatorLabel)
+  usageError(USAGE, '--needs-operator-label: expected a label name')
+const NEEDS_OPERATOR = needsOperatorLabel ?? 'needs-operator'
 
 const repoSlug = repo.replace('/', '-')
 const STATE_DIR = path.join(homedir(), '.agent-loop', 'state')
@@ -140,14 +149,14 @@ function pass({ gh, save }) {
   }
 
   const prs = JSON.parse(
-    gh(`gh pr list --repo ${repo} --json number,headRefOid,mergeable --limit 50`)
+    gh(`gh pr list --repo ${repo} --json number,headRefOid,mergeable,labels --limit 50`)
   )
 
   const toReview = []
   const mergeConflicts = []
   const reviewComments = []
 
-  for (const { number, headRefOid, mergeable } of prs) {
+  for (const { number, headRefOid, mergeable, labels } of prs) {
     if (skip.has(number)) {
       state[number] = { sha: headRefOid, lastComment: state[number]?.lastComment ?? null }
       continue
@@ -188,6 +197,12 @@ function pass({ gh, save }) {
       const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
       const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${number}/comments`)
       const hasReviewerPost = comments.some(isReviewerPost)
+      // A standing conflict on a PR in the operator's inbox as ready: main moved under an unchanged
+      // head (#48). Nobody else may report it: with no executor polling, pr-poll never runs. Reported
+      // whether or not an executor holds the PR (an executor that polls sees it as well), until the
+      // reviewer takes the label off or the conflict goes. The comment checks below still run.
+      const labelled = (labels ?? []).some((l) => l.name === NEEDS_OPERATOR)
+      if (hasReviewerPost && labelled && mergeable === 'CONFLICTING') mergeConflicts.push(number)
       if (!hasReviewerPost) {
         // Reviewer has never posted — PR needs initial review regardless of session
         if (mergeable === 'CONFLICTING') {

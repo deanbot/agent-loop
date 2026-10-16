@@ -82,16 +82,29 @@ error, a broken install): name it in the status line, run the cycle, but end it 
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
 again, so a failure that repeats costs one turn per five minutes, not one per second.
 
-1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> $ARGUMENTS`, in the foreground,
-   once per cycle. One line, space-separated signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`,
-   `REVIEW:<n>`, `REVIEW_COMMENTS:<n>`. You never need the waiter's own output.
+1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> --needs-operator-label
+   <needs-operator-label> $ARGUMENTS`, in the foreground, once per cycle. One line,
+   space-separated signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`, `REVIEW:<n>`,
+   `REVIEW_COMMENTS:<n>`. You never need the waiter's own output.
 2. Handle each signal. With several reviewers, a signal that leads to work and a post on a PR
    you do not hold yet goes through the claim first ("Several reviewers").
    - **`CLOSED:<n>`** (the operator merged or closed it) → nothing to post, whatever was
      outstanding; the operator's merge is the final word. Say "PR #<n> merged or closed; dropped"
      in the status line and forget it.
-   - **`MERGE_CONFLICT:<n>`** → `gh pr comment <n> --repo <repo> --body "[reviewer] Merge
-     conflicts — rebase on main before review."` Do not review the diff.
+   - **`MERGE_CONFLICT:<n>`** → do not review the diff. Two cases:
+     - The PR carries `<needs-operator-label>` (it was ready, and `main` moved under it; the
+       script reports this whoever owns the PR, executor or not) → `gh pr edit <n> --repo <repo>
+       --remove-label <needs-operator-label>` unless a question is still open, then, unless your
+       newest `[reviewer]` comment on the PR already says so, `gh pr comment <n> --repo <repo>
+       --body "[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready
+       to merge; <label state>. Whoever owns it: bring main in, resolve, push."`, where `<label
+       state>` is `<needs-operator-label> is off`, or `<needs-operator-label> stays on for the
+       open question` when one kept it. The signal repeats while the label stays on, so post once.
+     - No label, and the head is new since your last `[reviewer]` post (new commits on a
+       conflicting branch) → `gh pr comment <n> --repo <repo> --body "[reviewer] Merge conflicts
+       — rebase on main before review."`
+     - No label, and the head is one you already posted on (the executor took the label off
+       between the watch and now) → post nothing: the executor is resolving it.
    - **`REVIEW:<n>`** (new commits, or a PR you have never posted on) → a full review. With
      `qa-gate: on`, first check for a `[qa] PASS` newer than the last commit; none yet → post
      nothing this cycle. Otherwise read [reference/review.md](reference/review.md) the first time
@@ -114,7 +127,7 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
 5. Wait. Start the waiter with Bash `run_in_background: true`, then schedule the fallback:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> $ARGUMENTS --wait 30 --max 1500
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> --needs-operator-label <needs-operator-label> $ARGUMENTS --wait 30 --max 1500
 ```
 
 ```

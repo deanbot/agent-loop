@@ -19,8 +19,10 @@ Three layers. Boundaries are strict.
 (ScheduleWakeup, sleep, cron). If it can't run in a shell with Node.js, it doesn't belong here.
 
 - `scripts/pr-watch.mjs` — reviewer signal source. `--repo owner/repo [--skip n,n] [--reviewer
-  <clone>]`. One line, exits. With `--reviewer` (several reviewers) it honours review claims and
-  keeps state per reviewer; `--check-claim <n>` prints who holds a PR.
+  <clone>] [--needs-operator-label <name>]`. One line, exits. With `--reviewer` (several
+  reviewers) it honours review claims and keeps state per reviewer; `--check-claim <n>` prints who
+  holds a PR. A PR labelled needs-operator that falls into conflict is reported as a standing
+  `MERGE_CONFLICT:<n>`.
 - `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]`.
   Signals then content blocks, exits.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
@@ -112,6 +114,12 @@ A project that runs agent-loop has one clone per role: the operator's own, `proj
 branches, installed dependencies, `.claude/settings.local.json`, the role marker and stop requests
 isolated, and lets the reviewer run probes against the PR branch without disturbing the executor.
 
+A clone may live anywhere: siblings of the operator's checkout, or a separate tree such as
+`~/agents/<owner>/<clone>`. Nothing in the scripts depends on the location. The clone's folder
+name does matter: it is `<clone>` in executor claims (`[executor] Claimed by <clone>`), reviewer
+claims and per-reviewer state files. Keep it unique per repo and stable; renaming a clone while it
+holds a claim orphans the claim (release or finish the work first).
+
 ## How to add an adapter
 
 1. Create `adapters/<toolname>/`
@@ -152,6 +160,12 @@ description.
 Direct commits to `main` for docs, spec and adapter stubs. Script changes go through a PR —
 scripts affect all adopters — and `node scripts/test/run.mjs` must pass. After a PR merges, run
 `claude plugin update agent-loop@agent-loop` so the installed plugin follows `main`.
+
+Every PR body carries a **restart note**: which roles need a fresh session to pick the change up
+(a running loop keeps the skill text it started with), and whether `/agent-loop:setup <role>` must
+be re-run in existing clones. Setup must be re-run whenever `setup-project.sh` changes (allow
+rules, labels, ignores), because its output lives in each clone and an update does not touch it.
+Say "none" when nothing needs it; never leave the note out.
 
 ## Source of truth
 
