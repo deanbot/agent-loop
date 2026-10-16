@@ -42,7 +42,9 @@ Then proceed with $ARGUMENTS.
 
 ## Detect input type
 
-Run `gh pr view $ARGUMENTS --repo <repo>` first.
+$ARGUMENTS may hold `--milestone "<title>"`: take it out first and keep it as `<milestone>` (pass it again on every re-invocation; it decides every pick in step 8). Below, $ARGUMENTS means what remains: a PR number, an issue number, or empty.
+
+Run `gh pr view $ARGUMENTS --repo <repo>` first (skip it when $ARGUMENTS is empty).
 - If it succeeds: $ARGUMENTS is a PR — note linked issue from PR body (`Closes #<N>`), orient (step 6b), enter executor loop (step 7).
 - If it fails or $ARGUMENTS is empty: treat as issue number or pick next.
   - **Empty $ARGUMENTS:** run pick-next query (step 8), use result as issue number.
@@ -54,7 +56,11 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first.
       - **Author check — apply in order:**
         1. If `trusted-authors` is set: skip unless `login` is in that list. Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: @<login> is not in \`trusted-authors\`. Add login to AGENTS.md to allow. See README Security section."` — do not claim — go to step 8.
         2. Else: skip unless `assoc` is in `allow-author-associations` (default: `[OWNER, MEMBER, COLLABORATOR]`). Post `gh issue comment <N> --repo <repo> --body "[executor] Skipped: author @<login> (association: <assoc>) is not in \`allow-author-associations\`. See README Security section."` — do not claim — go to step 8.
-      - Otherwise claim — `gh issue edit <N> --add-label <in-progress-label> --repo <repo>` — then full implement flow.
+      - Otherwise claim with a comment, then the label (two executors that pick at the same moment both see no label). `<clone>` is the base name of your working directory. One command each:
+        1. `gh issue comment <N> --repo <repo> --body "[executor] Claimed by <clone>"` — the number after `#issuecomment-` in the printed URL is your claim's id.
+        2. `gh api --paginate "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "") | startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`
+        3. Live claims: yours and those posted no more than 10 minutes before yours (compare `created_at`, never your clock). The lowest id wins.
+        4. Yours → `gh issue edit <N> --add-label <in-progress-label> --repo <repo>`, then full implement flow. Not yours → `gh api -X DELETE "repos/<repo>/issues/comments/<your id>"`, leave the label alone (it is the winner's), go to step 8.
 
 **Operator stop — implement phase:** If the operator sends a message containing "stop" at any point before the executor loop (during implement steps 1–4): `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, notify "Executor stopped. Issue #<N> unclaimed.", exit. No sentinel needed — no scheduled re-invocation has been set up yet.
 
@@ -148,3 +154,8 @@ Signal handling:
 `gh issue list --state open --repo <repo> --limit 200 --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and (index("<blocked-label>") | not))) | first'`
 
 Take the first result whose dependencies (`Depends on #a, #b` in the body) are all closed (`gh issue view <a> --repo <repo> --json state`); skip the others. If one is found: restart from detect input type with that issue number. If none: STOP and notify user.
+
+**With `<milestone>`**, list that milestone instead: `gh issue list --state open --repo <repo> --milestone "<milestone>" --limit 200 --json number,title,labels --jq 'sort_by(.number)'`. Candidates are the issues without `<in-progress-label>` or `<blocked-label>` whose dependencies are all closed.
+- A candidate → restart from detect input type with that issue number.
+- Open issues but none startable → do not stop and do not move on: the track waits for its blocker to merge. The blocker is the dependency the first open issue waits on, or that issue itself when another executor has claimed it. Look for its PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] | select((.body // "") | test("Closes #<blocker>([^0-9]|$)"; "i"))] | first | .number'`. A PR (in review, merges soon) → report `<milestone>: waiting on #<blocker> (PR #<pr> in review)` and wait ~10 minutes. None (unstarted or still being built) → report `<milestone>: waiting on #<blocker> (no PR yet)` and wait ~30 minutes. Then re-invoke with the same `--milestone`.
+- No open issues in the milestone → move to the next one: `gh api "repos/<repo>/milestones?state=all&per_page=100" --jq 'sort_by(.number) | .[] | "\(.number) \(.state) \(.title)"'`; the new `<milestone>` is the first `open` one numbered after the current one. None → STOP and notify user.

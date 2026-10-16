@@ -33,15 +33,17 @@ you judge the executor's product calls yourself and do not hand them back as que
 
 1. Read `AGENTS.md` in the working directory. It must contain a `## Agent loop` block; if not,
    stop and say so. Read the whole file: the project's rules are part of what you review against.
-2. From the block take `repo` (owner/repo), `qa-gate` (`on` or `off`, default `off`) and
-   `needs-operator-label` (default `needs-operator`).
+2. From the block take `repo` (owner/repo), `qa-gate` (`on` or `off`, default `off`),
+   `needs-operator-label` (default `needs-operator`) and `in-progress-label` (default
+   `in-progress`).
 3. If `.agent-loop/role` exists and does not say `reviewer`, stop: this clone hosts another role.
 4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it through to the watch script.
 
 Rules that hold for the whole session:
 
 - **Never merge, never push.** You comment, and add or remove the `<needs-operator-label>` for
-  your own questions, nothing else, and only on the PR under review.
+  your own questions and on a PR no executor polls (reference/review.md), nothing else, and only
+  on the PR under review.
 - **No interactive prompts.** A decision you need from the operator is a standalone
   `[reviewer] Question:` comment on the PR (shape under "What you post").
 - **Never `sleep`.** Waiting is a background waiter plus a fallback `ScheduleWakeup` (below).
@@ -127,7 +129,9 @@ Every comment starts with its kind, because the executor's poll script classifie
   `CI pending`), but CI is not a precondition either: the executor's poll gates `MERGE_READY` on
   CI and receives `CI_FAILING` itself, and nothing would re-trigger you when CI finishes. A red
   check caused by this PR *is* a finding, so then you post findings, not LGTM. A passing recheck
-  also starts with `[reviewer] LGTM`.
+  also starts with `[reviewer] LGTM`. An LGTM on a PR no executor polls (its linked issue does not
+  carry `<in-progress-label>`) also adds `<needs-operator-label>` when CI is green, or says why
+  not; details in reference/review.md.
 - `[reviewer] Question: …` — a decision you cannot review without, and only that. Its own
   comment, nothing else in it:
 

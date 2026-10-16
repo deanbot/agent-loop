@@ -47,7 +47,11 @@ bump needed), then restart running loop sessions.
    allow rules to `.claude/settings.local.json`, and enables `.githooks` if the project has one.
 3. Start the loops, one per session, each in its clone:
    `/agent-loop:start-executor [issue-or-PR]`, `/agent-loop:start-reviewer`, and with
-   `qa-gate: on` `/agent-loop:start-qa`.
+   `qa-gate: on` `/agent-loop:start-qa`. Several executors can run separate tracks with
+   `/agent-loop:start-executor --milestone "<title>"`: each picks only from its milestone, waits
+   while nothing in it is startable, and moves to the next open milestone when it is empty. Two
+   executors that pick the same issue at once settle it with a claim comment (spec: "Claim
+   comments").
 4. Say `stop` in a loop's session to end it. Merge PRs yourself when the executor reports
    `MERGE_READY`.
 

@@ -99,6 +99,21 @@ other text. Repo conventions apply to your comments (for example, no tool attrib
 caused by this PR is a finding, not an LGTM; a pending check is noted, not waited for. Never ask
 first; post.
 
+**A PR no executor polls** gets `MERGE_READY`, and so `<needs-operator-label>`, from nobody: a PR
+the operator or a monitor opened, or one an executor parked. It is one when its linked issue does
+not carry `<in-progress-label>` (`gh issue view <M> --repo <repo> --json labels`), or there is no
+linked issue. With an LGTM on such a PR, check what the executor's poll would: CI green (every
+check `pass` or `skipping`, or no checks at all), `[qa] PASS` after the last commit when `qa-gate:
+on`, and no unanswered inline thread.
+
+- All hold → post the LGTM, then `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>`.
+- Otherwise → end the LGTM with `No executor polls this PR, so it will not get the
+  <needs-operator-label> label: merge it when <what is missing, e.g. CI is green>.`
+
+When you later post findings on a PR you labelled this way, `--remove-label
+<needs-operator-label>` in the same cycle, unless a question of yours is still open. An executor
+PR's issue carries `<in-progress-label>`, so you never label one.
+
 ## 5. Report to the operator
 
 One line per PR in the terminal: the PR, the sha, the acceptance criteria as a compact checklist,

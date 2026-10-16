@@ -5,7 +5,7 @@ description: >
   addressing reviewer findings, CI failures and operator comments; then picks the next issue.
   Reads its configuration from the project's AGENTS.md "## Agent loop" block. Explicit
   invocation only; runs headless in its own clone.
-argument-hint: "[issue-or-PR-number]"
+argument-hint: "[issue-or-PR-number] [--milestone \"<title>\"]"
 disable-model-invocation: true
 allowed-tools:
   - Bash(gh issue *)
@@ -54,23 +54,50 @@ Rules that hold for the whole session:
 
 ## Decide what you are working on
 
-`$ARGUMENTS` is a PR number, an issue number, or empty.
+`$ARGUMENTS` may hold `--milestone "<title>"`: take it out first and keep it as `<milestone>`
+for the whole session (it decides every later pick). What remains, `<arg>`, is a PR number, an
+issue number, or empty. Never pass `--milestone` to a `gh pr` or `gh issue` command that expects a
+number.
 
-- Run `gh pr view $ARGUMENTS --repo <repo> --json number,body,headRefName`. If it succeeds,
+- `<arg>` empty → pick the next issue (below), then treat it as an issue number.
+- Run `gh pr view <arg> --repo <repo> --json number,body,headRefName`. If it succeeds,
   this is a PR: note its linked issue (`Closes #N` in the body), orient (below), enter the loop.
 - Otherwise, with an issue number: `gh pr list --repo <repo> --state open --limit 100 --json
   number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first |
   .number'`. A PR found → orient on it and enter the loop (do not re-claim). None → claim and
   implement
   (read [reference/implement.md](reference/implement.md) now; it covers the author check, the
-  label claim, dependencies, tests-first, the pre-PR self-check and the PR body).
-- Empty → pick the next issue (below), then treat it as an issue number.
+  claim, dependencies, tests-first, the pre-PR self-check and the PR body).
 
-**Pick next.** `gh issue list --state open --repo <repo> --limit 200 --json number,title,body,labels
---jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and
-(index("<blocked-label>") | not)))'`, then take the first candidate whose dependencies are all
-closed (an issue names them as `Depends on #a, #b`; check each with `gh issue view <a> --repo
-<repo> --json state`). None → say there is nothing to pick and end without a wakeup.
+**Pick next.** Without `<milestone>`: `gh issue list --state open --repo <repo> --limit 200 --json
+number,title,body,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) |
+(index("<in-progress-label>") | not) and (index("<blocked-label>") | not)))'`, then take the first
+candidate whose dependencies are all closed (an issue names them as `Depends on #a, #b`; check each
+with `gh issue view <a> --repo <repo> --json state`). None → say there is nothing to pick and end
+without a wakeup.
+
+With `<milestone>`: `gh issue list --state open --repo <repo> --milestone "<milestone>" --limit 200
+--json number,title,body,labels --jq 'sort_by(.number)'`. The candidates are the issues without
+`<in-progress-label>` or `<blocked-label>`; take the first whose dependencies are all closed.
+
+- **A candidate** → treat it as an issue number (above).
+- **Open issues, none startable** (each claimed, blocked or waiting on a dependency) → do not end
+  and do not move on: the track waits for its blocker to merge. The blocker is the dependency the
+  first open issue waits on, or that issue itself when another executor has claimed it. Look for
+  its PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] |
+  select((.body // "") | test("Closes #<blocker>([^0-9]|$)"; "i"))] | first | .number'`.
+  - A PR → it is in review and merges soon: status line `⏸ <milestone>: waiting on #<blocker>
+    (PR #<pr> in review)`, delay 600.
+  - None → it is unstarted or still being built, likely hours away: status line `⏸ <milestone>:
+    waiting on #<blocker> (no PR yet)`, delay 1800.
+
+  Then `ScheduleWakeup({ delaySeconds: <delay>, noop: true, prompt: "Executor for <repo>,
+  milestone \"<milestone>\": nothing was startable; pick next again.", reason: "<one line>" })`.
+  That wake runs Pick next again, nothing else.
+- **No open issues** in the milestone → move on: `gh api "repos/<repo>/milestones?state=all&per_page=100"
+  --jq 'sort_by(.number) | .[] | "\(.number) \(.state) \(.title)"'`, and the new `<milestone>` is
+  the first `open` one numbered after the current one. Say so in one line and pick again. None
+  after it → nothing to pick; end without a wakeup.
 
 **Orient on an existing PR.** `gh pr view <PR> --repo <repo>` and `gh pr view <PR> --comments
 --repo <repo>`: the description, the acceptance criteria table, every comment, any earlier
@@ -123,11 +150,11 @@ Each cycle:
    considered.
 4. Print the status block. The third line is the state the operator cares about:
    `⏳ Waiting for review`, `❓ Question for you: <one line>` while your question is unanswered,
-   or `✅ Ready — operator merges`.
+   or `✅ Ready — operator merges`. The first line names `<milestone>` when you have one.
 
 ```
 ┌──────────────────────────────────────────┐
-│  PR #<PR> — <issue title>                │
+│  PR #<PR> — <issue title> · <milestone>  │
 │  https://github.com/<repo>/pull/<PR>     │
 │  ⏳ Waiting for review                   │
 └──────────────────────────────────────────┘
@@ -154,7 +181,8 @@ by itself: the waiter returns when it appears, or with new activity.
 
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
 call, after any posting.** The only exits are `MERGED` (then pick next), BLOCKED (then pick next),
-nothing to pick, and the operator's stop. If an iteration forgets, Claude Code fires one fallback
+nothing to pick (with `<milestone>`: no open issue left in it or a later milestone; a track that
+waits on a blocker schedules its 600- or 1800-second wakeup instead), and the operator's stop. If an iteration forgets, Claude Code fires one fallback
 wakeup after about 20 minutes and then ends the loop, so do not rely on it.
 
 ## Asking the operator

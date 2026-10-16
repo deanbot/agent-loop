@@ -135,6 +135,15 @@ an answered question comes back on the executor's next poll (an event-driven exe
 the asking role posts its next verdict). `gh pr list --label needs-operator` shows everything
 waiting on the operator.
 
+A PR **no executor polls** never gets `MERGE_READY` from a poll: a PR the operator or a monitor
+opened, or one whose executor parked it. The test is the linked issue (`Closes #N` in the body):
+none, or it does not carry `in-progress-label`. On such a PR the reviewer manages the label for
+readiness. With its LGTM it checks the `MERGE_READY` threshold itself (CI green, `[qa] PASS` after
+the last commit when `qa-gate: on`, no unanswered inline thread) and adds the label when it holds;
+when it does not, the LGTM says that the inbox will not show the PR and what is missing. When the
+reviewer later posts findings on a PR it labelled, it removes the label. Executor PRs carry
+`in-progress-label` on their issue, so they are never labelled twice.
+
 **The agent's own terminal** says the same in its status line, and an adapter with a notification
 primitive sends one when a question is posted.
 
@@ -292,7 +301,8 @@ stderr; "no checks reported" counts as no CI. Scripts page through the API (`gh 
 - `NONE` — wait.
 
 **Loop invariant:** every path ends with a wait before the next poll. Exits: `MERGED`, BLOCKED,
-nothing to pick, operator stop.
+nothing to pick (with a milestone: no open issue left in it or in a later milestone), operator
+stop.
 
 ### Picking work
 
@@ -302,6 +312,39 @@ the claim: an issue carrying `in-progress-label` belongs to another executor eve
 exists. On start the executor removes `in-progress-label` from closed issues: it normally removes
 the label on `MERGED`, which a loop stopped after `MERGE_READY` never sees, and a closed issue has
 no claim to protect.
+
+**Claiming** uses a claim comment, so two executors that pick at the same moment cannot both win
+(see "Claim comments" below). The winner then adds `in-progress-label`; the loser picks next.
+
+**Milestone track.** An executor started with a milestone (`--milestone "<title>"` in the adapters
+that take arguments) picks only open issues in that milestone. Several executors can run separate
+tracks this way; a shared `## Agent loop` key could not, since every clone reads the same
+`AGENTS.md`. When the milestone has open issues but none is startable (each is claimed, blocked or
+waiting on a dependency), the executor waits and picks again later; it does not end, and it does
+not move on. The wait follows the blocker (the dependency the first open issue waits on, or that
+issue when another executor claimed it): about 10 minutes when the blocker has an open PR, which
+is in review, and about 30 minutes when it has none yet, since it is hours away. The status line
+names the blocker and which case applies. Only when the milestone has **no open issues** does it move to the next open
+milestone by milestone number, after the current one. With no milestone, picking is as above.
+
+### Claim comments
+
+A role that must own an item alone (an executor and its issue) claims it with a comment, not a
+label alone: two agents can both read "no label" and both add it.
+
+1. Post the claim comment, `[<role>] <claim text naming the clone>`, and note its id. The clone is
+   the working directory's base name (`loom-exec`, `loom-exec2`).
+2. List the item's claim comments and keep the **live** ones (a per-role rule, below).
+3. The live claim with the lowest comment id wins. Comment ids only grow, so every agent agrees.
+4. The winner sets the role's durable marker, if any. A loser deletes its own claim comment and
+   moves on, and never touches the marker: a label is not per agent, so a loser removing it would
+   strip the winner's claim.
+
+Executor: `[executor] Claimed by <clone>` on the issue; the marker is `in-progress-label`. A claim
+is live when it was posted no more than 10 minutes before the executor's own (GitHub's
+`created_at` on both, never the local clock). An older claim that still holds already carries the
+label, which the executor checks first; an older one that does not is from a claim since released
+(merged, parked, stopped) or a claimer that crashed before labelling.
 
 ### Executor question / blocked protocol
 
@@ -394,7 +437,8 @@ the reviewer's own newest post is not reported again (`pr-watch.mjs`).
 waiter's baseline keeps standing signals from waking the agent on every poll.
 
 **Two executors on one issue.** Mitigation: the `in-progress-label` claim, re-fetched immediately
-before claiming; the label is authoritative.
+before claiming; the label is authoritative. Two executors that pick at the same moment both see
+no label, so the claim itself is a claim comment, earliest live one wins ("Claim comments").
 
 **Roles in one checkout.** Mitigation: one clone per role (`.agent-loop/role` marks it); agents
 refuse to run in a clone marked for another role.

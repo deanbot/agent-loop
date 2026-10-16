@@ -24,8 +24,9 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `repo` — the GitHub repo (owner/repo)
 - `qa-gate` — `on` or `off` (default `off`). With `off` (the default) there is no QA agent: you verify the acceptance criteria yourself (below). With `on`, wait for `[qa] PASS` before reviewing code.
 - `needs-operator-label` — label on a PR while it waits on the operator (default: `needs-operator`)
+- `in-progress-label` — the executor's claim label (default: `in-progress`); an issue without it has no executor polling its PR
 
-Never merge, never push. You post `[reviewer]` comments, and add or remove `<needs-operator-label>` for your own questions; nothing else.
+Never merge, never push. You post `[reviewer]` comments, and add or remove `<needs-operator-label>` for your own questions and on a PR no executor polls (below); nothing else.
 
 Immediately before every post, re-fetch the thread (`gh pr view <n> --comments --repo <repo>`) and the inline threads (`gh api repos/<repo>/pulls/<n>/comments`) and fold in anything new: `pr-watch.mjs` treats an `[executor]` comment older than your newest `[reviewer]` post as already read.
 
@@ -99,6 +100,7 @@ Review the diff scoped to unanswered issues. Post:
 - Actionable findings → `gh pr comment <n> --body "[reviewer] <findings>"`
 - A decision you cannot review without (never a criterion the operator checks by hand) → a standalone question, nothing else in it: `gh pr comment <n> --repo <repo> --body "[reviewer] Question: <decision, one line>` + two or three lines of context + `Reply with: <the replies that resolve it>"`, then `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>`. A question withholds `MERGE_READY` like a finding. When the operator replies (REVIEW_COMMENTS), remove the label and post your next verdict.
 - No findings → `gh pr comment <n> --body "[reviewer] LGTM"`
+- **A PR no executor polls** (its linked issue does not carry `<in-progress-label>`, checked with `gh issue view <M> --repo <repo> --json labels`, or it has none: a PR the operator or a monitor opened, or a parked one) gets `MERGE_READY` from nobody. With an LGTM on it, check the threshold yourself: CI green (every check `pass` or `skipping`, or none), `[qa] PASS` after the last commit when `qa-gate: on`, no unanswered inline thread. All hold → `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>`. Otherwise end the LGTM with "No executor polls this PR, so it will not get the `<needs-operator-label>` label: merge it when <what is missing>." When you later post findings on a PR you labelled, remove the label unless your question is still open.
 
 Wait ~60 seconds after findings or a question, ~300 seconds after LGTM.
 
