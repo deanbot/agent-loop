@@ -190,16 +190,16 @@ Each cycle:
 3. **Before posting any comment**, re-fetch `gh pr view <PR> --comments --repo <repo>` and fold
    in anything that arrived while you worked. One comment per cycle, after everything is
    considered.
-4. Print the status block. The third line is the state the operator cares about:
+4. Print the status block: three lines, each starting `▌ `, with no box, no right border and no
+   padding, so it wraps cleanly at any terminal width. The second line starts with
+   `<milestone> · ` when you have one. The third line is the state the operator cares about:
    `⏳ Waiting for review`, `❓ Question for you: <one line>` while your question is unanswered,
-   or `✅ Ready — operator merges`. The first line names `<milestone>` when you have one.
+   or `✅ Ready — operator merges`.
 
 ```
-┌──────────────────────────────────────────┐
-│  PR #<PR> — <issue title> · <milestone>  │
-│  https://github.com/<repo>/pull/<PR>     │
-│  ⏳ Waiting for review                   │
-└──────────────────────────────────────────┘
+▌ PR #<PR> — <issue title>
+▌ <milestone> · https://github.com/<repo>/pull/<PR>
+▌ ⏳ Waiting for review
 ```
 
 5. Wait. Start the waiter with Bash `run_in_background: true` — `<poll>` plus
