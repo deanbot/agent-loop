@@ -82,9 +82,9 @@ post nothing, wait ~120s. Otherwise the full review:
      `skipping`, or none), `[qa] PASS` after the last commit when `qa-gate: on`, no unanswered
      inline thread. All hold → after the LGTM, re-check the head sha; unchanged → add the
      `needs-operator-label` (a no-op when it is on), moved → skip it (the new head is
-     unreviewed). CI pending → end the LGTM with "CI is pending, so this PR does not have the needs-operator label yet: a
-     running executor adds it when CI is green; with none, merge it once CI is green." Anything
-     else missing → one line naming it. When you later post findings on a PR that carries the
+     unreviewed). CI pending → end the LGTM with "CI is pending, so this PR does not have the
+     needs-operator label yet: a running executor adds it when CI is green; with none, merge it
+     once CI is green." Anything else missing → one line naming it. When you later post findings on a PR that carries the
      label, remove it unless a question is still open.
    Every comment starts with its kind — `LGTM`, `Question`, `Merge conflicts`, or findings —
    because the executor's poll classifies by prefix, and a finding posted after an LGTM revokes it.
