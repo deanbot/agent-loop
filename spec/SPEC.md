@@ -321,7 +321,10 @@ that take arguments) picks only open issues in that milestone. Several executors
 tracks this way; a shared `## Agent loop` key could not, since every clone reads the same
 `AGENTS.md`. When the milestone has open issues but none is startable (each is claimed, blocked or
 waiting on a dependency), the executor waits and picks again later; it does not end, and it does
-not move on. Only when the milestone has **no open issues** does it move to the next open
+not move on. The wait follows the blocker (the dependency the first open issue waits on, or that
+issue when another executor claimed it): about 10 minutes when the blocker has an open PR, which
+is in review, and about 30 minutes when it has none yet, since it is hours away. The status line
+names the blocker and which case applies. Only when the milestone has **no open issues** does it move to the next open
 milestone by milestone number, after the current one. With no milestone, picking is as above.
 
 ### Claim comments

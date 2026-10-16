@@ -49,8 +49,11 @@ operator's results, such as measurements: ask for them once. On `MERGE_READY` ad
 **Milestone track.** The input may also name a milestone (`--milestone "<title>"`). Keep it for
 the whole run and pass it again on every re-invocation. Pick next then lists only that milestone
 (`gh issue list --state open --milestone "<title>" --limit 200 --json number,labels,body`), with
-the same rules. Open issues but none startable → do not stop and do not move on: report
-`<title>: waiting on #<blocker>`, wait ~10 minutes, and pick again. No open issues in it → the next
+the same rules. Open issues but none startable → do not stop and do not move on. The blocker is
+the dependency the first open issue waits on, or that issue itself when another executor claimed
+it. If it has an open PR (`Closes #<blocker>`), it is in review: report `<title>: waiting on
+#<blocker> (PR #<pr> in review)` and wait ~10 minutes. If not, it is unstarted or still being
+built: report `<title>: waiting on #<blocker> (no PR yet)` and wait ~30 minutes. Then pick again. No open issues in it → the next
 milestone is the first open one numbered after it; none → stop. List them with:
 `gh api "repos/<repo>/milestones?state=all&per_page=100" --jq 'sort_by(.number) | .[] | "\(.number) \(.state) \(.title)"'`
 

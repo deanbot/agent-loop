@@ -82,11 +82,18 @@ With `<milestone>`: `gh issue list --state open --repo <repo> --milestone "<mile
 
 - **A candidate** → treat it as an issue number (above).
 - **Open issues, none startable** (each claimed, blocked or waiting on a dependency) → do not end
-  and do not move on: the track waits for its blocker to merge. Status line `⏸ <milestone>:
-  waiting on #<blocker>` (the in-review issue or the dependency the first open issue waits on),
-  then `ScheduleWakeup({ delaySeconds: 600, noop: true, prompt: "Executor for <repo>, milestone
-  \"<milestone>\": nothing was startable; pick next again.", reason: "<one line>" })`. That wake
-  runs Pick next again, nothing else.
+  and do not move on: the track waits for its blocker to merge. The blocker is the dependency the
+  first open issue waits on, or that issue itself when another executor has claimed it. Look for
+  its PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] |
+  select((.body // "") | test("Closes #<blocker>([^0-9]|$)"; "i"))] | first | .number'`.
+  - A PR → it is in review and merges soon: status line `⏸ <milestone>: waiting on #<blocker>
+    (PR #<pr> in review)`, delay 600.
+  - None → it is unstarted or still being built, likely hours away: status line `⏸ <milestone>:
+    waiting on #<blocker> (no PR yet)`, delay 1800.
+
+  Then `ScheduleWakeup({ delaySeconds: <delay>, noop: true, prompt: "Executor for <repo>,
+  milestone \"<milestone>\": nothing was startable; pick next again.", reason: "<one line>" })`.
+  That wake runs Pick next again, nothing else.
 - **No open issues** in the milestone → move on: `gh api "repos/<repo>/milestones?state=all&per_page=100"
   --jq 'sort_by(.number) | .[] | "\(.number) \(.state) \(.title)"'`, and the new `<milestone>` is
   the first `open` one numbered after the current one. Say so in one line and pick again. None
@@ -175,7 +182,7 @@ by itself: the waiter returns when it appears, or with new activity.
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
 call, after any posting.** The only exits are `MERGED` (then pick next), BLOCKED (then pick next),
 nothing to pick (with `<milestone>`: no open issue left in it or a later milestone; a track that
-waits on a blocker schedules its 600-second wakeup instead), and the operator's stop. If an iteration forgets, Claude Code fires one fallback
+waits on a blocker schedules its 600- or 1800-second wakeup instead), and the operator's stop. If an iteration forgets, Claude Code fires one fallback
 wakeup after about 20 minutes and then ends the loop, so do not rely on it.
 
 ## Asking the operator
