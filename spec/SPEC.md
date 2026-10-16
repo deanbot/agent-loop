@@ -212,11 +212,14 @@ lands between that re-read and the post is still reported.
 - `MERGE_CONFLICT:<n>` — no review. On a PR carrying `needs-operator-label` (it was ready and the
   base moved under it), remove the label unless a question is still open, and post once
   `[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready to merge; …`
-  for whoever owns it. `pr-watch` reports this standing conflict whether or not an executor holds
-  the PR (it takes `--needs-operator-label <name>`, default `needs-operator`): with no executor
-  nobody runs `pr-poll` on it, and an executor that polls sees the conflict as well. Otherwise
-  (new commits on a conflicting branch) post `[reviewer] Merge conflicts — rebase on main before
-  review.`
+  for whoever owns it, saying whether the label is off or stays on for an open question.
+  `pr-watch` reports this standing conflict whether or not an executor holds the PR (it takes
+  `--needs-operator-label <name>`, default `needs-operator`): with no executor nobody runs
+  `pr-poll` on it, and an executor that polls sees the conflict as well. With no label and a head
+  new since the reviewer's last post (new commits on a conflicting branch), post `[reviewer] Merge
+  conflicts — rebase on main before review.`; with no label on a head it already posted on (the
+  executor took the label off meanwhile), post nothing. An LGTM on a PR found `CONFLICTING` skips
+  the label and posts the "whoever owns it" line, so a PR with no executor is not left silent.
 - `REVIEW:<n>` — with `qa-gate: on`, require a `[qa] PASS` newer than the head commit first; none
   → post nothing. Then the full review: gather the PR, its linked issue, the whole thread and the
   inline threads, CI state and the diff; **verify each acceptance criterion** (a named test that CI
@@ -523,6 +526,6 @@ never block, the retired `[reviewer] Verified` kind (tolerated by `pr-poll`), an
 (and `MERGE_READY` now also requires no conflict), and `pr-watch`'s standing `MERGE_CONFLICT:<n>`
 on a labelled PR (the existing signal line, on a new occasion). A reviewer prompt that predates
 the standing case handles it the old way, posting "rebase on main" every cycle while the label
-stays on, so the reviewer restarts with the script that emits it. Breaking changes to signal format or prefix convention increment
-the version. Adapters note which version
-they implement. `scripts/test/run.mjs` holds the contract tests for the three scripts.
+stays on, so the reviewer restarts with the script that emits it. Breaking changes to signal
+format or prefix convention increment the version. Adapters note which version they implement.
+`scripts/test/run.mjs` holds the contract tests for the three scripts.

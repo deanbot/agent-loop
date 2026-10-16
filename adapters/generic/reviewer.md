@@ -44,10 +44,12 @@ n,n]` (plus `--reviewer <clone>` with several reviewers, below). Then:
 **`MERGE_CONFLICT:<n>`** → do not review the diff. When the PR carries the `needs-operator-label`
 (it was ready and `main` moved under it; reported whoever owns the PR), remove the label unless a
 question is still open and, unless your newest `[reviewer]` comment already says so, post
-`[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready to merge; the
-label is off. Whoever owns it: bring main in, resolve, push.` (the signal repeats while the label
-stays on, so post once). Otherwise post `[reviewer] Merge conflicts — rebase on main before
-review.` Wait ~120s.
+`[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready to merge; <label
+state>. Whoever owns it: bring main in, resolve, push.`, where `<label state>` is "the label is
+off", or "the label stays on for the open question" when one kept it (the signal repeats while the
+label stays on, so post once). No label and a head new since your last `[reviewer]` post → post
+`[reviewer] Merge conflicts — rebase on main before review.` No label and a head you already
+posted on (the executor took the label off meanwhile) → post nothing. Wait ~120s.
 
 **`REVIEW:<n>`** → with `qa-gate: on`, require a `[qa] PASS` newer than the head commit; none →
 post nothing, wait ~120s. Otherwise the full review:
@@ -87,11 +89,13 @@ post nothing, wait ~120s. Otherwise the full review:
      `skipping`, or none), `[qa] PASS` after the last commit when `qa-gate: on`, no unanswered
      inline thread. All hold → after the LGTM, re-check the head sha and `mergeable`; same sha
      and not `CONFLICTING` (`UNKNOWN` is fine) → add the `needs-operator-label` (a no-op when it
-     is on); moved → skip it (the new head is unreviewed); `CONFLICTING` → skip it (the executor
-     resolves the conflict). CI pending → end the LGTM with "CI is pending, so this PR does not
-     have the needs-operator label yet: a running executor adds it when CI is green; with none,
-     merge it once CI is green." Anything else missing → one line naming it. When you later post
-     findings on a PR that carries the label, remove it unless a question is still open.
+     is on); moved → skip it (the new head is unreviewed); `CONFLICTING` → skip it and post
+     `[reviewer] Merge conflicts — PR #<n> conflicts with main, so it is not ready to merge.
+     Whoever owns it: bring main in, resolve, push.` (a PR with no executor would otherwise sit
+     unlabelled with nobody told). CI pending → end the LGTM with "CI is pending, so this PR does
+     not have the needs-operator label yet: a running executor adds it when CI is green; with
+     none, merge it once CI is green." Anything else missing → one line naming it. When you later
+     post findings on a PR that carries the label, remove it unless a question is still open.
    Every comment starts with its kind — `LGTM`, `Question`, `Merge conflicts`, or findings —
    because the executor's poll classifies by prefix, and a finding posted after an LGTM revokes it.
 

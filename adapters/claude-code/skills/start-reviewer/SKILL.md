@@ -97,10 +97,14 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
        --remove-label <needs-operator-label>` unless a question is still open, then, unless your
        newest `[reviewer]` comment on the PR already says so, `gh pr comment <n> --repo <repo>
        --body "[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready
-       to merge; <needs-operator-label> is off. Whoever owns it: bring main in, resolve, push."`
-       The signal repeats while the label stays on (an open question keeps it), so post once.
-     - Otherwise (new commits on a conflicting branch) → `gh pr comment <n> --repo <repo> --body
-       "[reviewer] Merge conflicts — rebase on main before review."`
+       to merge; <label state>. Whoever owns it: bring main in, resolve, push."`, where `<label
+       state>` is `<needs-operator-label> is off`, or `<needs-operator-label> stays on for the
+       open question` when one kept it. The signal repeats while the label stays on, so post once.
+     - No label, and the head is new since your last `[reviewer]` post (new commits on a
+       conflicting branch) → `gh pr comment <n> --repo <repo> --body "[reviewer] Merge conflicts
+       — rebase on main before review."`
+     - No label, and the head is one you already posted on (the executor took the label off
+       between the watch and now) → post nothing: the executor is resolving it.
    - **`REVIEW:<n>`** (new commits, or a PR you have never posted on) → a full review. With
      `qa-gate: on`, first check for a `[qa] PASS` newer than the last commit; none yet → post
      nothing this cycle. Otherwise read [reference/review.md](reference/review.md) the first time

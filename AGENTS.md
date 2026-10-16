@@ -19,8 +19,10 @@ Three layers. Boundaries are strict.
 (ScheduleWakeup, sleep, cron). If it can't run in a shell with Node.js, it doesn't belong here.
 
 - `scripts/pr-watch.mjs` — reviewer signal source. `--repo owner/repo [--skip n,n] [--reviewer
-  <clone>]`. One line, exits. With `--reviewer` (several reviewers) it honours review claims and
-  keeps state per reviewer; `--check-claim <n>` prints who holds a PR.
+  <clone>] [--needs-operator-label <name>]`. One line, exits. With `--reviewer` (several
+  reviewers) it honours review claims and keeps state per reviewer; `--check-claim <n>` prints who
+  holds a PR. A PR labelled needs-operator that falls into conflict is reported as a standing
+  `MERGE_CONFLICT:<n>`.
 - `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]`.
   Signals then content blocks, exits.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
