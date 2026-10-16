@@ -16,11 +16,13 @@
  *                                body says "Closes #<blocker>", or none
  *   MOVE_ON <title>              milestone only: it has no open issues; <title> is the first open
  *                                milestone numbered after it (the rest of the line, spaces included)
- *   NONE                         nothing to pick: no candidate without a milestone, no open
- *                                milestone after an empty one, or every open issue was skipped
+ *   NONE                         nothing to pick: no candidate without a milestone, or no open
+ *                                milestone after an empty one. With a milestone whose only open
+ *                                issues are skipped, it is WAIT on the lowest of them, not NONE
  *
  * Dependencies are named in an issue body as "Depends on #a, #b" (also "#a and #b"); only the list
- * right after "Depends on" counts, so "Depends on #5. See #9." depends on #5 alone. A dependency's
+ * right after "Depends on" counts, so "Depends on #5. See #9." depends on #5 alone; "#a, #b, and #c"
+ * and "**Depends on:** #a" are read too. --skip none (or empty) is an empty list. A dependency's
  * state comes from the REST issues endpoint, which also resolves a PR (`gh issue view` reports a
  * merged PR as MERGED, not CLOSED); only state "closed" counts as done. --skip lists issues this session already turned
  * down (author check failed, claim lost), so a pick never returns them again. Labels default to
@@ -54,19 +56,22 @@ if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) usageError(repo ? `--repo: expect
 const milestone = arg('--milestone')
 const inProgress = arg('--in-progress-label') ?? 'in-progress'
 const blocked = arg('--blocked-label') ?? 'is-blocked'
-const skipArg = arg('--skip') ?? ''
+// "none" (or an empty value) is an empty list, so a wake prompt can carry "--skip none" as is.
+const skipArg = (arg('--skip') ?? '').replace(/^none$/i, '')
 if (skipArg && !/^\d+(,\d+)*$/.test(skipArg)) usageError(`--skip: expected n,n,…, got "${skipArg}"`)
 const skip = new Set(skipArg.split(',').filter(Boolean).map(Number))
 
 const gh = (...args) => JSON.parse(execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || 'null')
 
 function listOpen(title) {
-  const args = ['issue', 'list', '--repo', repo, '--state', 'open', '--limit', '200', '--json', 'number,title,body,labels']
+  const args = ['issue', 'list', '--repo', repo, '--state', 'open', '--limit', '1000', '--json', 'number,title,body,labels']
   if (title !== null) args.push('--milestone', title)
   return gh(...args).sort((a, b) => a.number - b.number)
 }
 
-const DEPENDS = /depends on:?\s*(#\d+(?:\s*(?:,|and|&)\s*#\d+)*)/gi
+// "Depends on #a, #b", "#a and #b", "#a, #b, and #c", "**Depends on:** #a". The list ends at the first
+// character that is not a #number, a comma, "and", "&" or a space on the same line.
+const DEPENDS = /\bdepends on\b[*_:]*[ \t]*((?:#\d+|,|&|\band\b|[ \t])+)/gi
 function dependencies(body) {
   const deps = []
   for (const m of (body ?? '').matchAll(DEPENDS)) {
@@ -85,7 +90,8 @@ function isOpen(n, openNumbers) {
 const hasLabel = (issue, name) => (issue.labels ?? []).some((l) => l.name === name)
 
 function pick(title) {
-  const open = listOpen(title).filter((i) => !skip.has(i.number))
+  const listed = listOpen(title)
+  const open = listed.filter((i) => !skip.has(i.number))
   const openNumbers = new Set(open.map((i) => i.number))
   const startable = (i) =>
     !hasLabel(i, inProgress) && !hasLabel(i, blocked) && dependencies(i.body).every((d) => !isOpen(d, openNumbers))
@@ -94,9 +100,10 @@ function pick(title) {
   if (candidate) return `ISSUE:${candidate.number}`
   if (title === null) return 'NONE'
 
+  // Only skipped issues left (an untrusted author, or a claim another executor won and is still
+  // working on): the milestone is not empty, so wait on the lowest of them rather than end.
+  if (open.length === 0 && listed.length > 0) return waitOn(listed[0].number)
   if (open.length === 0) {
-    // The skipped issues still count as open: a milestone is empty only when nothing is left in it.
-    if (skip.size > 0 && listOpen(title).length > 0) return 'NONE'
     const milestones = gh('api', `repos/${repo}/milestones?state=all&per_page=100`).sort((a, b) => a.number - b.number)
     const current = milestones.find((m) => m.title === title)
     if (!current) return 'NONE'
@@ -109,6 +116,10 @@ function pick(title) {
     hasLabel(first, inProgress) || hasLabel(first, blocked)
       ? first.number
       : (dependencies(first.body).find((d) => isOpen(d, openNumbers)) ?? first.number)
+  return waitOn(blocker)
+}
+
+function waitOn(blocker) {
   const prs = gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,body')
   const closes = new RegExp(`Closes #${blocker}([^0-9]|$)`, 'i')
   const pr = prs.find((p) => closes.test(p.body ?? ''))

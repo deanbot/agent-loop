@@ -365,7 +365,10 @@ the rules above and prints one line: `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>` (
 none startable; the PR is the open one whose body says `Closes #<blocker>`), `MOVE_ON <title>`
 (milestone only: no open issues; the rest of the line is the next open milestone) or `NONE`
 (nothing to pick). `--skip` names issues the executor turned down this session (author check,
-lost claim). Adapters run it for every pick, a wake after a wait included, so an issue filed while
+lost claim; `none` is an empty list). A milestone whose only open issues are skipped is not empty:
+the pick is `WAIT` on the lowest of them, so an executor that lost a claim keeps its track until
+the winner's issue merges. Dependencies are the `#n` list right after "Depends on" (`#a, #b`,
+`#a, #b, and #c`, `**Depends on:** #a`). Adapters run it for every pick, a wake after a wait included, so an issue filed while
 the executor waited is never missed by reasoning from a list it remembers. A failed `gh` call
 exits 2 with one `pick-next: …` line on stderr and nothing on stdout; the executor retries later
 and never picks by hand. A dependency's state is read from the REST issues endpoint, so a merged

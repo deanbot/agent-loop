@@ -496,7 +496,18 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   check('pick: … a title with spaces is printed whole',
     pick({ issues: [], milestones: [milestones[1], { number: 4, title: 'M4', state: 'closed' }, { number: 5, title: 'M5 Service and CLI', state: 'open' }] }, ms) === 'MOVE_ON M5 Service and CLI')
   check('pick: no open milestone after it → NONE', pick({ issues: [], milestones: milestones.slice(0, 2) }, ms) === 'NONE')
-  check('pick: every open issue skipped → NONE, not MOVE_ON', pick({ issues: [issue(11)], milestones }, [...ms, '--skip', '11']) === 'NONE')
+  check('pick: every open issue skipped (a claim another executor still holds) → WAIT on the lowest, not NONE',
+    pick({ issues: [issue(11, { labels: label('in-progress') }), issue(12)], milestones, prs: [{ number: 60, body: 'Closes #11' }] }, [...ms, '--skip', '12,11']) === 'WAIT:11 PR:60')
+  check('pick: no milestone and every open issue skipped → NONE', pick({ issues: [issue(11)] }, ['--skip', '11']) === 'NONE')
+  check('pick: --skip none is an empty list', pick({ issues: [issue(11)] }, ['--skip', 'none']) === 'ISSUE:11')
+  check('pick: "Depends on #5, #6, and #7" waits on all three',
+    pick({ issues: [issue(5, { state: 'CLOSED' }), issue(6, { state: 'CLOSED' }), issue(7, { milestone: M4 }), issue(10, { body: 'Depends on #5, #6, and #7' })], milestones, prs: [] }, ms) === 'WAIT:7 PR:none')
+  check('pick: "**Depends on:** #7" is read',
+    pick({ issues: [issue(7, { milestone: M4 }), issue(10, { body: '**Depends on:** #7' })], milestones, prs: [] }, ms) === 'WAIT:7 PR:none')
+  check('pick: "Depends on: #7 & #8" is read',
+    pick({ issues: [issue(7, { state: 'CLOSED' }), issue(8, { milestone: M4 }), issue(10, { body: 'Depends on: #7 & #8' })], milestones, prs: [] }, ms) === 'WAIT:8 PR:none')
+  check('pick: a list ends at the line break ("Depends on #5\\n#9 is related")',
+    pick({ issues: [issue(5, { state: 'CLOSED' }), issue(9, { milestone: M4 }), issue(10, { body: 'Depends on #5\n#9 is related' })] }, ms) === 'ISSUE:10')
 
   check('pick: a dependency that is a merged PR counts as closed',
     pick({ issues: [issue(49, { state: 'MERGED' }), issue(50, { body: 'Depends on #49' })] }) === 'ISSUE:50')
