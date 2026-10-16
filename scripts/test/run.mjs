@@ -448,6 +448,72 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- pick-next.mjs
+{
+  const ctx = makeEnv()
+  const pick = (fx, extra = []) => run(ctx, 'pick-next.mjs', ['--repo', REPO, ...extra], fx).trim()
+  const M3 = { title: 'M3' }
+  const M4 = { title: 'M4' }
+  const issue = (number, extra = {}) => ({ number, title: `#${number}`, body: '', labels: [], milestone: M3, ...extra })
+  const label = (name) => [{ name }]
+  const milestones = [
+    { number: 2, title: 'M2', state: 'closed' },
+    { number: 3, title: 'M3', state: 'open' },
+    { number: 4, title: 'M4', state: 'open' },
+  ]
+  const ms = ['--milestone', 'M3']
+
+  check('pick: lowest-numbered startable issue → ISSUE:<n>', pick({ issues: [issue(12), issue(11)] }) === 'ISSUE:11')
+  check('pick: in-progress and blocked issues are passed over',
+    pick({ issues: [issue(10, { labels: label('in-progress') }), issue(11, { labels: label('is-blocked') }), issue(12)] }) === 'ISSUE:12')
+  check('pick: custom label names are honoured',
+    pick({ issues: [issue(10, { labels: label('wip') }), issue(11)] }, ['--in-progress-label', 'wip']) === 'ISSUE:11')
+  const deps = { issues: [issue(5, { state: 'CLOSED' }), issue(6), issue(10, { body: 'Depends on #6' }), issue(11, { body: 'Notes\nDepends on #5, #9' }), issue(9, { state: 'CLOSED' })] }
+  check('pick: an issue whose dependency is open waits; one whose dependencies are closed is picked',
+    pick({ ...deps, issues: deps.issues.map((i) => (i.number === 6 ? { ...i, labels: label('in-progress') } : i)) }) === 'ISSUE:11')
+  check('pick: --skip passes over issues this session turned down', pick({ issues: [issue(11), issue(12)] }, ['--skip', '11']) === 'ISSUE:12')
+  check('pick: no milestone and nothing startable → NONE', pick({ issues: [issue(11, { labels: label('in-progress') })] }) === 'NONE')
+  check('pick: milestone filters the listing', pick({ issues: [issue(3, { milestone: M4 }), issue(11)] }, ms) === 'ISSUE:11')
+
+  // Waiting: the blocker and its PR.
+  const claimedFirst = { issues: [issue(28, { labels: label('in-progress') }), issue(29, { body: 'Depends on #28' })], milestones }
+  check('pick: milestone, first open issue claimed, no PR → WAIT:28 PR:none', pick({ ...claimedFirst, prs: [] }, ms) === 'WAIT:28 PR:none')
+  check('pick: … with an open PR that closes it → WAIT:28 PR:<n>',
+    pick({ ...claimedFirst, prs: [{ number: 40, body: 'Closes #280' }, { number: 41, body: 'Fix.\n\nCloses #28' }] }, ms) === 'WAIT:28 PR:41')
+  const depFirst = { issues: [issue(7, { milestone: M4 }), issue(30, { body: 'Depends on #7' })], milestones, prs: [] }
+  check('pick: first open issue waits on a dependency (another milestone) → WAIT on that dependency',
+    pick(depFirst, ms) === 'WAIT:7 PR:none')
+
+  // The loom #118 case: an issue filed while the executor waited is picked at the next call.
+  const before = { ...claimedFirst, prs: [] }
+  check('pick: before the new issue → WAIT', pick(before, ms) === 'WAIT:28 PR:none')
+  const filed = { ...before, issues: [...before.issues, issue(118, { body: 'Depends on #20' }), issue(20, { state: 'CLOSED' })] }
+  check('pick: an unblocked issue filed after the last wait → ISSUE:118', pick(filed, ms) === 'ISSUE:118')
+
+  // Moving on.
+  check('pick: milestone with no open issues → MOVE_ON <next open milestone>',
+    pick({ issues: [issue(1, { state: 'CLOSED' })], milestones: [...milestones, { number: 5, title: 'M5 Service and CLI', state: 'open' }] }, ms) === 'MOVE_ON M4')
+  check('pick: … a title with spaces is printed whole',
+    pick({ issues: [], milestones: [milestones[1], { number: 4, title: 'M4', state: 'closed' }, { number: 5, title: 'M5 Service and CLI', state: 'open' }] }, ms) === 'MOVE_ON M5 Service and CLI')
+  check('pick: no open milestone after it → NONE', pick({ issues: [], milestones: milestones.slice(0, 2) }, ms) === 'NONE')
+  check('pick: every open issue skipped → NONE, not MOVE_ON', pick({ issues: [issue(11)], milestones }, [...ms, '--skip', '11']) === 'NONE')
+
+  check('pick: a dependency that is a merged PR counts as closed',
+    pick({ issues: [issue(49, { state: 'MERGED' }), issue(50, { body: 'Depends on #49' })] }) === 'ISSUE:50')
+  check('pick: only the list right after "Depends on" counts ("Depends on #5. See #9.")',
+    pick({ issues: [issue(5, { state: 'CLOSED' }), issue(9), issue(10, { body: 'Depends on #5. See #9 for context.', milestone: M4 })] }, ['--milestone', 'M4']) === 'ISSUE:10')
+  check('pick: "Depends on #5 and #9" waits on both',
+    pick({ issues: [issue(5, { state: 'CLOSED' }), issue(9, { milestone: M4 }), issue(10, { body: 'Depends on #5 and #9' })], milestones, prs: [] }, ms) === 'WAIT:9 PR:none')
+  const failed = run(ctx, 'pick-next.mjs', ['--repo', REPO], { fail: true })
+  check('pick: a failed gh call → exit 2, one stderr line, nothing on stdout',
+    /^EXIT 2\n\npick-next: HTTP 502/.test(failed), failed)
+  const usage = run(ctx, 'pick-next.mjs', ['--milestone', 'M3'], { issues: [] })
+  check('pick: missing --repo → usage error, exit 1', /^EXIT 1/.test(usage) && /Usage: pick-next\.mjs/.test(usage), usage)
+  const badSkip = run(ctx, 'pick-next.mjs', ['--repo', REPO, '--skip', '11,x'], { issues: [] })
+  check('pick: malformed --skip → usage error', /^EXIT 1/.test(badSkip), badSkip)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- --wait (lib/wait.mjs)
 // The waiter runs in the background so a test can change the fixture mid-wait. Intervals are 1s.
 function start(ctx, script, args) {

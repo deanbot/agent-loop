@@ -119,35 +119,34 @@ number.
   (read [reference/implement.md](reference/implement.md) now; it covers the author check, the
   claim, dependencies, tests-first, the pre-PR self-check and the PR body).
 
-**Pick next.** Without `<milestone>`: `gh issue list --state open --repo <repo> --limit 200 --json
-number,title,body,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) |
-(index("<in-progress-label>") | not) and (index("<blocked-label>") | not)))'`, then take the first
-candidate whose dependencies are all closed (an issue names them as `Depends on #a, #b`; check each
-with `gh issue view <a> --repo <repo> --json state`). None → say there is nothing to pick and end
-without a wakeup.
+**Pick next** with the script, every time, a wake included. Never pick from a list you
+remember: issues are filed while you wait, and only a fresh listing sees them.
 
-With `<milestone>`: `gh issue list --state open --repo <repo> --milestone "<milestone>" --limit 200
---json number,title,body,labels --jq 'sort_by(.number)'`. The candidates are the issues without
-`<in-progress-label>` or `<blocked-label>`; take the first whose dependencies are all closed.
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/pick-next.mjs --repo <repo> --in-progress-label
+<in-progress-label> --blocked-label <blocked-label>`, plus `--milestone "<milestone>"` when you
+have one, plus `--skip <n,n,…>` for issues this session turned down (implement.md §1: the author
+check failed, or another executor won the claim). It lists the open issues, drops claimed, blocked
+and skipped ones, checks each `Depends on #a, #b`, and prints one line:
 
-- **A candidate** → treat it as an issue number (above).
-- **Open issues, none startable** (each claimed, blocked or waiting on a dependency) → do not end
-  and do not move on: the track waits for its blocker to merge. The blocker is the dependency the
-  first open issue waits on, or that issue itself when another executor has claimed it. Look for
-  its PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] |
-  select((.body // "") | test("Closes #<blocker>([^0-9]|$)"; "i"))] | first | .number'`.
-  - A PR → it is in review and merges soon: status line `⏸ <milestone>: waiting on #<blocker>
-    (PR #<pr> in review)`, delay 600.
-  - None → it is unstarted or still being built, likely hours away: status line `⏸ <milestone>:
-    waiting on #<blocker> (no PR yet)`, delay 1800.
+- **`ISSUE:<n>`** → treat it as an issue number (above). If implement.md §1 turns it down, add it
+  to your skip list and run the script again.
+- **`WAIT:<blocker> PR:<pr>`** (with `<milestone>` only: open issues, none startable) → do not end
+  and do not move on: the track waits for its blocker to merge.
+  - `PR:<n>` → it is in review and merges soon: status line `⏸ <milestone>: waiting on
+    #<blocker> (PR #<n> in review)`, delay 600.
+  - `PR:none` → it is unstarted or still being built, likely hours away: status line `⏸
+    <milestone>: waiting on #<blocker> (no PR yet)`, delay 1800.
 
   Then `ScheduleWakeup({ delaySeconds: <delay>, noop: true, prompt: "Executor for <repo>,
-  milestone \"<milestone>\": nothing was startable; pick next again.", reason: "<one line>" })`.
-  That wake runs Pick next again, nothing else.
-- **No open issues** in the milestone → move on: `gh api "repos/<repo>/milestones?state=all&per_page=100"
-  --jq 'sort_by(.number) | .[] | "\(.number) \(.state) \(.title)"'`, and the new `<milestone>` is
-  the first `open` one numbered after the current one. Say so in one line and pick again. None
-  after it → nothing to pick; end without a wakeup.
+  milestone \"<milestone>\": nothing was startable; run pick-next.mjs again (skip: <n,n or
+  none>).", reason: "<one line>" })`. That wake runs the script again, nothing else.
+- **`MOVE_ON <title>`** (the milestone has no open issues) → `<title>`, the rest of the line, is
+  the new `<milestone>`. Say so in one line, then run the script again.
+- **`NONE`** → nothing to pick: say so and end without a wakeup.
+- **A failed run** (exit non-zero, a `pick-next: …` line on stderr: network, rate limit, auth) →
+  never pick by hand from what you remember. Name the failure in the status line and
+  `ScheduleWakeup({ delaySeconds: 300, noop: true, prompt: <the same "run pick-next.mjs again
+  (skip: …)" prompt>, reason: "<one line>" })`.
 
 **Orient on an existing PR.** `gh pr view <PR> --repo <repo>` and `gh pr view <PR> --comments
 --repo <repo>`: the description, the acceptance criteria table, every comment, any earlier
