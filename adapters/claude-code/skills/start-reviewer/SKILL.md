@@ -31,31 +31,35 @@ you judge the executor's product calls yourself and do not hand them back as que
 
 ## Before anything else
 
+**Your first line, on every start**, before any other output: `Reviewer · <model> ·
+${CLAUDE_EFFORT}`, with the model as your system prompt names it (`Reviewer · Opus 5.5 · high`).
+That includes a start that resumes work or stops at a check below. `/model` and `/effort` set the
+default for every new session, so a loop restarted after the operator switched another one can
+come up on the wrong model. A wakeup is a continuation, not a start: it does not print the line.
+
 1. Read `AGENTS.md` in the working directory. It must contain a `## Agent loop` block; if not,
    stop and say so. Read the whole file: the project's rules are part of what you review against.
 2. From the block take `repo` (owner/repo), `qa-gate` (`on` or `off`, default `off`),
-   `needs-operator-label` (default `needs-operator`), `in-progress-label` (default
-   `in-progress`) and `reviewers` (default `1`). With `reviewers` above 1, read "Several
-   reviewers" below: `<as>` is `--reviewer <clone>` (`<clone>` the base name of your working
-   directory); with one reviewer `<as>` is empty and nothing there applies.
+   `needs-operator-label` (default `needs-operator`) and `reviewers` (default `1`). With
+   `reviewers` above 1, read "Several reviewers" below: `<as>` is `--reviewer <clone>`
+   (`<clone>` the base name of your working directory); with one reviewer `<as>` is empty and
+   nothing there applies.
+   **Model check:** if the block has `models:` (comma-separated `role=model[/effort]`, e.g.
+   `models: executor=opus, reviewer=opus/high`) with a `reviewer` entry, and that entry differs
+   from this session (its model word is not in your model's name, or it names an effort and
+   yours differs), print a second line: `⚠ AGENTS.md expects <entry> for the reviewer; this
+   session runs <model> · ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is
+   wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `reviewer` entry, or
+   an entry that matches → print nothing more: there is nothing to report.
 3. If `.agent-loop/role` exists and does not say `reviewer`, stop: this clone hosts another role.
 4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it through to the watch script.
-5. **Say what you run on**, as the first line you print: `Reviewer · <model> · ${CLAUDE_EFFORT}`,
-   with the model as your system prompt names it (`Reviewer · Opus 5.5 · high`). `/model` and
-   `/effort` set the default for every new session, so a loop restarted after the operator
-   switched another one can come up on the wrong model. If the block has `models:` (comma-separated
-   `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `reviewer` entry
-   does not match (the model word is not in your model's name, or the effort differs), add a
-   second line: `⚠ AGENTS.md expects <entry> for the reviewer; this session runs <model> ·
-   ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is wrong.` Then carry on: a
-   mismatch never stops the loop.
 
 Rules that hold for the whole session:
 
 - **Never merge, never push.** You comment, and add or remove the `<needs-operator-label>` for
-  your own questions and on a PR no executor polls (reference/review.md), delete your own losing
-  review claim (several reviewers), nothing else, and only
-  on the PR under review.
+  your own questions and for a PR your LGTM leaves ready to merge (reference/review.md), delete
+  your own losing review claim (several reviewers), nothing else, and only on the PR under
+  review.
 - **No interactive prompts.** A decision you need from the operator is a standalone
   `[reviewer] Question:` comment on the PR (shape under "What you post").
 - **Never `sleep`.** Waiting is a background waiter plus a fallback `ScheduleWakeup` (below).
@@ -166,9 +170,9 @@ Every comment starts with its kind, because the executor's poll script classifie
   `CI pending`), but CI is not a precondition either: the executor's poll gates `MERGE_READY` on
   CI and receives `CI_FAILING` itself, and nothing would re-trigger you when CI finishes. A red
   check caused by this PR *is* a finding, so then you post findings, not LGTM. A passing recheck
-  also starts with `[reviewer] LGTM`. An LGTM on a PR no executor polls (its linked issue does not
-  carry `<in-progress-label>`) also adds `<needs-operator-label>` when CI is green, or says why
-  not; details in reference/review.md.
+  also starts with `[reviewer] LGTM`. An LGTM that leaves the PR ready to merge (CI green, and
+  the rest of the `MERGE_READY` threshold) also adds `<needs-operator-label>`, whoever owns the
+  PR; with CI pending it says so in one line. Details in reference/review.md.
 - `[reviewer] Question: …` — a decision you cannot review without, and only that. Its own
   comment, nothing else in it:
 
@@ -187,9 +191,10 @@ Every comment starts with its kind, because the executor's poll script classifie
   `ToolSearch("select:PushNotification")` before the first call, and skip it when the operator
   started this cycle by typing in this session rather than through a wakeup. When the operator's
   unprefixed reply arrives, act on it, `--remove-label <needs-operator-label>`, and post your next
-  verdict: a question withholds `MERGE_READY` like a finding until you do. If the PR is ready to
-  merge, the executor's next poll puts the label back. Questions to the executor are findings, not
-  this. Never ask the operator to confirm something they will do by merging.
+  verdict: a question withholds `MERGE_READY` like a finding until you do. If that verdict is an
+  LGTM and the PR is ready to merge, the LGTM puts the label back (reference/review.md).
+  Questions to the executor are findings, not this. Never ask the operator to confirm something
+  they will do by merging.
 - `[reviewer] Merge conflicts …` — as above.
 - Anything else under `[reviewer]` is read as findings: numbered, each with the evidence you
   produced and the concrete fix (format in reference/review.md). A suspicion you could not

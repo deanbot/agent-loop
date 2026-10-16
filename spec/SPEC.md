@@ -47,12 +47,13 @@ is the project's conventions, which the agents follow.
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
-| `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); a loop whose model or effort differs says so in its first status line and runs anyway |
+| `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
 | `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
 
-Every loop's first status line names its role, model and effort (`Reviewer · Opus 5.5 · high`)
-where the tool exposes them, so a loop that came up on another session's saved default is seen at
-once.
+Every start of a loop, including one that resumes held work, prints its role, model and effort
+(`Reviewer · Opus 5.5 · high`) before anything else, where the tool exposes them, so a loop that
+came up on another session's saved default is seen at once. A `⚠` line follows only when `models`
+has an entry for that role and it differs.
 
 Labels must exist before first use (`gh label create …`); adapters may ship a setup step.
 `.agent-loop/` in the project is agent-local state (gitignored).
@@ -141,17 +142,19 @@ that asks adds it with the question and removes it on the operator's unprefixed 
 executor adds it whenever it sees `MERGE_READY`, and removes it when it pushes, unless a question
 is still open. `pr-poll` reports `MERGE_READY` on every run while it holds, so a label removed with
 an answered question comes back on the executor's next poll (an event-driven executor polls when
-the asking role posts its next verdict). `gh pr list --label needs-operator` shows everything
-waiting on the operator.
+the asking role posts its next verdict), or with the reviewer's next LGTM (below). `gh pr list
+--label needs-operator` shows everything waiting on the operator.
 
-A PR **no executor polls** never gets `MERGE_READY` from a poll: a PR the operator or a monitor
-opened, or one whose executor parked it. The test is the linked issue (`Closes #N` in the body):
-none, or it does not carry `in-progress-label`. On such a PR the reviewer manages the label for
-readiness. With its LGTM it checks the `MERGE_READY` threshold itself (CI green, `[qa] PASS` after
-the last commit when `qa-gate: on`, no unanswered inline thread) and adds the label when it holds;
-when it does not, the LGTM says that the inbox will not show the PR and what is missing. When the
-reviewer later posts findings on a PR it labelled, it removes the label. Executor PRs carry
-`in-progress-label` on their issue, so they are never labelled twice.
+**The reviewer labels a ready PR with its LGTM**, whoever owns it. An executor the operator
+stopped polls nothing (its issue keeps `in-progress-label`), and a PR the operator or a monitor
+opened, or one whose executor parked it, has no executor; neither gets `MERGE_READY` from a poll.
+So with every LGTM the reviewer checks the `MERGE_READY` threshold itself (its LGTM on the head
+commit, CI green, `[qa] PASS` after the last commit when `qa-gate: on`, no unanswered inline
+thread) and adds the label when it holds; adding it twice does nothing. With CI still pending the
+executor's poll remains the path, and the LGTM says in one line that a stopped or absent executor
+leaves the PR unlabelled until the operator merges it. When the reviewer later posts findings on a
+labelled PR, it removes the label unless a question is still open. The executor still removes the
+label when it pushes, and adds it when CI turns green after the LGTM.
 
 **The agent's own terminal** says the same in its status line, and an adapter with a notification
 primitive sends one when a question is posted.

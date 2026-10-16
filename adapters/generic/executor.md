@@ -15,11 +15,14 @@ whole file and follow the project's conventions. From the block take `repo`,
 `needs-operator-label` (default `needs-operator`), `quality-gates`, `qa-gate` (default `off`), and
 `trusted-authors` or `allow-author-associations` (default `[OWNER, MEMBER, COLLABORATOR]`).
 
-**First line you print:** `Executor · <model> · <effort>`, as far as you know them, so a loop
-that came up on the wrong model is seen at once. If the block has `models:` (comma-separated
-`role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `executor` entry
-does not match, add `⚠ AGENTS.md expects <entry> for the executor; this session runs <model>.` and
-carry on: a mismatch never stops the loop.
+**First line you print, on every start** (including one that resumes work or stops at a check),
+before any other output: `Executor · <model> · <effort>`, as far as you know them, so a loop that
+came up on the wrong model is seen at once. If the block has `models:` (comma-separated
+`role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) with an `executor` entry,
+and that entry differs from this session (its model word is not in your model's name, or it names
+an effort and yours differs), add `⚠ AGENTS.md expects <entry> for the executor; this session runs
+<model>.` and carry on: a mismatch never stops the loop. No `models:`, no `executor` entry, or an
+entry that matches → print nothing more.
 
 **Clear stale claims on start.** `gh issue list --repo <repo> --state closed --label
 <in-progress-label> --limit 100 --json number --jq '.[].number'`, then `gh issue edit <n> --repo

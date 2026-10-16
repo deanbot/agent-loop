@@ -104,8 +104,9 @@ trusted-authors: [your-login]
 models: executor=opus, reviewer=opus/high
 ```
 
-`models` is optional: each loop's first status line names its model and effort, and says so when
-they differ from its entry here. It never stops a loop.
+`models` is optional: each loop's first line on every start names its model and effort, and a
+second `⚠` line says so when they differ from that role's entry here (a role without an entry
+gets no `⚠` line). It never stops a loop.
 
 Make one clone per role (for example `proj`, `proj-exec`, `proj-review`) and run
 `/agent-loop:setup <operator|executor|reviewer|qa>` inside each. It creates the labels, ignores
