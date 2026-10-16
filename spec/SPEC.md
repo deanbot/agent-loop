@@ -89,8 +89,11 @@ ping-pong loops: `pr-poll.mjs` ignores `[executor]`, `pr-watch.mjs` ignores `[re
 Agent → agent communication is findings and fix summaries. Agent → operator communication is a
 `Question`, never a paragraph inside something else.
 
-A role's verdict is its **newest** comment posted after the last commit. A new push supersedes
-every earlier verdict; a finding posted later than an approval, without a push, revokes it. So
+An approval (`LGTM`, `PASS`) counts only as the role's **newest** comment posted after the last
+commit: a new push supersedes every earlier approval, and a finding posted later than an approval,
+without a push, revokes it. A finding or `BLOCKED` is not superseded by a push: it stays open until
+the executor answers it (an `[executor]` comment after it) or the role posts a newer verdict, so a
+commit that fixes nothing never buries it. So
 does a later `Question`: it withholds `MERGE_READY` until the role posts its next verdict, which it
 does once the operator replies.
 
@@ -281,9 +284,10 @@ pass `--require-qa` when `qa-gate: on`.
 | `MERGED` | PR is merged |
 
 Content blocks follow signal lines, indented two spaces. `CI_FAILING` blocks carry the check name,
-state and link. Live negative verdicts (`[qa] BLOCKED`, `[reviewer]` findings newer than the head
-commit with no `[executor]` comment after them) are re-surfaced as `NEW_COMMENT` every poll until
-the executor responds, so a verdict posted before the executor's first poll is never lost.
+state and link. Live negative verdicts (`[qa] BLOCKED` or a `[reviewer]` finding with no
+`[executor]` comment and no newer verdict from its role after it, however many commits followed)
+are re-surfaced as `NEW_COMMENT` every poll until the executor responds, so a verdict posted before
+the executor's first poll is never lost, even when a commit that fixes nothing lands in between.
 `[reviewer] Question …` is not a finding and is not re-surfaced. If the CI checks cannot be read
 (auth, network, an old `gh`), `MERGE_READY` is withheld and the error is passed through on
 stderr; "no checks reported" counts as no CI. Scripts page through the API (`gh api --paginate

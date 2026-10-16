@@ -58,7 +58,8 @@ Read the full thread, not just the new blocks.
   is direction: check whether the current code already does it; if so, reply confirming where; if
   not, do it, push, reply.
 - **A live `[reviewer]`/`[qa]` verdict that re-surfaces** after you already pushed a fix: the
-  script surfaces verdicts newer than the last commit until an `[executor]` comment follows them.
+  script surfaces a finding or `BLOCKED` until an `[executor]` comment or a newer verdict from
+  its role follows it, whatever commits came in between.
   If your fix comment is missing, post it; if the verdict is wrong, say why in one comment.
 
 After posting, the PR body may be stale: update it (`gh pr edit <PR> --repo <repo> --body-file

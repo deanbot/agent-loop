@@ -286,6 +286,51 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- negative verdicts survive non-fix commits (#41)
+// deanbot/loom#91: the reviewer posts a finding on a draft before the executor's first poll; a
+// baselines-only commit follows; the first poll must still deliver the finding.
+{
+  const ctx = makeEnv()
+  const finding = comment('[reviewer] 1. the empty-state screenshot is missing', T('2026-01-01T12:05:00Z'))
+  const fx = { ...BASE, commits: [commit(T('2026-01-01T10:00:00Z')), commit(T('2026-01-01T12:10:00Z'))], comments: [finding] }
+  const first = poll(ctx, fx)
+  check('poll #41: a finding, then a non-fix commit, then the first poll → NEW_COMMENT with the finding', signals(first).includes('NEW_COMMENT') && first.includes('empty-state screenshot'), first)
+  const again = poll(ctx, fx)
+  check('poll #41: … and it stays live while unanswered', again.includes('empty-state screenshot'), again)
+  const answered = { ...fx, comments: [finding, comment('[executor] Pushed fix: added the screenshot', T('2026-01-01T12:20:00Z'))] }
+  poll(ctx, answered)
+  const quiet = poll(ctx, answered)
+  check('poll #41: after an [executor] comment the finding goes quiet', !quiet.includes('empty-state screenshot'), quiet)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const finding = comment('[reviewer] 1. the empty-state screenshot is missing', T('2026-01-01T12:05:00Z'))
+  const lgtm = comment('[reviewer] LGTM — recheck of def456', T('2026-01-01T12:30:00Z'))
+  const fx = { ...BASE, commits: [commit(T('2026-01-01T10:00:00Z')), commit(T('2026-01-01T12:10:00Z'))], comments: [finding, lgtm] }
+  poll(ctx, fx)
+  const out = poll(ctx, fx)
+  check('poll #41: a finding superseded by a newer LGTM is quiet, and MERGE_READY follows', !out.includes('empty-state screenshot') && out.trim() === 'MERGE_READY', out)
+  const staleLgtm = { ...fx, commits: [...fx.commits, commit(T('2026-01-01T12:40:00Z'))] }
+  const out2 = poll(ctx, staleLgtm)
+  check('poll #41: … an LGTM older than the last commit still gives no MERGE_READY (commit rule kept for LGTM)', !signals(out2).includes('MERGE_READY') && !out2.includes('empty-state screenshot'), out2)
+  const second = comment('[reviewer] 2. the dark-mode baseline is wrong', T('2026-01-01T12:50:00Z'))
+  const out3 = poll(ctx, { ...staleLgtm, comments: [finding, lgtm, second] })
+  check('poll #41: a newer finding is live; the older, superseded one is not re-surfaced', out3.includes('dark-mode baseline') && !out3.includes('empty-state screenshot'), out3)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const blocked = comment('[qa] BLOCKED\n\n| criterion | missing |', T('2026-01-01T12:05:00Z'))
+  const fx = { ...BASE, commits: [commit(T('2026-01-01T10:00:00Z')), commit(T('2026-01-01T12:10:00Z'))], comments: [blocked] }
+  const first = poll(ctx, fx, ['--require-qa'])
+  check('poll #41: [qa] BLOCKED before a non-fix commit survives the first poll', first.includes('[qa] BLOCKED'), first)
+  const passed = { ...fx, comments: [blocked, comment('[qa] PASS\n\n| a | b |', T('2026-01-01T12:30:00Z'))] }
+  const out = poll(ctx, passed, ['--require-qa'])
+  check('poll #41: … and a newer [qa] post supersedes it', !out.includes('[qa] BLOCKED'), out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- pr-watch.mjs / pr-qa.mjs smoke
 {
   const ctx = makeEnv()

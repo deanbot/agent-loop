@@ -188,7 +188,8 @@ function pass({ gh, save, dry }) {
   // first-run baseline seeding (intentional, to skip resolved history on a state wipe) would
   // otherwise swallow it as "pre-existing". Inline comments (unansweredInline) and positive verdicts
   // (MERGE_READY below) already ignore the cursor; negative verdicts were the lone asymmetry.
-  // "Live" = newer than the last commit — a fix push supersedes the verdict until the agent re-runs.
+  // "Live": an LGTM or PASS must be newer than the last commit; a finding or BLOCKED stays live until
+  // the executor answers it or its role supersedes it (below).
   const reviewerComments = issueComments.filter((c) => /^\[reviewer\]/.test(c.body ?? ''))
   const qaComments = issueComments.filter((c) => /^\[qa\]/.test(c.body ?? ''))
   const isLgtm = (b) => /^\[reviewer\] LGTM/.test(b ?? '')
@@ -201,7 +202,7 @@ function pass({ gh, save, dry }) {
   const isQaBlocked = (b) => /^\[qa\] BLOCKED/.test(b ?? '')
   const blockingCandidates = issueComments.filter((c) => isQaBlocked(c.body) || isReviewerFinding(c.body))
 
-  // Fetch the last commit date once if any verdict (positive or negative) needs liveness checking.
+  // Fetch the last commit date once if a verdict exists (positive verdicts need it for MERGE_READY).
   let lastCommitDate = null
   if (reviewerComments.length > 0 || qaComments.length > 0) {
     const commits = ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/commits`)
@@ -209,21 +210,28 @@ function pass({ gh, save, dry }) {
   }
 
   // Surface live blocking verdicts even if the cursor has already passed them (mirrors
-  // unansweredInline). Re-surfaces each poll until a fix push makes the verdict stale.
+  // unansweredInline). Re-surfaces each poll until the executor answers it or it is superseded.
   // NOTE: the reviews API path (firstReviews → seed) has the same first-run swallow, but in
   // single-account mode the reviewer posts [reviewer] comments, not formal CHANGES_REQUESTED
   // reviews, so the issue-comment path above is the one that matters. Operator (unprefixed)
-  // comments present at first poll are not covered here — the commit-based liveness rule fits
-  // verdicts, not free-form operator direction.
+  // comments present at first poll are not covered here — verdict liveness fits verdicts, not
+  // free-form operator direction.
   // "Addressed" = an [executor] comment posted after the verdict (the executor has engaged:
   // a fix push, an answer, or a clarifying question). Without this, a [reviewer] comment or
-  // question that needs no commit would never go stale (no superseding commit) and would
+  // question that needs no commit would never go stale and would
   // re-surface every poll, thrashing the loop. The guard is safe: an [executor] comment can
   // only post-date a verdict the executor already saw, so it never hides an unaddressed one.
+  // A negative verdict stays live until the executor engages (an [executor] comment after it) or its
+  // role supersedes it (a newer LGTM or finding; for QA, any newer [qa] post). No commit-date
+  // condition: a push that fixes nothing must not bury a finding (deanbot/loom#91, where the finding
+  // landed before the first poll and a baselines-only commit followed). The commit-date rule stays
+  // where it belongs, on LGTM and PASS for MERGE_READY.
   const lastExecutorId = issueComments.filter((c) => /^\[executor\]/.test(c.body ?? '')).at(-1)?.id ?? 0
-  const liveBlocking = blockingCandidates.filter(
-    (c) => c.id > lastExecutorId && lastCommitDate && new Date(c.created_at) > lastCommitDate
-  )
+  const superseded = (c) =>
+    isQaBlocked(c.body)
+      ? qaComments.some((q) => q.id > c.id)
+      : reviewerComments.some((r) => r.id > c.id && (isLgtm(r.body) || isReviewerFinding(r.body)))
+  const liveBlocking = blockingCandidates.filter((c) => c.id > lastExecutorId && !superseded(c))
   for (const c of liveBlocking) {
     if (!newComments.some((n) => n.id === c.id)) newComments.push(c)
   }
