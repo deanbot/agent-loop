@@ -9,7 +9,8 @@
  *   [reviewer]       — this agent's own posts; filtered out to prevent ping-pong loops
  *
  * Only [reviewer] comments are suppressed. All other comments (including [executor]) are
- * treated as meaningful signals.
+ * treated as meaningful signals, unless they are older than the reviewer's newest post: the
+ * reviewer re-reads the thread immediately before posting, so those were already read.
  *
  * Usage:
  *   node scripts/pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--wait [secs] [--max secs]]
@@ -137,12 +138,22 @@ function pass({ gh, save }) {
         entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0
         entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : 0
       } else {
+        // The reviewer re-reads the thread and the inline threads immediately before it posts, so a
+        // comment older than its newest post was already read, even when it landed after this
+        // script's last run. Timeline ids are one sequence; inline comments have their own, so
+        // they compare by time (a tie, or no timestamp, counts as news).
+        const own = [...comments, ...inlineComments].filter((c) => /^\[reviewer\]/.test(c.body ?? ''))
+        const ownLastId = Math.max(0, ...own.filter((c) => comments.includes(c)).map((c) => c.id))
+        const ownLastAt = Math.max(-Infinity, ...own.map((c) => Date.parse(c.created_at)).filter((t) => !Number.isNaN(t)))
         const newNonAgent = comments.filter(
-          (c) => c.id > entry.lastComment && !/^\[reviewer\]/.test(c.body ?? '')
+          (c) => c.id > entry.lastComment && c.id > ownLastId && !/^\[reviewer\]/.test(c.body ?? '')
         )
         const lastReviewComment = entry.lastReviewComment ?? 0
         const newInlineNonAgent = inlineComments.filter(
-          (c) => c.id > lastReviewComment && !/^\[reviewer\]/.test(c.body ?? '')
+          (c) =>
+            c.id > lastReviewComment &&
+            !(Date.parse(c.created_at) < ownLastAt) &&
+            !/^\[reviewer\]/.test(c.body ?? '')
         )
         // Surface unanswered top-level inline comments even if cursor has passed them
         const replyToIds = new Set(inlineComments.filter((c) => c.in_reply_to_id).map((c) => c.in_reply_to_id))

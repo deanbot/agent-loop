@@ -70,7 +70,8 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
      is green, and nothing would re-trigger you when a check finishes.
    - **`NONE`** → nothing to do.
 3. Before posting, re-fetch `gh pr view <n> --comments --repo <repo>` for operator comments that
-   arrived while you evaluated.
+   arrived while you evaluated. The QA script counts every operator comment older than your newest
+   post as read, so this re-fetch is where you see them.
 4. Print one line per PR you touched.
 5. Wait. Start the waiter with Bash `run_in_background: true`, then schedule the fallback:
 

@@ -538,5 +538,62 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   rmSync(migrated.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- already read before the role's own post (#28)
+// loom#72: the executor pushes, the reviewer's one-shot run prints REVIEW, the executor's comment
+// lands after that run, and the reviewer re-reads the thread and posts LGTM. The executor comment
+// is older than the LGTM: already read, so neither a waiter nor the next run reports it.
+{
+  const ctx = makeEnv()
+  const findings = { ...watchFx, comments: [comment('[reviewer] 1. empty input crashes', T('2026-01-01T12:00:00Z'))] }
+  run(ctx, 'pr-watch.mjs', watchArgs(), findings)
+  run(ctx, 'pr-watch.mjs', watchArgs(), findings)
+  const pushed = { ...findings, prs: [{ number: 7, headRefOid: 'def456', mergeable: 'MERGEABLE' }] }
+  const review = run(ctx, 'pr-watch.mjs', watchArgs(), pushed)
+  check('seen: setup — the fix push gives REVIEW:7', review.trim() === 'REVIEW:7', review)
+  const answered = {
+    ...pushed,
+    comments: [...pushed.comments, comment('[executor] Pushed fix: guard empty input', T('2026-01-01T12:10:05Z')), comment('[reviewer] LGTM — recheck of def456', T('2026-01-01T12:10:33Z'))],
+  }
+  setFixture(ctx, answered)
+  const w1 = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
+  check('seen: an executor comment older than the [reviewer] post → the waiter does not return PENDING', signals(w1.out).join() === 'NONE', `${w1.ms}ms\n${w1.out}${w1.err}`)
+  const quiet = run(ctx, 'pr-watch.mjs', watchArgs(), answered)
+  check('seen: … and the next one-shot run prints NONE', signals(quiet).join() === 'NONE', quiet)
+  const w2 = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
+  check('seen: … and a waiter after that run still returns NONE', signals(w2.out).join() === 'NONE', `${w2.out}${w2.err}`)
+  // Inline comments have their own id sequence: a higher id but an earlier time is still older.
+  const inlineOld = { ...answered, inline: [{ id: 9000, body: '[executor] done, see 983ffbc', created_at: T('2026-01-01T12:10:20Z'), user: user('acme') }] }
+  setFixture(ctx, inlineOld)
+  const w4 = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
+  const inlineRun = run(ctx, 'pr-watch.mjs', watchArgs(), inlineOld)
+  check('seen: an inline comment older than the [reviewer] post (higher id) → waiter NONE, one-shot NONE', signals(w4.out).join() === 'NONE' && signals(inlineRun).join() === 'NONE', `${w4.out}${inlineRun}`)
+  const later = { ...inlineOld, comments: [...inlineOld.comments, comment('[executor] Also renamed the helper', T('2026-01-01T12:11:00Z'))] }
+  setFixture(ctx, later)
+  const w5 = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '5')).done
+  const newer = run(ctx, 'pr-watch.mjs', watchArgs(), later)
+  check('seen: an executor comment newer than the [reviewer] post → PENDING, then REVIEW_COMMENTS:7', w5.out === 'PENDING\n' && newer.trim() === 'REVIEW_COMMENTS:7', `${w5.out}${newer}`)
+  const op = { ...later, comments: [...later.comments, comment('[reviewer] LGTM', T('2026-01-01T12:12:00Z')), comment('one more thing before I merge', T('2026-01-01T12:20:00Z'))] }
+  const opRun = run(ctx, 'pr-watch.mjs', watchArgs(), op)
+  check('seen: an operator comment after the [reviewer] post → REVIEW_COMMENTS:7', opRun.trim() === 'REVIEW_COMMENTS:7', opRun)
+  const inlineNew = { ...op, inline: [...op.inline, { id: 9001, body: 'why this constant?', created_at: T('2026-01-01T12:12:00Z'), in_reply_to_id: 9000, user: user('acme') }] }
+  const tieRun = run(ctx, 'pr-watch.mjs', watchArgs(), inlineNew)
+  check('seen: an inline comment at the same second as the [reviewer] post counts as news', tieRun.trim() === 'REVIEW_COMMENTS:7', tieRun)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const fx = { ...BASE, prs: [{ number: 7, headRefOid: 'abc123', mergeable: 'MERGEABLE' }] }
+  run(ctx, 'pr-qa.mjs', ['--repo', REPO], fx)
+  const answered = { ...fx, comments: [comment('verified by hand on my Mac', T('2026-01-01T12:00:05Z')), comment('[qa] PASS\n\n| a | b |', T('2026-01-01T12:00:40Z'))] }
+  setFixture(ctx, answered)
+  const w = await start(ctx, 'pr-qa.mjs', ['--repo', REPO, '--wait', '1', '--max', '2']).done
+  const out = run(ctx, 'pr-qa.mjs', ['--repo', REPO], answered)
+  check('seen (qa): an operator comment older than the [qa] post → waiter NONE, one-shot NONE', signals(w.out).join() === 'NONE' && signals(out).join() === 'NONE', `${w.out}${out}`)
+  const op = { ...answered, comments: [...answered.comments, comment('also checked on Linux', T('2026-01-01T12:30:00Z'))] }
+  const out2 = run(ctx, 'pr-qa.mjs', ['--repo', REPO], op)
+  check('seen (qa): an operator comment after the [qa] post → QA_READY:7', out2.trim() === 'QA_READY:7', out2)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 console.log(`\n${passes} passed, ${failures} failed`)
 process.exit(failures ? 1 : 0)

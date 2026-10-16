@@ -178,6 +178,11 @@ waiter: see "Waiting for events" below.)
 Multiple signals space-separated on one line. `REVIEW:<n>` subsumes `REVIEW_COMMENTS:<n>` for the
 same PR. On first encounter of a PR with a `CHANGES_REQUESTED` formal review the signal is
 suppressed. Comment cursors advance when the SHA changes and when `REVIEW_COMMENTS` is emitted.
+A comment older than the reviewer's newest `[reviewer]` post counts as already read, even when it
+landed after the last run: the reviewer re-reads the thread and the inline threads immediately
+before every post (below). Inline comments compare by time; a comment at the same second as the
+post is news. The trade-off: a comment that lands between that re-read and the post is never
+reported. The window is seconds, and an executor fix also pushes, which gives `REVIEW:<n>`.
 
 ### Reviewer handling per signal
 
@@ -217,6 +222,9 @@ a later finding or a later question.
 | `QA_READY:<n>` | PR #n has new commits or a new operator comment; needs evaluation |
 | `MERGE_CONFLICT:<n>` | PR #n has new commits but conflicts with base |
 | `CLOSED:<n>` | PR #n, which the script was tracking, is no longer open; emitted once |
+
+An operator comment older than QA's newest `[qa]` post counts as already read: QA re-reads the
+thread immediately before posting.
 
 ### QA handling per signal
 
@@ -380,7 +388,8 @@ own claim), and no further poll runs. See each adapter's README for its mechanis
 
 **Reviewer re-raises answered findings.** Mitigation: the reviewer reads the whole thread
 alongside the diff and raises only unanswered scope; it re-reads immediately before posting and
-drops the comment if the head moved.
+drops the comment if the head moved. Because of that re-read, a comment older than the
+reviewer's own newest post is not reported again (`pr-watch.mjs`; the same for QA).
 
 **Executor tight-poll loop.** Mitigation: the loop invariant (a wait after every cycle); a
 waiter's baseline keeps standing signals from waking the agent on every poll.

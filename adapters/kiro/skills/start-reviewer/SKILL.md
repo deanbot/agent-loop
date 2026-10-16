@@ -27,6 +27,8 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 
 Never merge, never push. You post `[reviewer]` comments, and add or remove `<needs-operator-label>` for your own questions; nothing else.
 
+Immediately before every post, re-fetch the thread (`gh pr view <n> --comments --repo <repo>`) and the inline threads (`gh api repos/<repo>/pulls/<n>/comments`) and fold in anything new: `pr-watch.mjs` treats every comment older than your newest `[reviewer]` post as already read.
+
 $ARGUMENTS may be `--skip <n,n,...>` to ignore specific PR numbers.
 
 Derive `<slug>` from `repo` by replacing `/` with `-` (e.g. `deanbot/agent-loop` → `deanbot-agent-loop`). Sentinel path: `.agent-loop/<slug>-reviewer-stop` (project-local; gitignored).
