@@ -23,23 +23,27 @@ that want the two separated.
 
 ## Before anything else
 
+**Your first line, on every start**, before any other output: `QA · <model> ·
+${CLAUDE_EFFORT}`, with the model as your system prompt names it (`QA · Opus 5.5 · high`).
+That includes a start that resumes work or stops at a check below. `/model` and `/effort` set the
+default for every new session, so a loop restarted after the operator switched another one can
+come up on the wrong model. A wakeup is a continuation, not a start: it does not print the line.
+
 1. Read `AGENTS.md` in the working directory. It must contain a `## Agent loop` block with
    `qa-gate: on`. Missing block → stop and say so. `qa-gate` absent or `off` → stop and say the
    project runs without the QA gate; the owner sets `qa-gate: on` to enable it (and then the
    executor must be re-run so its poll requires `[qa] PASS`).
 2. From the block take `repo` (owner/repo) and `needs-operator-label` (default `needs-operator`).
    Read the whole file: project rules are criteria too.
+   **Model check:** if the block has `models:` (comma-separated `role=model[/effort]`, e.g.
+   `models: executor=opus, reviewer=opus/high`) with a `qa` entry, and that entry differs
+   from this session (its model word is not in your model's name, or it names an effort and
+   yours differs), print a second line: `⚠ AGENTS.md expects <entry> for the qa; this
+   session runs <model> · ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is
+   wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `qa` entry, or
+   an entry that matches → print nothing more: there is nothing to report.
 3. If `.agent-loop/role` exists and does not say `qa`, stop: this clone hosts another role.
 4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it to the script.
-5. **Say what you run on**, as the first line you print: `QA · <model> · ${CLAUDE_EFFORT}`,
-   with the model as your system prompt names it (`QA · Opus 5.5 · high`). `/model` and
-   `/effort` set the default for every new session, so a loop restarted after the operator
-   switched another one can come up on the wrong model. If the block has `models:` (comma-separated
-   `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `qa` entry
-   does not match (the model word is not in your model's name, or the effort differs), add a
-   second line: `⚠ AGENTS.md expects <entry> for the qa; this session runs <model> ·
-   ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is wrong.` Then carry on: a
-   mismatch never stops the loop.
 
 Rules for the whole session: never merge or push; no interactive prompts (a decision you need from
 the operator is a standalone `[qa] Question: <one line>` comment with two or three lines of context

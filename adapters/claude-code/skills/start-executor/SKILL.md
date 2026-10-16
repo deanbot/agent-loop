@@ -22,6 +22,12 @@ operator (the human) in unprefixed comments. The operator merges; you never do.
 
 ## Before anything else
 
+**Your first line, on every start**, before any other output: `Executor · <model> ·
+${CLAUDE_EFFORT}`, with the model as your system prompt names it (`Executor · Opus 5.5 · high`).
+That includes a start that resumes work or stops at a check below. `/model` and `/effort` set the
+default for every new session, so a loop restarted after the operator switched another one can
+come up on the wrong model. A wakeup is a continuation, not a start: it does not print the line.
+
 1. Read `AGENTS.md` in the working directory. It must contain a `## Agent loop` block; if it does
    not, stop and say so (the project owner adds it; `/agent-loop:setup` prints the template).
    Read the whole file: the rest of it is the project's conventions, and you follow them.
@@ -30,6 +36,13 @@ operator (the human) in unprefixed comments. The operator merges; you never do.
    PR), `qa-gate` (`on` or `off`, default `off`), `needs-operator-label` (default
    `needs-operator`), and the author allowlist
    (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
+   **Model check:** if the block has `models:` (comma-separated `role=model[/effort]`, e.g.
+   `models: executor=opus, reviewer=opus/high`) with an `executor` entry, and that entry differs
+   from this session (its model word is not in your model's name, or it names an effort and
+   yours differs), print a second line: `⚠ AGENTS.md expects <entry> for the executor; this
+   session runs <model> · ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is
+   wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `executor` entry, or
+   an entry that matches → print nothing more: there is nothing to report.
 3. If `.agent-loop/role` exists and does not say `executor`, stop: this clone hosts another role.
 4. **See where this clone is before touching `main`.** `git branch --show-current` and `git
    status --porcelain`. On `main` with a clean tree → `git pull` (an issue you hold that
@@ -63,15 +76,6 @@ operator (the human) in unprefixed comments. The operator merges; you never do.
    <in-progress-label>`, one call per issue. You remove the label on `MERGED`, but a loop stopped
    after `MERGE_READY` never sees the merge. A closed issue has no claim to protect, so this is
    safe while other executors run.
-5. **Say what you run on**, as the first line you print: `Executor · <model> · ${CLAUDE_EFFORT}`,
-   with the model as your system prompt names it (`Executor · Opus 5.5 · high`). `/model` and
-   `/effort` set the default for every new session, so a loop restarted after the operator
-   switched another one can come up on the wrong model. If the block has `models:` (comma-separated
-   `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `executor` entry
-   does not match (the model word is not in your model's name, or the effort differs), add a
-   second line: `⚠ AGENTS.md expects <entry> for the executor; this session runs <model> ·
-   ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is wrong.` Then carry on: a
-   mismatch never stops the loop.
 
 Rules that hold for the whole session:
 
@@ -94,7 +98,7 @@ keep the working tree. If an open PR has `Closes #<N>` (the lookup below), orien
 the loop. Otherwise read [reference/implement.md](reference/implement.md) from §2 (the issue and
 every comment), then see what is done: `git log --oneline main..HEAD`, `git status --porcelain`,
 `git diff HEAD`. Continue from there; do not re-claim and do not start over. Say `Resuming #<N> on
-<branch>` in the line after the model line (step 5).
+<branch>` in the line after the model line (and the `⚠` line, when there is one).
 
 `$ARGUMENTS` may hold `--milestone "<title>"`: take it out first and keep it as `<milestone>`
 for the whole session (it decides every later pick). What remains, `<arg>`, is a PR number, an

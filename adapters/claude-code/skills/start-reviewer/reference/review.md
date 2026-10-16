@@ -99,20 +99,27 @@ other text. Repo conventions apply to your comments (for example, no tool attrib
 caused by this PR is a finding, not an LGTM; a pending check is noted, not waited for. Never ask
 first; post.
 
-**A PR no executor polls** gets `MERGE_READY`, and so `<needs-operator-label>`, from nobody: a PR
-the operator or a monitor opened, or one an executor parked. It is one when its linked issue does
-not carry `<in-progress-label>` (`gh issue view <M> --repo <repo> --json labels`), or there is no
-linked issue. With an LGTM on such a PR, check what the executor's poll would: CI green (every
-check `pass` or `skipping`, or no checks at all), `[qa] PASS` after the last commit when `qa-gate:
-on`, and no unanswered inline thread.
+**Label a ready PR with your LGTM**, whoever owns it. The executor adds `<needs-operator-label>`
+when its poll sees `MERGE_READY`, but an executor the operator stopped (its issue keeps its
+in-progress label) polls nothing, and a PR the operator or a monitor opened, or one an executor
+parked, has no executor at all. So with every LGTM, check the `MERGE_READY` threshold yourself:
+your LGTM is on the head commit, CI is green (every check `pass` or `skipping`, or no checks at
+all), `[qa] PASS` after the last commit when `qa-gate: on`, and no inline thread is unanswered.
 
-- All hold → post the LGTM, then `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>`.
-- Otherwise → end the LGTM with `No executor polls this PR, so it will not get the
-  <needs-operator-label> label: merge it when <what is missing, e.g. CI is green>.`
+- All hold → post the LGTM, then `gh pr view <n> --repo <repo> --json headRefOid`. Still the sha
+  you reviewed → `gh pr edit <n> --repo <repo> --add-label <needs-operator-label>` (when the label
+  is already on, this does nothing). The head moved → skip the label: a push landed after your
+  LGTM, and the new head is unreviewed.
+- CI is pending (everything else holds) → end the LGTM with `CI is pending, so this PR does not
+  have the <needs-operator-label> label yet: a running executor adds it when CI is green; with
+  none, merge it once CI is green.` A failing check caused by the PR is a finding, not an LGTM.
+- Anything else missing → end the LGTM with one line naming it and saying the PR has no
+  `<needs-operator-label>` label until it is resolved.
 
-When you later post findings on a PR you labelled this way, `--remove-label
-<needs-operator-label>` in the same cycle, unless a question of yours is still open. An executor
-PR's issue carries `<in-progress-label>`, so you never label one.
+When you later post findings on a PR that carries `<needs-operator-label>`, `--remove-label
+<needs-operator-label>` in the same cycle, unless a question (yours, the executor's or QA's) is
+still open: a finding revokes the LGTM, so the PR is no longer ready. The executor still removes
+the label when it pushes, and still adds it when CI turns green after your LGTM.
 
 ## 5. Report to the operator
 
