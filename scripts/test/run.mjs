@@ -378,6 +378,40 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// Standing MERGE_CONFLICT (#48): a PR in the operator's inbox (needs-operator) that falls into
+// conflict with no new commit, e.g. a monitor's PR with no executor after main moved.
+{
+  const ctx = makeEnv()
+  const lgtm = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))], prView: { reviewDecision: '' } }
+  const pr = (extra) => ({ ...lgtm, prs: [{ number: 7, headRefOid: 'abc123', mergeable: 'MERGEABLE', labels: [], ...extra }] })
+  const watch = (fx, extra = []) => run(ctx, 'pr-watch.mjs', ['--repo', REPO, ...extra], fx)
+  watch(pr({}))
+  watch(pr({}))
+  const ready = watch(pr({ labels: [{ name: 'needs-operator' }] }))
+  check('watch: labelled, mergeable, reviewed PR → NONE', signals(ready).join() === 'NONE', ready)
+  const conflicting = pr({ labels: [{ name: 'needs-operator' }], mergeable: 'CONFLICTING' })
+  const out = watch(conflicting)
+  check('watch: labelled PR falls into conflict with no new commit → MERGE_CONFLICT:7', out.trim() === 'MERGE_CONFLICT:7', out)
+  const again = watch(conflicting)
+  check('watch: … repeated while the label is on (a standing signal)', again.trim() === 'MERGE_CONFLICT:7', again)
+  const unlabelled = watch(pr({ mergeable: 'CONFLICTING' }))
+  check('watch: … quiet once the label is off', signals(unlabelled).join() === 'NONE', unlabelled)
+  const unknown = watch(pr({ labels: [{ name: 'needs-operator' }], mergeable: 'UNKNOWN' }))
+  check('watch: labelled PR with mergeable UNKNOWN → NONE', signals(unknown).join() === 'NONE', unknown)
+  const custom = watch(pr({ labels: [{ name: 'waiting-on-dean' }], mergeable: 'CONFLICTING' }), ['--needs-operator-label', 'waiting-on-dean'])
+  check('watch: --needs-operator-label names the label → MERGE_CONFLICT:7', custom.trim() === 'MERGE_CONFLICT:7', custom)
+  const otherLabel = watch(pr({ labels: [{ name: 'needs-operator' }], mergeable: 'CONFLICTING' }), ['--needs-operator-label', 'waiting-on-dean'])
+  check('watch: … and the default label no longer counts', signals(otherLabel).join() === 'NONE', otherLabel)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const fx = { ...BASE, prView: { reviewDecision: '' }, prs: [{ number: 7, headRefOid: 'abc123', mergeable: 'MERGEABLE', labels: [{ name: 'needs-operator' }] }] }
+  run(ctx, 'pr-watch.mjs', ['--repo', REPO], fx)
+  const out = run(ctx, 'pr-watch.mjs', ['--repo', REPO], { ...fx, prs: [{ ...fx.prs[0], mergeable: 'CONFLICTING' }] })
+  check('watch: labelled conflicting PR the reviewer never posted on → one MERGE_CONFLICT:7, not two', out.trim() === 'MERGE_CONFLICT:7', out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
 // MERGE_CONFLICT (#46): a PR that falls into conflict after its LGTM, e.g. when another PR merges.
 {
   const ctx = makeEnv()
@@ -496,6 +530,23 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   const r = await start(ctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--wait', '1', '--max', '3']).done
   check('wait (poll): a standing MERGE_READY does not return before --max', signals(r.out).join() === 'NONE' && r.ms >= 3000, `${r.ms}ms\n${r.out}${r.err}`)
   check('wait (poll): the waiter leaves the state file byte-for-byte unchanged', stateText(ctx, POLL_STATE) === before, stateText(ctx, POLL_STATE))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const lgtm = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))], prView: { reviewDecision: '' }, prs: [{ number: 7, headRefOid: 'abc123', mergeable: 'MERGEABLE', labels: [{ name: 'needs-operator' }] }] }
+  run(ctx, 'pr-watch.mjs', ['--repo', REPO], lgtm)
+  run(ctx, 'pr-watch.mjs', ['--repo', REPO], lgtm)
+  setFixture(ctx, lgtm)
+  const w = start(ctx, 'pr-watch.mjs', ['--repo', REPO, '--wait', '1', '--max', '15'])
+  await pause(1500)
+  const conflicting = { ...lgtm, prs: [{ ...lgtm.prs[0], mergeable: 'CONFLICTING' }] }
+  setFixture(ctx, conflicting)
+  const r = await w.done
+  const out = run(ctx, 'pr-watch.mjs', ['--repo', REPO], conflicting)
+  check('wait (watch): a ready PR falling into conflict is news → PENDING, then MERGE_CONFLICT:7', r.out === 'PENDING\n' && r.ms < 10000 && out.trim() === 'MERGE_CONFLICT:7', `${r.ms}ms\n${r.out}${r.err}${out}`)
+  const standing = await start(ctx, 'pr-watch.mjs', ['--repo', REPO, '--wait', '1', '--max', '2']).done
+  check('wait (watch): … a standing one is not news again → NONE at --max', signals(standing.out).join() === 'NONE' && standing.ms >= 2000, `${standing.ms}ms\n${standing.out}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {

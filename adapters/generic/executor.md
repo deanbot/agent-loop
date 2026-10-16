@@ -22,7 +22,10 @@ came up on the wrong model is seen at once. If the block has `models:` (comma-se
 and that entry differs from this session (its model word is not in your model's name, or it names
 an effort and yours differs), add `⚠ AGENTS.md expects <entry> for the executor; this session runs
 <model>.` and carry on: a mismatch never stops the loop. No `models:`, no `executor` entry, or an
-entry that matches → print nothing more.
+entry that matches → print nothing more. **The line after the model line names the track:**
+`Track: <milestone>` when the input names `--milestone "<milestone>"`, else `Track: all
+milestones`, so a start without the intended filter is seen at once (the `⚠` line, when there is
+one, comes after it).
 
 **Clear stale claims on start.** `gh issue list --repo <repo> --state closed --label
 <in-progress-label> --limit 100 --json number --jq '.[].number'`, then `gh issue edit <n> --repo
@@ -138,8 +141,10 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 - `MERGE_CONFLICT` → the branch conflicts with `main` (often another PR merged after the LGTM);
   it repeats every poll while it holds and withholds `MERGE_READY`. Remove the
   `needs-operator-label` unless a question is still open, bring `main` in the project's way (none
-  → `git merge origin/main`, no force-push), resolve keeping both sides' intent (a contradiction
-  you cannot settle is a question for the operator), run `quality-gates`, push once, post one
+  → `git merge --no-edit origin/main`, no force-push), resolve keeping both sides' intent (a
+  contradiction you cannot settle is a question for the operator), commit the merge with `git
+  commit --no-edit` (never a bare `git commit`, which opens an editor), run `quality-gates`, push
+  once, post one
   `[executor] Pushed fix: resolved conflicts with main in <files>`. The review follows the new
   head.
 - `NEW_INLINE_COMMENT` → verify, fix in the batch, reply to every thread with

@@ -192,7 +192,7 @@ waiter: see "Waiting for events" below.)
 |---|---|
 | `NONE <timestamp>` | No PRs changed since last run |
 | `REVIEW:<n>` | PR #n has new commits (or no `[reviewer]` post yet) and is mergeable |
-| `MERGE_CONFLICT:<n>` | PR #n has new commits but conflicts with base |
+| `MERGE_CONFLICT:<n>` | PR #n has new commits but conflicts with base; or (standing) it carries `needs-operator-label` and conflicts with base, whatever its head, repeated every run while both hold |
 | `REVIEW_COMMENTS:<n>` | PR #n has new non-reviewer comments (timeline or inline) since last check |
 | `CLOSED:<n>` | PR #n, which the script was tracking, is no longer open (merged or closed); emitted once |
 
@@ -209,7 +209,14 @@ lands between that re-read and the post is still reported.
 
 - `CLOSED:<n>` — the operator merged or closed the PR; nothing to post. Say so in the status line
   and forget the PR, whatever was outstanding on it.
-- `MERGE_CONFLICT:<n>` — post `[reviewer] Merge conflicts — rebase on main before review.`
+- `MERGE_CONFLICT:<n>` — no review. On a PR carrying `needs-operator-label` (it was ready and the
+  base moved under it), remove the label unless a question is still open, and post once
+  `[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready to merge; …`
+  for whoever owns it. `pr-watch` reports this standing conflict whether or not an executor holds
+  the PR (it takes `--needs-operator-label <name>`, default `needs-operator`): with no executor
+  nobody runs `pr-poll` on it, and an executor that polls sees the conflict as well. Otherwise
+  (new commits on a conflicting branch) post `[reviewer] Merge conflicts — rebase on main before
+  review.`
 - `REVIEW:<n>` — with `qa-gate: on`, require a `[qa] PASS` newer than the head commit first; none
   → post nothing. Then the full review: gather the PR, its linked issue, the whole thread and the
   inline threads, CI state and the diff; **verify each acceptance criterion** (a named test that CI
@@ -478,7 +485,9 @@ before claiming; the label is authoritative. Two executors that pick at the same
 no label, so the claim itself is a claim comment, earliest live one wins ("Claim comments").
 
 **Roles in one checkout.** Mitigation: one clone per role (`.agent-loop/role` marks it); agents
-refuse to run in a clone marked for another role.
+refuse to run in a clone marked for another role. A clone may live anywhere; its folder's base
+name is the `<clone>` in claims and per-reviewer state, so it must be unique per repo and stable
+(renaming a clone that holds a claim orphans the claim).
 
 ---
 
@@ -508,8 +517,12 @@ threads are still surfaced).
 0.2 — QA optional, `CI_FAILING`, `CLOSED`, own-prefix filtering everywhere, newest-comment
 verdicts, CI gated in the executor's poll only, adapter-specific stop. Later in 0.2, with no
 change to signal format: the `Question` kind, the `needs-operator-label` key, hand checks that
-never block, the retired `[reviewer] Verified` kind (tolerated by `pr-poll`), `--wait` waiters
-(their own output, `PENDING` / `NONE` / `WATCHER_RUNNING <pid>`, never a signal line), and
-`pr-poll`'s `MERGE_CONFLICT` (a new signal line; `MERGE_READY` now also requires no conflict). Breaking
-changes to signal format or prefix convention increment the version. Adapters note which version
+never block, the retired `[reviewer] Verified` kind (tolerated by `pr-poll`), and `--wait` waiters
+(their own output, `PENDING` / `NONE` / `WATCHER_RUNNING <pid>`, never a signal line). Later in
+0.2, additive (a new signal, no change to existing signal lines): `pr-poll`'s `MERGE_CONFLICT`
+(and `MERGE_READY` now also requires no conflict), and `pr-watch`'s standing `MERGE_CONFLICT:<n>`
+on a labelled PR (the existing signal line, on a new occasion). A reviewer prompt that predates
+the standing case handles it the old way, posting "rebase on main" every cycle while the label
+stays on, so the reviewer restarts with the script that emits it. Breaking changes to signal format or prefix convention increment
+the version. Adapters note which version
 they implement. `scripts/test/run.mjs` holds the contract tests for the three scripts.

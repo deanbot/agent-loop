@@ -58,7 +58,7 @@ If the operator sends a message containing "stop" at any point during the cycle:
 2. Notify: "Stop sentinel written. Loop will exit on next invocation if it fires within 10 minutes. If using external cron, also pause it."
 3. Exit without re-invoking this skill.
 
-Run `node scripts/pr-watch.mjs --repo <repo> $ARGUMENTS` from the repo root (plus `--reviewer <clone>` with several reviewers, below) and handle each signal below.
+Run `node scripts/pr-watch.mjs --repo <repo> --needs-operator-label <needs-operator-label> $ARGUMENTS` from the repo root (plus `--reviewer <clone>` with several reviewers, below) and handle each signal below.
 
 **Several reviewers** (only with `reviewers` above 1 in the block; one reviewer ignores this): pass `--reviewer <clone>` (the base name of your working directory) to every `pr-watch.mjs` run; it then reports only PRs you hold or nobody holds and keeps its state per reviewer. Before work that ends in a post on a PR (not while it still waits for `[qa] PASS`), claim it, one command each: (1) `node scripts/pr-watch.mjs --repo <repo> --reviewer <clone> --check-claim <n>` → `MINE` go on, `THEIRS <clone>` drop it; (2) `OPEN` → `gh pr comment <n> --repo <repo> --body "[reviewer] Reviewing (<clone>)"` and note the id after `#issuecomment-` in the printed URL; (3) check again: `MINE` go on, anything else → `gh api -X DELETE "repos/<repo>/issues/comments/<id>"` and drop it. The holder keeps the PR's rechecks and follow-ups; a holder silent for 30 minutes after a push loses it to the next claim (spec: "Claim comments").
 
@@ -79,7 +79,7 @@ No activity. Wait ~120 seconds before next cycle.
 The operator merged or closed the PR; nothing to post. Note it and forget the PR.
 
 **`MERGE_CONFLICT:<n>`**
-Post: `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main before review."`
+Do not review the diff. The PR carries `<needs-operator-label>` (it was ready and `main` moved under it; reported whoever owns the PR) → `gh pr edit <n> --repo <repo> --remove-label <needs-operator-label>` unless a question is still open, and, unless your newest `[reviewer]` comment already says so, post `gh pr comment <n> --repo <repo> --body "[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready to merge; <needs-operator-label> is off. Whoever owns it: bring main in, resolve, push."` (the signal repeats while the label stays on, so post once). Otherwise (new commits on a conflicting branch): `gh pr comment <n> --repo <repo> --body "[reviewer] Merge conflicts — rebase on main before review."`
 Wait ~120 seconds before next cycle.
 
 **`REVIEW:<n>`**

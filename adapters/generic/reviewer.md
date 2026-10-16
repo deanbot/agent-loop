@@ -34,15 +34,20 @@ revoke that (below), nothing else.
 
 ## One cycle
 
-`node scripts/pr-watch.mjs --repo <repo> [--skip n,n]` (plus `--reviewer <clone>` with several
-reviewers, below). Then:
+`node scripts/pr-watch.mjs --repo <repo> --needs-operator-label <needs-operator-label> [--skip
+n,n]` (plus `--reviewer <clone>` with several reviewers, below). Then:
 
 **`NONE`** → wait ~120s.
 
 **`CLOSED:<n>`** → the operator merged or closed it; nothing to post. Note it and forget the PR.
 
-**`MERGE_CONFLICT:<n>`** → `gh pr comment <n> --body "[reviewer] Merge conflicts — rebase on main
-before review."` Wait ~120s.
+**`MERGE_CONFLICT:<n>`** → do not review the diff. When the PR carries the `needs-operator-label`
+(it was ready and `main` moved under it; reported whoever owns the PR), remove the label unless a
+question is still open and, unless your newest `[reviewer]` comment already says so, post
+`[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready to merge; the
+label is off. Whoever owns it: bring main in, resolve, push.` (the signal repeats while the label
+stays on, so post once). Otherwise post `[reviewer] Merge conflicts — rebase on main before
+review.` Wait ~120s.
 
 **`REVIEW:<n>`** → with `qa-gate: on`, require a `[qa] PASS` newer than the head commit; none →
 post nothing, wait ~120s. Otherwise the full review:

@@ -32,13 +32,15 @@ not ready whatever the verdicts say.
 1. `gh pr edit <PR> --repo <repo> --remove-label <needs-operator-label>` unless a question is still
    open: the operator cannot merge a conflicting PR.
 2. `git fetch origin`, then bring `main` in the way the project's conventions say. With no
-   convention, `git merge origin/main`: a merge needs no force-push. A rebase needs `git push
-   --force-with-lease`, and only on this PR's branch.
+   convention, `git merge --no-edit origin/main`: a merge needs no force-push. A rebase needs
+   `git push --force-with-lease`, and only on this PR's branch.
 3. Resolve each conflict by reading both sides: keep what `main` added and what this PR adds.
    When a resolution needs a decision you cannot make (the two changes contradict each other),
    it is a question for the operator (SKILL.md, "Asking the operator"), not a guess.
-4. Run `quality-gates`, push once (with any other fix from this cycle), and post `[executor]
-   Pushed fix: resolved conflicts with main in <files>; <anything notable>`.
+4. `git add` the resolved files and commit the merge with `git commit --no-edit` (or `-m
+   "<message>"`), never a bare `git commit`, which opens an editor and stalls the loop. Run
+   `quality-gates`, push once (with any other fix from this cycle), and post `[executor] Pushed
+   fix: resolved conflicts with main in <files>; <anything notable>`.
 
 The push makes every verdict stale. The reviewer's watch sees the new head and reviews it, and
 `MERGE_READY` comes back with its next LGTM. When GitHub has not yet computed whether the PR

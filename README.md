@@ -67,7 +67,9 @@ pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NON
 
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green + no conflict with `main` (+
 `[qa] PASS` with `qa-gate: on`). The operator merges. A PR that falls into conflict after its
-LGTM (another PR merged) gets `MERGE_CONFLICT` instead, and the executor resolves it.
+LGTM (another PR merged) gets `MERGE_CONFLICT` instead, and the executor resolves it. With no
+executor polling it, the reviewer's watch reports the conflict on a PR labelled `needs-operator`,
+and the reviewer takes the label off and says so on the PR.
 
 Each script runs once and exits. With `--wait` it becomes a waiter that polls in place and exits once
 a run would have news, so an agent can sleep until something happens instead of polling on a timer.
@@ -110,7 +112,10 @@ second `⚠` line says so when they differ from that role's entry here (a role w
 gets no `⚠` line). It never stops a loop.
 
 Make one clone per role (for example `proj`, `proj-exec`, `proj-review`) and run
-`/agent-loop:setup <operator|executor|reviewer|qa>` inside each. It creates the labels, ignores
+`/agent-loop:setup <operator|executor|reviewer|qa>` inside each. A clone can live anywhere (next to
+your checkout or in a separate tree such as `~/agents/<owner>/<clone>`); its folder name is how
+claims and reviewer state name it, so keep that name unique per repo and don't rename a clone
+while it holds a claim. It creates the labels, ignores
 `.agent-loop/` and `.claude/settings.local.json`, writes the clone's role marker (which makes the
 plugin's hook refuse `gh pr merge` and pushes to `main` there), and adds the role's permission
 rules. Needs `gh` 2.43+ and Node 18+.

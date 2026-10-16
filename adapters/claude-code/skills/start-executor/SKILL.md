@@ -28,6 +28,10 @@ That includes a start that resumes work or stops at a check below. `/model` and 
 default for every new session, so a loop restarted after the operator switched another one can
 come up on the wrong model. A wakeup is a continuation, not a start: it does not print the line.
 
+**Your second line names the track:** `Track: <milestone>` when `$ARGUMENTS` holds `--milestone
+"<milestone>"`, else `Track: all milestones`. A start without the filter the operator meant (a
+bare start that ran before the intended command) is then seen at once.
+
 1. Read `AGENTS.md` in the working directory. It must contain a `## Agent loop` block; if it does
    not, stop and say so (the project owner adds it; `/agent-loop:setup` prints the template).
    Read the whole file: the rest of it is the project's conventions, and you follow them.
@@ -39,10 +43,10 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
    **Model check:** if the block has `models:` (comma-separated `role=model[/effort]`, e.g.
    `models: executor=opus, reviewer=opus/high`) with an `executor` entry, and that entry differs
    from this session (its model word is not in your model's name, or it names an effort and
-   yours differs), print a second line: `⚠ AGENTS.md expects <entry> for the executor; this
-   session runs <model> · ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is
-   wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `executor` entry, or
-   an entry that matches → print nothing more: there is nothing to report.
+   yours differs), print a line after the Track line: `⚠ AGENTS.md expects <entry> for the
+   executor; this session runs <model> · ${CLAUDE_EFFORT}. Restart it with /model and /effort if
+   that is wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `executor`
+   entry, or an entry that matches → print nothing more: there is nothing to report.
 3. If `.agent-loop/role` exists and does not say `executor`, stop: this clone hosts another role.
 4. **See where this clone is before touching `main`.** `git branch --show-current` and `git
    status --porcelain`. On `main` with a clean tree → `git pull` (an issue you hold that
@@ -98,7 +102,7 @@ keep the working tree. If an open PR has `Closes #<N>` (the lookup below), orien
 the loop. Otherwise read [reference/implement.md](reference/implement.md) from §2 (the issue and
 every comment), then see what is done: `git log --oneline main..HEAD`, `git status --porcelain`,
 `git diff HEAD`. Continue from there; do not re-claim and do not start over. Say `Resuming #<N> on
-<branch>` in the line after the model line (and the `⚠` line, when there is one).
+<branch>` in the line after the model and Track lines (and the `⚠` line, when there is one).
 
 `$ARGUMENTS` may hold `--milestone "<title>"`: take it out first and keep it as `<milestone>`
 for the whole session (it decides every later pick). What remains, `<arg>`, is a PR number, an
