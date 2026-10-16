@@ -76,20 +76,22 @@ operator's results, such as measurements: ask for them once. On `MERGE_READY` ad
 - Issue number → look for an open PR whose body has `Closes #N` (`gh pr list --state open
   --limit 100 --json number,body`; treat a missing body as empty); found → orient and poll; not
   found → implement.
-- Nothing → pick next: `gh issue list --state open --limit 200 --json number,labels,body`, then the
-  lowest-numbered issue without `in-progress-label` or `blocked-label` whose `Depends on #…`
-  issues are all closed.
+- Nothing → pick next with `node scripts/pick-next.mjs --repo <repo> --in-progress-label <l>
+  --blocked-label <l>` (plus `--milestone "<title>"`, plus `--skip <n,n>` for issues this run
+  turned down: author check failed, claim lost). Run it every time, after a wait too; never pick
+  from a list you remember, since issues are filed while you wait. It prints `ISSUE:<n>` (the
+  lowest-numbered open issue without either label whose `Depends on #…` issues are all closed),
+  `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE` (nothing to pick: stop). A failed run
+  (exit non-zero, `pick-next: …` on stderr) → never pick by hand; report it, wait ~5 minutes, run
+  it again.
 
 **Milestone track.** The input may also name a milestone (`--milestone "<title>"`). Keep it for
-the whole run and pass it again on every re-invocation. Pick next then lists only that milestone
-(`gh issue list --state open --milestone "<title>" --limit 200 --json number,labels,body`), with
-the same rules. Open issues but none startable → do not stop and do not move on. The blocker is
-the dependency the first open issue waits on, or that issue itself when another executor claimed
-it. If it has an open PR (`Closes #<blocker>`), it is in review: report `<title>: waiting on
-#<blocker> (PR #<pr> in review)` and wait ~10 minutes. If not, it is unstarted or still being
-built: report `<title>: waiting on #<blocker> (no PR yet)` and wait ~30 minutes. Then pick again. No open issues in it → the next
-milestone is the first open one numbered after it; none → stop. List them with:
-`gh api "repos/<repo>/milestones?state=all&per_page=100" --jq 'sort_by(.number) | .[] | "\(.number) \(.state) \(.title)"'`
+the whole run and pass it again on every re-invocation, to the script as well. `WAIT:<blocker>
+PR:<n>` → open issues, none startable: do not stop and do not move on; the blocker is in review,
+so report `<title>: waiting on #<blocker> (PR #<n> in review)` and wait ~10 minutes. `PR:none` →
+unstarted or still being built: report `<title>: waiting on #<blocker> (no PR yet)` and wait ~30
+minutes. Then run the script again. `MOVE_ON <title>` → the milestone has no open issues; the
+rest of the line is the next one: say so and run the script again.
 
 ## Implement
 

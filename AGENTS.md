@@ -26,10 +26,14 @@ Three layers. Boundaries are strict.
 - `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]`.
   Signals then content blocks, exits.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
-- `scripts/lib/wait.mjs` — shared driver. Every script also takes `--wait [secs] [--max secs]`: a
+- `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
+  [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n]`. Prints `ISSUE:<n>`,
+  `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE`, exits. No state and no `--wait`: it
+  lists fresh every call, so an issue filed while the executor waited is seen.
+- `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a
   waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:
   "Waiting for events").
-- `scripts/test/run.mjs` — contract tests for all three against a fake `gh`
+- `scripts/test/run.mjs` — contract tests for all four against a fake `gh`
   (`scripts/test/fake-gh.mjs`). Run `node scripts/test/run.mjs` before any script change lands.
 - `spec/SPEC.md` — the protocol contract: roles, config keys, signals, merge policy, collision
   avoidance, state. Version 0.2.

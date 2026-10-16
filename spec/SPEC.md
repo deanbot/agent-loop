@@ -355,8 +355,24 @@ waiting on a dependency), the executor waits and picks again later; it does not 
 not move on. The wait follows the blocker (the dependency the first open issue waits on, or that
 issue when another executor claimed it): about 10 minutes when the blocker has an open PR, which
 is in review, and about 30 minutes when it has none yet, since it is hours away. The status line
-names the blocker and which case applies. Only when the milestone has **no open issues** does it move to the next open
-milestone by milestone number, after the current one. With no milestone, picking is as above.
+names the blocker and which case applies. Only when the milestone has **no open issues** does it
+move to the next open milestone by milestone number, after the current one. With no milestone,
+picking is as above.
+
+**`pick-next.mjs`** makes the pick deterministic: `--repo owner/repo [--milestone <title>]
+[--in-progress-label <l>] [--blocked-label <l>] [--skip n,n]` lists the open issues fresh, applies
+the rules above and prints one line: `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>` (milestone only:
+none startable; the PR is the open one whose body says `Closes #<blocker>`), `MOVE_ON <title>`
+(milestone only: no open issues; the rest of the line is the next open milestone) or `NONE`
+(nothing to pick). `--skip` names issues the executor turned down this session (author check,
+lost claim; `none` is an empty list). A milestone whose only open issues are skipped is not empty:
+the pick is `WAIT` on the lowest of them, so an executor that lost a claim keeps its track until
+the winner's issue merges. Dependencies are the `#n` list right after "Depends on" (`#a, #b`,
+`#a, #b, and #c`, `**Depends on:** #a`). Adapters run it for every pick, a wake after a wait included, so an issue filed while
+the executor waited is never missed by reasoning from a list it remembers. A failed `gh` call
+exits 2 with one `pick-next: …` line on stderr and nothing on stdout; the executor retries later
+and never picks by hand. A dependency's state is read from the REST issues endpoint, so a merged
+PR named as a dependency counts as closed.
 
 ### Claim comments
 
@@ -528,4 +544,5 @@ on a labelled PR (the existing signal line, on a new occasion). A reviewer promp
 the standing case handles it the old way, posting "rebase on main" every cycle while the label
 stays on, so the reviewer restarts with the script that emits it. Breaking changes to signal
 format or prefix convention increment the version. Adapters note which version they implement.
-`scripts/test/run.mjs` holds the contract tests for the three scripts.
+`scripts/test/run.mjs` holds the contract tests for the scripts. `pick-next.mjs` (later in 0.2) is
+a helper, not a signal source: its output is the executor's pick, not a signal line.

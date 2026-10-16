@@ -65,6 +65,9 @@ pr-watch.mjs  (reviewer)  →  REVIEW:<n>, REVIEW_COMMENTS:<n>, MERGE_CONFLICT:<
 pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NONE
 ```
 
+A fourth, `pick-next.mjs`, chooses the executor's next issue (`ISSUE:<n>`, `WAIT:<blocker>
+PR:<n|none>`, `MOVE_ON <milestone>`, `NONE`), so a pick always starts from a fresh listing.
+
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green + no conflict with `main` (+
 `[qa] PASS` with `qa-gate: on`). The operator merges. A PR that falls into conflict after its
 LGTM (another PR merged) gets `MERGE_CONFLICT` instead, and the executor resolves it. With no

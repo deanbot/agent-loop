@@ -159,11 +159,9 @@ Signal handling:
 
 ## Pick next item (step 8)
 
-`gh issue list --state open --repo <repo> --limit 200 --json number,title,labels --jq 'sort_by(.number) | map(select(.labels | map(.name) | (index("<in-progress-label>") | not) and (index("<blocked-label>") | not))) | first'`
-
-Take the first result whose dependencies (`Depends on #a, #b` in the body) are all closed (`gh issue view <a> --repo <repo> --json state`); skip the others. If one is found: restart from detect input type with that issue number. If none: STOP and notify user.
-
-**With `<milestone>`**, list that milestone instead: `gh issue list --state open --repo <repo> --milestone "<milestone>" --limit 200 --json number,title,labels --jq 'sort_by(.number)'`. Candidates are the issues without `<in-progress-label>` or `<blocked-label>` whose dependencies are all closed.
-- A candidate → restart from detect input type with that issue number.
-- Open issues but none startable → do not stop and do not move on: the track waits for its blocker to merge. The blocker is the dependency the first open issue waits on, or that issue itself when another executor has claimed it. Look for its PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] | select((.body // "") | test("Closes #<blocker>([^0-9]|$)"; "i"))] | first | .number'`. A PR (in review, merges soon) → report `<milestone>: waiting on #<blocker> (PR #<pr> in review)` and wait ~10 minutes. None (unstarted or still being built) → report `<milestone>: waiting on #<blocker> (no PR yet)` and wait ~30 minutes. Then re-invoke with the same `--milestone`.
-- No open issues in the milestone → move to the next one: `gh api "repos/<repo>/milestones?state=all&per_page=100" --jq 'sort_by(.number) | .[] | "\(.number) \(.state) \(.title)"'`; the new `<milestone>` is the first `open` one numbered after the current one. None → STOP and notify user.
+Run the script every time, a re-invocation after a wait included; never pick from a list you remember (issues are filed while you wait): `node scripts/pick-next.mjs --repo <repo> --in-progress-label <in-progress-label> --blocked-label <blocked-label>`, plus `--milestone "<milestone>"` when you have one, plus `--skip <n,n,…>` for issues this session turned down (author check failed, claim lost). It prints one line:
+- `ISSUE:<n>` → restart from detect input type with that issue number. If the claim step turns it down, add it to the skip list and run the script again.
+- `WAIT:<blocker> PR:<n>` (milestone only) → do not stop and do not move on: report `<milestone>: waiting on #<blocker> (PR #<n> in review)` and wait ~10 minutes. `WAIT:<blocker> PR:none` → report `<milestone>: waiting on #<blocker> (no PR yet)` and wait ~30 minutes. Then re-invoke with the same `--milestone` (and skip list), which runs the script again.
+- `MOVE_ON <title>` → the rest of the line is the new `<milestone>`; say so and run the script again.
+- `NONE` → nothing to pick: STOP and notify user.
+- A failed run (exit non-zero, a `pick-next: …` line on stderr) → never pick by hand from what you remember; report the failure, wait ~5 minutes and re-invoke, which runs the script again.
