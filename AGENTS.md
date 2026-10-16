@@ -18,7 +18,9 @@ Three layers. Boundaries are strict.
 `scripts/` and `spec/` only. No tool names, no tool-specific API calls, no scheduling primitives
 (ScheduleWakeup, sleep, cron). If it can't run in a shell with Node.js, it doesn't belong here.
 
-- `scripts/pr-watch.mjs` — reviewer signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
+- `scripts/pr-watch.mjs` — reviewer signal source. `--repo owner/repo [--skip n,n] [--reviewer
+  <clone>]`. One line, exits. With `--reviewer` (several reviewers) it honours review claims and
+  keeps state per reviewer; `--check-claim <n>` prints who holds a PR.
 - `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]`.
   Signals then content blocks, exits.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.

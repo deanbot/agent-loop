@@ -48,6 +48,7 @@ is the project's conventions, which the agents follow.
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); a loop whose model or effort differs says so in its first status line and runs anyway |
+| `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
 
 Every loop's first status line names its role, model and effort (`Reviewer · Opus 5.5 · high`)
 where the tool exposes them, so a loop that came up on another session's saved default is seen at
@@ -351,6 +352,21 @@ is live when it was posted no more than 10 minutes before the executor's own (Gi
 label, which the executor checks first; an older one that does not is from a claim since released
 (merged, parked, stopped) or a claimer that crashed before labelling.
 
+Reviewer (only with `reviewers` above 1): `[reviewer] Reviewing (<clone>)` on the PR, posted
+before the first work that ends in a post on it; there is no separate marker, the claim persists.
+Every reviewer posts as one account, so a post cannot be traced to a clone, and liveness comes from
+the PR's activity. Walk the claims in id order: the first holds; a later claim by another clone
+takes over only if the holder was **stale** at that moment, and a takeover is permanent (later
+posts by the new holder never revive the old claim). A holder is stale when no non-claim
+`[reviewer]` comment has appeared for 30 minutes since the later of the head commit and its claim.
+A holder that is stale now holds nothing: the PR is open to the next claim. `pr-watch.mjs
+--reviewer <clone>` computes this (and `--check-claim <n>` prints `MINE`, `THEIRS <clone>` or
+`OPEN`), reports only PRs the reviewer holds or nobody holds, and drops another's PR from its state
+without a `CLOSED`. The holder handles rechecks and follow-ups, so findings and rechecks come from
+one voice. Claim comments are never a review: `pr-poll.mjs` and `pr-watch.mjs` ignore them. Commit
+times are when a commit was made, not pushed, so a late push of old commits can make a working
+holder look stale; the cost is a second reviewer taking over.
+
 ### Executor question / blocked protocol
 
 A posted question is a **stop**: either a safe default exists (take it, record the assumption in
@@ -454,7 +470,7 @@ refuse to run in a clone marked for another role.
 
 | Script | Default state path |
 |---|---|
-| `pr-watch.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-state.json` |
+| `pr-watch.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-state.json`; with `--reviewer <clone>`, `<owner>-<repo>-pr-state-<clone>.json` |
 | `pr-poll.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json` (one per PR) |
 | `pr-qa.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json` |
 
