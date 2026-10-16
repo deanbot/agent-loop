@@ -13,7 +13,20 @@
  * newest post was already read (the reviewer re-reads the thread immediately before posting).
  *
  * Usage:
- *   node scripts/pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--wait [secs] [--max secs]]
+ *   node scripts/pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>]]
+ *                             [--wait [secs] [--max secs]]
+ *   node scripts/pr-watch.mjs --repo owner/repo --reviewer <clone> --check-claim <n> [--stale-after <secs>]
+ *
+ * Several reviewers (--reviewer <clone>): each reviewer claims a PR with a "[reviewer] Reviewing
+ * (<clone>)" comment before its first post on it, and handles only the PRs it holds or that nobody
+ * holds. The holder: claims in id order, the first one holds; a later claim by another clone takes
+ * over only if the holder was stale at that moment (no non-claim [reviewer] comment since the later
+ * of the head commit and the holder's claim, for longer than --stale-after, default 1800s). A
+ * holder that is stale now holds nothing: the PR is open to every reviewer. A PR another reviewer
+ * holds yields no signal and is dropped from this reviewer's state (no CLOSED for it). State is per
+ * reviewer, <owner>-<repo>-pr-state-<clone>.json. --check-claim <n> prints MINE, THEIRS <clone> or
+ * OPEN for one PR and exits without touching state. Without --reviewer nothing here applies.
+ * Claim comments never count as a reviewer post.
  *
  * Output — one line, then exits (with --wait: the first line that is news, see lib/wait.mjs):
  *   NONE <timestamp>              no PRs changed since last run
@@ -35,11 +48,13 @@
  */
 
 import { readFileSync, mkdirSync } from 'fs'
+import { execSync } from 'child_process'
 import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
-const USAGE = 'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--wait [secs] [--max secs]]'
+const USAGE =
+  'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--wait [secs] [--max secs]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -55,9 +70,20 @@ function ghApiAll(gh, path) {
   return pages.flat()
 }
 
+const reviewer = arg('--reviewer')
+if (process.argv.includes('--reviewer') && !/^[A-Za-z0-9._-]+$/.test(reviewer ?? ''))
+  usageError(USAGE, `--reviewer: expected a clone name, got "${reviewer ?? ''}"`)
+const checkClaim = arg('--check-claim')
+if (process.argv.includes('--check-claim') && (!reviewer || !/^\d+$/.test(checkClaim ?? '')))
+  usageError(USAGE, '--check-claim needs a PR number and --reviewer')
+const staleArg = arg('--stale-after')
+if (process.argv.includes('--stale-after') && !/^\d+$/.test(staleArg ?? ''))
+  usageError(USAGE, `--stale-after: expected seconds, got "${staleArg ?? ''}"`)
+const STALE_MS = Number(staleArg ?? 1800) * 1000
+
 const repoSlug = repo.replace('/', '-')
 const STATE_DIR = path.join(homedir(), '.agent-loop', 'state')
-const STATE_FILE = path.join(STATE_DIR, `${repoSlug}-pr-state.json`)
+const STATE_FILE = path.join(STATE_DIR, reviewer ? `${repoSlug}-pr-state-${reviewer}.json` : `${repoSlug}-pr-state.json`)
 
 mkdirSync(STATE_DIR, { recursive: true })
 
@@ -67,6 +93,36 @@ const skip = new Set(
     .filter(Boolean)
     .map(Number)
 )
+
+const CLAIM = /^\[reviewer\] Reviewing \(([^)]+)\)/
+const isClaim = (c) => CLAIM.test(c.body ?? '')
+const isReviewerPost = (c) => /^\[reviewer\]/.test(c.body ?? '') && !isClaim(c)
+
+// The clone that holds a PR, or null when nobody does (see the header).
+function claimHolder(comments, commits, now) {
+  const time = (c) => Date.parse(c.created_at)
+  const posts = comments.filter(isReviewerPost).map(time)
+  const commitTimes = commits.map((c) => Date.parse(c.commit?.committer?.date)).filter((t) => !Number.isNaN(t))
+  const headAt = (at) => Math.max(-Infinity, ...commitTimes.filter((t) => t <= at))
+  const stale = (claim, at) => {
+    const start = Math.max(headAt(at), time(claim))
+    return !posts.some((t) => t > start && t <= at) && at - start > STALE_MS
+  }
+  let holder = null
+  for (const c of comments.filter(isClaim).sort((a, b) => a.id - b.id)) {
+    const clone = c.body.match(CLAIM)[1]
+    if (!holder || clone === holder.clone || stale(holder.claim, time(c))) holder = { clone, claim: c }
+  }
+  return holder && !stale(holder.claim, now) ? holder.clone : null
+}
+
+function holderOf(gh, number) {
+  return claimHolder(
+    ghApiAll(gh, `repos/${repo}/issues/${number}/comments`),
+    ghApiAll(gh, `repos/${repo}/pulls/${number}/commits`),
+    Date.now()
+  )
+}
 
 function pass({ gh, save }) {
   let state = {}
@@ -97,6 +153,14 @@ function pass({ gh, save }) {
       continue
     }
 
+    if (reviewer) {
+      const holder = holderOf(gh, number)
+      if (holder && holder !== reviewer) {
+        delete state[number]
+        continue
+      }
+    }
+
     if (!state[number]) state[number] = { sha: null, lastComment: null }
     const entry = state[number]
     const isNew = entry.sha === null
@@ -123,7 +187,7 @@ function pass({ gh, save }) {
       // No new commits — check for new non-reviewer comments (timeline + inline review)
       const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
       const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${number}/comments`)
-      const hasReviewerPost = comments.some((c) => /^\[reviewer\]/.test(c.body ?? ''))
+      const hasReviewerPost = comments.some(isReviewerPost)
       if (!hasReviewerPost) {
         // Reviewer has never posted — PR needs initial review regardless of session
         if (mergeable === 'CONFLICTING') {
@@ -144,7 +208,7 @@ function pass({ gh, save }) {
         // comments stay news whenever unseen: one landing between that re-read and the post would
         // otherwise be lost. Timeline ids are one sequence; inline comments have their own, so they
         // compare by time (a tie, or no timestamp, counts as news).
-        const own = [...comments, ...inlineComments].filter((c) => /^\[reviewer\]/.test(c.body ?? ''))
+        const own = [...comments, ...inlineComments].filter(isReviewerPost)
         const ownLastId = Math.max(0, ...own.filter((c) => comments.includes(c)).map((c) => c.id))
         const ownLastAt = Math.max(-Infinity, ...own.map((c) => Date.parse(c.created_at)).filter((t) => !Number.isNaN(t)))
         const isExecutor = (c) => /^\[executor\]/.test(c.body ?? '')
@@ -203,4 +267,9 @@ function pass({ gh, save }) {
   return signals.length === 0 ? `NONE ${new Date().toISOString()}\n` : signals.join(' ') + '\n'
 }
 
-await runSignalScript({ argv: process.argv, usage: USAGE, stateFile: STATE_FILE, pass })
+if (checkClaim) {
+  const holder = holderOf((cmd) => execSync(cmd, { encoding: 'utf8' }), checkClaim)
+  process.stdout.write(holder === null ? 'OPEN\n' : holder === reviewer ? 'MINE\n' : `THEIRS ${holder}\n`)
+} else {
+  await runSignalScript({ argv: process.argv, usage: USAGE, stateFile: STATE_FILE, pass })
+}

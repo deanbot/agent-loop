@@ -34,7 +34,8 @@
  * A role's verdict is its NEWEST [role] comment posted after the last commit: a later finding revokes
  * an earlier LGTM/PASS without a push. Reviewer comment kinds by prefix: "[reviewer] LGTM" (verdict),
  * "[reviewer] Question" (for the operator; not actionable for the executor), anything else is a
- * finding. "[reviewer] Verified" (a 0.2 draft kind) is tolerated the same way. CI is evaluated here only: if the checks cannot be read (auth, network, old gh), MERGE_READY
+ * finding. "[reviewer] Verified" (a 0.2 draft kind) is tolerated the same way; a "[reviewer] Reviewing
+ * (<clone>)" claim is ignored. CI is evaluated here only: if the checks cannot be read (auth, network, old gh), MERGE_READY
  * is withheld and the error is passed through on stderr; "no checks reported" counts as no CI.
  *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json across sessions, one file
@@ -103,7 +104,11 @@ function pass({ gh, save, dry }) {
   const headSha = pr.head?.sha ?? null
 
   // Fetch all three signal sources via REST API
-  const issueComments = ghApiAll(gh, `repos/${repo}/issues/${prNumber}/comments`)
+  // A reviewer's "[reviewer] Reviewing (<clone>)" claim (several reviewers, pr-watch.mjs) is neither a
+  // verdict nor a finding: nothing for the executor, so it is dropped before anything reads the thread.
+  const issueComments = ghApiAll(gh, `repos/${repo}/issues/${prNumber}/comments`).filter(
+    (c) => !/^\[reviewer\] Reviewing \(/.test(c.body ?? '')
+  )
   const reviewSubmissions = ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/reviews`)
   const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/comments`)
 

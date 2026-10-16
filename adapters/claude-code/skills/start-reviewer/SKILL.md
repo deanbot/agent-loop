@@ -34,8 +34,10 @@ you judge the executor's product calls yourself and do not hand them back as que
 1. Read `AGENTS.md` in the working directory. It must contain a `## Agent loop` block; if not,
    stop and say so. Read the whole file: the project's rules are part of what you review against.
 2. From the block take `repo` (owner/repo), `qa-gate` (`on` or `off`, default `off`),
-   `needs-operator-label` (default `needs-operator`) and `in-progress-label` (default
-   `in-progress`).
+   `needs-operator-label` (default `needs-operator`), `in-progress-label` (default
+   `in-progress`) and `reviewers` (default `1`). With `reviewers` above 1, read "Several
+   reviewers" below: `<as>` is `--reviewer <clone>` (`<clone>` the base name of your working
+   directory); with one reviewer `<as>` is empty and nothing there applies.
 3. If `.agent-loop/role` exists and does not say `reviewer`, stop: this clone hosts another role.
 4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it through to the watch script.
 5. **Say what you run on**, as the first line you print: `Reviewer · <model> · ${CLAUDE_EFFORT}`,
@@ -51,7 +53,8 @@ you judge the executor's product calls yourself and do not hand them back as que
 Rules that hold for the whole session:
 
 - **Never merge, never push.** You comment, and add or remove the `<needs-operator-label>` for
-  your own questions and on a PR no executor polls (reference/review.md), nothing else, and only
+  your own questions and on a PR no executor polls (reference/review.md), delete your own losing
+  review claim (several reviewers), nothing else, and only
   on the PR under review.
 - **No interactive prompts.** A decision you need from the operator is a standalone
   `[reviewer] Question:` comment on the PR (shape under "What you post").
@@ -75,10 +78,11 @@ error, a broken install): name it in the status line, run the cycle, but end it 
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
 again, so a failure that repeats costs one turn per five minutes, not one per second.
 
-1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> $ARGUMENTS`, in the foreground,
+1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> $ARGUMENTS`, in the foreground,
    once per cycle. One line, space-separated signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`,
    `REVIEW:<n>`, `REVIEW_COMMENTS:<n>`. You never need the waiter's own output.
-2. Handle each signal:
+2. Handle each signal. With several reviewers, a signal that leads to work and a post on a PR
+   you do not hold yet goes through the claim first ("Several reviewers").
    - **`CLOSED:<n>`** (the operator merged or closed it) → nothing to post, whatever was
      outstanding; the operator's merge is the final word. Say "PR #<n> merged or closed; dropped"
      in the status line and forget it.
@@ -106,7 +110,7 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
 5. Wait. Start the waiter with Bash `run_in_background: true`, then schedule the fallback:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> $ARGUMENTS --wait 30 --max 1500
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> $ARGUMENTS --wait 30 --max 1500
 ```
 
 ```
@@ -124,6 +128,30 @@ you have not posted on, say, while you wait for `[qa] PASS`) do not wake you aga
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
 call.** The only exit is the operator's stop. (Claude Code fires one fallback wakeup about 20
 minutes after an iteration that forgets, then ends the loop; do not rely on it.)
+
+## Several reviewers
+
+Only with `reviewers` above 1 in the block. Every reviewer posts as the same account, so a PR is
+claimed before anyone works on it, and the one who claimed it keeps it: its rechecks and
+follow-ups stay with one voice (spec: "Claim comments"). `pr-watch.mjs <as>` reports only PRs you
+hold or nobody holds, and keeps its state per reviewer.
+
+**Claim** before work that ends in a post on a PR (a full review once `qa-gate` allows it, a
+follow-up, a merge-conflict note). Do not claim a PR you would post nothing on yet, such as one
+still waiting for `[qa] PASS`. One command per call:
+
+1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> --reviewer <clone> --check-claim
+   <n>` prints `MINE`, `THEIRS <clone>` or `OPEN`. `MINE` → go on. `THEIRS` → drop the PR this
+   cycle; it is another reviewer's.
+2. `OPEN` → `gh pr comment <n> --repo <repo> --body "[reviewer] Reviewing (<clone>)"`. The number
+   after `#issuecomment-` in the URL it prints is your claim's id.
+3. Run step 1 again. `MINE` → go on. Anything else → you lost a race: `gh api -X DELETE
+   "repos/<repo>/issues/comments/<your id>"` and drop the PR.
+
+A claim lapses when its holder posts nothing for 30 minutes after a push (or after the claim);
+the PR then reads `OPEN`, the next reviewer claims it, and the takeover is permanent. The claim
+comment is not a review: the executor's poll and the watch script both ignore it. Turn
+`reviewers` above 1 only once every executor runs a version that ignores it.
 
 ## What you post
 

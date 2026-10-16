@@ -611,5 +611,100 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- several reviewers (#35)
+// Reviewers share HOME (one machine), each with --reviewer <clone>. Times are relative to now: a claim
+// goes stale after --stale-after (default 1800s) without a reviewer post.
+const ago = (min) => new Date(Date.now() - min * 60000).toISOString()
+const claimBy = (clone, at) => comment(`[reviewer] Reviewing (${clone})`, at)
+const rw = (ctx, clone, fixture, extra = []) => run(ctx, 'pr-watch.mjs', ['--repo', REPO, '--reviewer', clone, ...extra], fixture)
+const checkClaim = (ctx, clone, fixture, extra = []) => rw(ctx, clone, fixture, ['--check-claim', '7', ...extra]).trim()
+const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
+  ...BASE,
+  prs: [{ number: 7, headRefOid: sha, mergeable: 'MERGEABLE' }],
+  prView: { reviewDecision: '' },
+  commits,
+  comments,
+})
+{
+  const ctx = makeEnv()
+  const fresh = multiFx([])
+  const a0 = rw(ctx, 'rev-a', fresh)
+  const b0 = rw(ctx, 'rev-b', fresh)
+  check('reviewers: a new unclaimed PR is visible to both → REVIEW:7 each', a0.trim() === 'REVIEW:7' && b0.trim() === 'REVIEW:7', `${a0}${b0}`)
+  check('reviewers: --check-claim on an unclaimed PR → OPEN', checkClaim(ctx, 'rev-a', fresh) === 'OPEN', checkClaim(ctx, 'rev-a', fresh))
+  const claimA = claimBy('rev-a', ago(0.2))
+  const claimB = claimBy('rev-b', ago(0.1))
+  const raced = multiFx([claimA, claimB])
+  const beforeA = stateText(ctx, 'acme-widgets-pr-state-rev-a.json')
+  const beforeWait = stateText(ctx, 'acme-widgets-pr-state-rev-a-wait.json')
+  const ca = checkClaim(ctx, 'rev-a', raced)
+  const cb = checkClaim(ctx, 'rev-b', raced)
+  check('reviewers: both claim at once → the earlier claim wins (MINE / THEIRS rev-a)', ca === 'MINE' && cb === 'THEIRS rev-a', `${ca} | ${cb}`)
+  check('reviewers: --check-claim writes no state and no baseline', stateText(ctx, 'acme-widgets-pr-state-rev-a.json') === beforeA && stateText(ctx, 'acme-widgets-pr-state-rev-a-wait.json') === beforeWait, '')
+  const bLost = rw(ctx, 'rev-b', raced)
+  const held = multiFx([claimA])
+  const a1 = rw(ctx, 'rev-a', held)
+  const b1 = rw(ctx, 'rev-b', held)
+  check('reviewers: exactly one reviews it — the holder keeps REVIEW:7 (a claim is not a post), the other gets NONE', a1.trim() === 'REVIEW:7' && signals(bLost).join() === 'NONE' && signals(b1).join() === 'NONE', `${a1}${bLost}${b1}`)
+  check('reviewers: state is per reviewer, and the other reviewer drops the PR', stateText(ctx, WATCH_STATE) === null && !('7' in JSON.parse(stateText(ctx, 'acme-widgets-pr-state-rev-b.json'))), stateText(ctx, 'acme-widgets-pr-state-rev-b.json'))
+  setFixture(ctx, held)
+  const bw = await start(ctx, 'pr-watch.mjs', ['--repo', REPO, '--reviewer', 'rev-b', '--wait', '1', '--max', '2']).done
+  check('reviewers: the other reviewer\'s waiter stays quiet while the PR is held', signals(bw.out).join() === 'NONE', `${bw.out}${bw.err}`)
+  // A recheck stays with the claimant.
+  const reviewed = multiFx([claimA, comment('[reviewer] 1. empty input crashes', ago(0.05))])
+  const a2 = rw(ctx, 'rev-a', reviewed)
+  const pushed = multiFx([...reviewed.comments, comment('[executor] Pushed fix: guard empty input', ago(0.01))], [commit(ago(20)), commit(ago(0.02))], 'def456')
+  const a3 = rw(ctx, 'rev-a', pushed)
+  const b3 = rw(ctx, 'rev-b', pushed)
+  check('reviewers: after a fix push the recheck goes to the claimant (REVIEW:7) and not the other (NONE)', signals(a2).join() === 'NONE' && a3.trim() === 'REVIEW:7' && signals(b3).join() === 'NONE', `${a2}${a3}${b3}`)
+  check('reviewers: … and the other reviewer never reports CLOSED for it', signals(rw(ctx, 'rev-b', { ...pushed, prs: [] })).join() === 'NONE', '')
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // A stale claim is taken over: rev-a claimed and reviewed, the executor pushed 90 minutes ago, and
+  // no reviewer has posted since.
+  const ctx = makeEnv()
+  const claimA = claimBy('rev-a', ago(180))
+  const history = [claimA, comment('[reviewer] 1. empty input crashes', ago(170)), comment('[executor] Pushed fix', ago(89))]
+  const commits = [commit(ago(200)), commit(ago(90))]
+  const stale = multiFx(history, commits, 'def456')
+  const ca = checkClaim(ctx, 'rev-a', stale)
+  const b0 = rw(ctx, 'rev-b', stale)
+  check('takeover: a holder silent for 30 minutes after a push holds nothing → OPEN, and the other reviewer gets REVIEW:7', ca === 'OPEN' && b0.trim() === 'REVIEW:7', `${ca}\n${b0}`)
+  const taken = multiFx([...history, claimBy('rev-b', ago(0.1))], commits, 'def456')
+  const cb = checkClaim(ctx, 'rev-b', taken)
+  const ca2 = checkClaim(ctx, 'rev-a', taken)
+  const a1 = rw(ctx, 'rev-a', taken)
+  check('takeover: the new claim holds (MINE for rev-b, THEIRS rev-b for rev-a) and rev-a gets NONE', cb === 'MINE' && ca2 === 'THEIRS rev-b' && signals(a1).join() === 'NONE', `${cb} | ${ca2} | ${a1}`)
+  const after = multiFx([...taken.comments, comment('[reviewer] LGTM — recheck of def456', ago(0.05))], commits, 'def456')
+  check('takeover: after rev-b reviews, rev-a\'s old claim stays dead', checkClaim(ctx, 'rev-a', after) === 'THEIRS rev-b' && checkClaim(ctx, 'rev-b', after) === 'MINE', checkClaim(ctx, 'rev-a', after))
+  const again = multiFx([...after.comments, claimBy('rev-b', ago(0.01))], commits, 'def456')
+  check('takeover: a re-claim by the holder keeps it', checkClaim(ctx, 'rev-b', again) === 'MINE', checkClaim(ctx, 'rev-b', again))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // A waiter wakes when the holder's claim goes stale, with no state change (--stale-after 3).
+  const ctx = makeEnv()
+  const fx = multiFx([claimBy('rev-a', new Date().toISOString())], [commit(ago(20))])
+  const b0 = rw(ctx, 'rev-b', fx, ['--stale-after', '3'])
+  setFixture(ctx, fx)
+  const w = await start(ctx, 'pr-watch.mjs', ['--repo', REPO, '--reviewer', 'rev-b', '--stale-after', '3', '--wait', '1', '--max', '15']).done
+  check('takeover: the other reviewer\'s waiter returns PENDING once the claim goes stale', signals(b0).join() === 'NONE' && w.out === 'PENDING\n' && w.ms < 10000, `${b0}${w.ms}ms ${w.out}${w.err}`)
+  const bad = run(ctx, 'pr-watch.mjs', ['--repo', REPO, '--check-claim', '7'], fx)
+  const badName = run(ctx, 'pr-watch.mjs', ['--repo', REPO, '--reviewer', '../x'], fx)
+  check('reviewers: --check-claim without --reviewer, or a bad clone name → usage error, exit 1', bad.startsWith('EXIT 1') && badName.startsWith('EXIT 1'), `${bad}${badName}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // The executor's poll ignores claim comments: a claim after an LGTM is not a finding.
+  const ctx = makeEnv()
+  poll(ctx, BASE)
+  const fx = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z')), comment('[reviewer] Reviewing (rev-b)', T('2026-01-01T12:05:00Z'))] }
+  const first = poll(ctx, fx)
+  const second = poll(ctx, fx)
+  check('poll: a [reviewer] Reviewing claim after an LGTM leaves MERGE_READY and is never surfaced', signals(first).includes('MERGE_READY') && !first.includes('Reviewing') && second.trim() === 'MERGE_READY', `${first}---\n${second}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 console.log(`\n${passes} passed, ${failures} failed`)
 process.exit(failures ? 1 : 0)

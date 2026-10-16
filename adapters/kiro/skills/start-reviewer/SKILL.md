@@ -24,6 +24,7 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `repo` — the GitHub repo (owner/repo)
 - `qa-gate` — `on` or `off` (default `off`). With `off` (the default) there is no QA agent: you verify the acceptance criteria yourself (below). With `on`, wait for `[qa] PASS` before reviewing code.
 - `needs-operator-label` — label on a PR while it waits on the operator (default: `needs-operator`)
+- `reviewers` — how many reviewer loops run (default: `1`); above 1, see "Several reviewers"
 - `in-progress-label` — the executor's claim label (default: `in-progress`); an issue without it has no executor polling its PR
 
 **First line you print:** `Reviewer · <model> · <effort>`, as far as you know them, so a loop that came up on the wrong model is seen at once. If the `## Agent loop` block has `models:` (comma-separated `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) and its `reviewer` entry does not match, add `⚠ AGENTS.md expects <entry> for the reviewer; this session runs <model>.` and carry on: a mismatch never stops the loop.
@@ -58,7 +59,9 @@ If the operator sends a message containing "stop" at any point during the cycle:
 2. Notify: "Stop sentinel written. Loop will exit on next invocation if it fires within 10 minutes. If using external cron, also pause it."
 3. Exit without re-invoking this skill.
 
-Run `node scripts/pr-watch.mjs --repo <repo> $ARGUMENTS` from the repo root and handle each signal below.
+Run `node scripts/pr-watch.mjs --repo <repo> $ARGUMENTS` from the repo root (plus `--reviewer <clone>` with several reviewers, below) and handle each signal below.
+
+**Several reviewers** (only with `reviewers` above 1 in the block; one reviewer ignores this): pass `--reviewer <clone>` (the base name of your working directory) to every `pr-watch.mjs` run; it then reports only PRs you hold or nobody holds and keeps its state per reviewer. Before work that ends in a post on a PR (not while it still waits for `[qa] PASS`), claim it, one command each: (1) `node scripts/pr-watch.mjs --repo <repo> --reviewer <clone> --check-claim <n>` → `MINE` go on, `THEIRS <clone>` drop it; (2) `OPEN` → `gh pr comment <n> --repo <repo> --body "[reviewer] Reviewing (<clone>)"` and note the id after `#issuecomment-` in the printed URL; (3) check again: `MINE` go on, anything else → `gh api -X DELETE "repos/<repo>/issues/comments/<id>"` and drop it. The holder keeps the PR's rechecks and follow-ups; a holder silent for 30 minutes after a push loses it to the next claim (spec: "Claim comments").
 
 **After handling any signal (including NONE), wait before the next cycle:**
 - After posting findings, a clarification or a question: wait ~60 seconds (the
