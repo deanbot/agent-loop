@@ -24,6 +24,7 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `repo` — the GitHub repo (owner/repo)
 - `qa-gate` — `on` or `off` (default `off`). With `off` (the default) there is no QA agent: you verify the acceptance criteria yourself (below). With `on`, wait for `[qa] PASS` before reviewing code.
 - `needs-operator-label` — label on a PR while it waits on the operator (default: `needs-operator`)
+- `gate` — optional: the command that stands in for CI on a PR that has none (below, "Gate")
 - `reviewers` — how many reviewer loops run (default: `1`); above 1, see "Several reviewers"
 
 **First line you print, on every start** (including one that resumes work or stops at a check), before any other output: `Reviewer · <model> · <effort>`, as far as you know them, so a loop that came up on the wrong model is seen at once. If the `## Agent loop` block has `models:` (comma-separated `role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) with a `reviewer` entry, and that entry differs from this session (its model word is not in your model's name, or it names an effort and yours differs), add `⚠ AGENTS.md expects <entry> for the reviewer; this session runs <model>.` and carry on: a mismatch never stops the loop. No `models:`, no `reviewer` entry, or an entry that matches → print nothing more.
@@ -84,6 +85,8 @@ Wait ~120 seconds before next cycle.
 
 **`REVIEW:<n>`**
 **Acceptance criteria first.** With `qa-gate: off`: read the linked issue (`Closes #M` in this PR's body; `gh issue view <M> --repo <repo> --comments`) and, for each acceptance criterion, find the test that asserts it and confirm CI runs that test (a test outside the CI gate's scope is a dead test, not evidence), or, for a criterion only a human can check, exact steps in the PR body. The executor's PR-body table is a pointer, not proof: open the cited tests. Missing evidence is your first finding; post `[reviewer] LGTM` when every criterion a test can prove has one. Criteria checked by hand never hold it back: list them in the LGTM under "Before you merge" with their steps, and the operator confirms by a comment or by merging. The exception is a PR that must record the operator's results, such as measurements: that criterion is missing until they are in the PR. Back code findings with evidence you produced (run the project's tests on a probe, try adversarial input); drop anything you cannot demonstrate. Do not relay CI status or echo operator comments — the executor receives both directly.
+
+**Gate.** With `gate` in the block and no CI on the PR (no checks reported, or every check `skipping`), run the gate before an LGTM: `git fetch origin pull/<n>/head`, `git switch --detach FETCH_HEAD`, a clean `git status --porcelain`, then `<gate>`, then `git switch main`. A failure is a finding. A pass goes into the LGTM as its own line, `Gate on <short sha>: <the gate's last line>`, and replaces "CI green" in the threshold below: `MERGE_READY` (`pr-poll --require-gate`) needs that line on the head, and the label goes on right after the LGTM.
 
 **QA gate check** (only with `qa-gate: on`) — before fetching the diff, check whether `[qa] PASS` has been posted after the last commit:
 - `gh api "repos/<repo>/pulls/<n>/commits" --jq '.[-1].commit.committer.date'` → last commit date

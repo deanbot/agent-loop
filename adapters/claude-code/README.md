@@ -18,7 +18,8 @@ adapters/claude-code/
   skills/start-executor/            /agent-loop:start-executor    SKILL.md + reference/
   skills/start-reviewer/            /agent-loop:start-reviewer    SKILL.md + reference/
   skills/start-qa/                  /agent-loop:start-qa          SKILL.md + reference/
-  hooks/hooks.json, guard.mjs       PreToolUse: deny `gh pr merge` in clones with .agent-loop/role
+  hooks/hooks.json, guard.mjs       PreToolUse: deny `gh pr merge` in clones with .agent-loop/role,
+                                    and every command from a session another one took over
   setup-project.sh                  what the setup skill runs
   install.sh                        marketplace add + plugin install
 ```
@@ -86,20 +87,35 @@ Claude Code fires one fallback wakeup about 20 minutes after an iteration that f
 reschedule, then ends the loop. Loops are session-scoped: they do not survive closing the
 terminal or `--resume`; re-run the skill.
 
+**One session per clone.** Every start runs `scripts/session.mjs --start ${CLAUDE_SESSION_ID}`,
+every wake `--beat`, and a stop `--release` (spec: "Two sessions in one clone"). The newest start
+wins: a restart never has to wait for, or find, the old session. The old one is recorded in
+`.agent-loop/session` as superseded, and the guard hook refuses its next Bash, Edit, Write or
+NotebookEdit call with a reason that tells it to stop; its next wake also prints `SUPERSEDED`. It
+stops without unclaiming or posting, since the claims belong to the clone. The hook's
+`session_id` and the skill's `${CLAUDE_SESSION_ID}` were checked to be the same string, subagents
+included. One leftover: the old session's background waiter may still hold the PR's waiter lock,
+so the new session's waiters exit 3 until it ends (at most 25 minutes); after a takeover that
+wake re-schedules in 300 seconds instead of 1800.
+
 ## Permissions
 
 Skills declare `allowed-tools` for `gh`, the plugin scripts and (reviewer) read-only `git`; that
 grant covers the invoking turn. Unattended wakeups rely on the rules `setup-project.sh` writes to
-`.claude/settings.local.json`. Skill text gives Bash as one plain command per call — `$(…)`, `;`
+`.claude/settings.local.json`, which include the block's `gate` command (`Bash(<gate>)` and
+`Bash(<gate> *)`) for the executor and the reviewer, so re-run setup after adding `gate`. Skill text gives Bash as one plain command per call — `$(…)`, `;`
 and pipes are not statically matchable and would prompt every cycle. `find` is not
 prefix-approvable either, which is one reason the stop-sentinel mechanism was dropped in favour
 of `ScheduleWakeup({ stop: true })`.
 
 ## Guard hook
 
-`hooks/guard.mjs` runs on every `PreToolUse` for Bash. When the working directory holds
-`.agent-loop/role` it denies, anywhere in the command text, `gh pr merge`, the REST and GraphQL
-merge routes, and `git push` to `main`/`master`, with a reason the agent reads. The operator's
+`hooks/guard.mjs` runs on every `PreToolUse` for Bash, Edit, Write and NotebookEdit. When the
+working directory holds `.agent-loop/role` it denies, anywhere in the Bash command text, `gh pr
+merge`, the REST and GraphQL merge routes, and `git push` to `main`/`master`, with a reason the
+agent reads. It also denies every one of those tools to a session `.agent-loop/session` lists as
+superseded (a plain `node …/scripts/session.mjs` call excepted), so an old loop session stops at
+its next step instead of moving the checkout under the new one. The operator's
 clone has no marker, so nothing changes there. It is a safety net behind the prompt rule, not a
 security boundary: the same action through another program (a script, `sh -c`, the API from node)
 is not caught. A comment body that quotes the literal phrase `gh pr merge` is refused too; reword.

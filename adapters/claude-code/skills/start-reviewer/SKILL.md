@@ -40,7 +40,8 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
 1. Read `AGENTS.md` in the working directory. It must contain a `## Agent loop` block; if not,
    stop and say so. Read the whole file: the project's rules are part of what you review against.
 2. From the block take `repo` (owner/repo), `qa-gate` (`on` or `off`, default `off`),
-   `needs-operator-label` (default `needs-operator`) and `reviewers` (default `1`). With
+   `needs-operator-label` (default `needs-operator`), `gate` (optional: the command that stands in
+   for CI on a PR that has none; reference/review.md §4) and `reviewers` (default `1`). With
    `reviewers` above 1, read "Several reviewers" below: `<as>` is `--reviewer <clone>`
    (`<clone>` the base name of your working directory); with one reviewer `<as>` is empty and
    nothing there applies.
@@ -52,6 +53,15 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
    wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `reviewer` entry, or
    an entry that matches → print nothing more: there is nothing to report.
 3. If `.agent-loop/role` exists and does not say `reviewer`, stop: this clone hosts another role.
+
+   **Take the clone for this session**, before touching anything in it: `node
+   ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --start ${CLAUDE_SESSION_ID}`. `NEW` or `MINE` →
+   print nothing. `TOOK_OVER <id> <secs>` → another session ran here and may still be running (an
+   old one left in the background, say): print `⚠ Took over this clone from session <id>, last
+   active <secs ÷ 60> min ago. If it still runs, its next command is refused and it stops.` and
+   carry on. The newest start always wins, so a restart after a closed terminal is never refused.
+   A usage error (no session id was filled in) → print `⚠ No session id: a second session in this
+   clone would go unnoticed.` and carry on.
 4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it through to the watch script.
 
 Rules that hold for the whole session:
@@ -75,9 +85,20 @@ same script with `--wait`, in the background. The waiter polls GitHub every 30 s
 recording anything, and exits as soon as a run would have news (or after 25 minutes); its exit
 wakes you. Any wakeup is a continuation: run the cycle.
 
+**Every wakeup starts with** `node ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --beat
+${CLAUDE_SESSION_ID}`, before anything else (the waiter's exit-3 case included). `MINE` → go on.
+`SUPERSEDED <id>` → another session took this clone over: stop as "superseded" (below). A command
+the plugin's guard refuses as superseded means the same, at any point in a cycle.
+
+A notification from another background command you started, such as the gate or a long probe, is
+not a cycle: read its output and finish the review it belongs to, then end that cycle as usual
+(step 5).
+
 A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
-is still alive (it printed `WATCHER_RUNNING`). Run nothing and start no waiter; only call the
-`ScheduleWakeup` from step 5. Any **other failed exit** means the waiter itself broke (a usage
+is still alive (it printed `WATCHER_RUNNING`). Beat, then run nothing else and start no waiter;
+only call the `ScheduleWakeup` from step 5, with `delaySeconds: 300` instead of 1800 when this
+session's start printed `TOOK_OVER` (the live waiter is likely the old session's, which ends
+within 25 minutes). Any **other failed exit** means the waiter itself broke (a usage
 error, a broken install): name it in the status line, run the cycle, but end it with
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
 again, so a failure that repeats costs one turn per five minutes, not one per second.
@@ -143,7 +164,7 @@ one, so scheduling it every cycle never stacks wakeups. Standing signals (`REVIE
 you have not posted on, say, while you wait for `[qa] PASS`) do not wake you again by themselves.
 
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
-call.** The only exit is the operator's stop. (Claude Code fires one fallback wakeup about 20
+call.** The only exits are the operator's stop and being superseded. (Claude Code fires one fallback wakeup about 20
 minutes after an iteration that forgets, then ends the loop; do not rely on it.)
 
 ## Several reviewers
@@ -180,9 +201,11 @@ Every comment starts with its kind, because the executor's poll script classifie
   with the exact steps from the PR body. The operator confirms by a comment or by merging, and a
   failure comes back as an unprefixed comment you treat as a finding. The exception is a PR that
   must record the operator's results: they are part of the PR, so wait for them like any criterion. Note the CI state in the first line (`CI green` /
-  `CI pending`), but CI is not a precondition either: the executor's poll gates `MERGE_READY` on
+  `CI pending`, or `CI none, gate passed`), but CI is not a precondition either: the executor's poll gates `MERGE_READY` on
   CI and receives `CI_FAILING` itself, and nothing would re-trigger you when CI finishes. A red
-  check caused by this PR *is* a finding, so then you post findings, not LGTM. A passing recheck
+  check caused by this PR *is* a finding, so then you post findings, not LGTM. With `gate` in the
+  block and no CI on the PR, the gate is the precondition: you run it on the head, a failure is a
+  finding, and the LGTM quotes it (`Gate on <sha>: …`), which `MERGE_READY` requires. A passing recheck
   also starts with `[reviewer] LGTM`. An LGTM that leaves the PR ready to merge (CI green, and
   the rest of the `MERGE_READY` threshold) also adds `<needs-operator-label>`, whoever owns the
   PR; with CI pending it says so in one line. Details in reference/review.md.
@@ -220,9 +243,15 @@ Every comment starts with its kind, because the executor's poll script classifie
 
 Operator says "stop" (a message that is, or begins with, the word stop): stop the running waiter
 with `TaskStop` (its task id is in the result that started it; `TaskStop` is a deferred tool, so
-load it with `ToolSearch("select:TaskStop")` first), call `ScheduleWakeup({ stop: true })`, and say
-"Reviewer stopped". Nothing else. A task notification that arrives after the stop is not a
-continuation: do nothing.
+load it with `ToolSearch("select:TaskStop")` first), call `ScheduleWakeup({ stop: true })`, run
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --release ${CLAUDE_SESSION_ID}`, and say "Reviewer
+stopped". Nothing else. A task notification that arrives after the stop is not a continuation: do
+nothing.
+
+**Superseded** (a beat printed `SUPERSEDED <id>`, or the guard refused a command as
+superseded): stop the running waiter with `TaskStop`, call `ScheduleWakeup({ stop: true })`, and
+say "Reviewer stopped: session <id> took over this clone". Nothing else: no label, no release, no
+comment, no git command. The new session carries on with the clone's work.
 
 ## Permissions
 

@@ -36,7 +36,9 @@ reviewer looks at code. Prompt: `adapters/generic/qa.md`. Its own clone and sess
 No native scheduling here. Between cycles: executor ~60s; reviewer and QA ~60s after posting
 findings (`[qa] BLOCKED`) or a question, ~300s after LGTM or `[qa] PASS`, ~120s otherwise; the
 shortest wins across PRs. Stop a loop by writing `.agent-loop/<role>-stop` in its clone; each
-cycle checks for that file first and exits when it exists.
+cycle checks for that file first and exits when it exists. Run one loop per clone at a time:
+`scripts/session.mjs` (spec: "Two sessions in one clone") needs a session id these prompts do not
+have, so a second loop in the same clone goes unnoticed.
 
 ### Protocol reference
 

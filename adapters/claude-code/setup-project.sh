@@ -8,7 +8,8 @@
 #   - ignores .agent-loop/ and .claude/settings.local.json (via .git/info/exclude when .gitignore lacks them)
 #   - writes the role marker .agent-loop/role (removed for --role operator)
 #   - adds the role's permission allow rules to .claude/settings.local.json (agent roles only;
-#     --plugin-root names the installed plugin so its scripts are allowed wherever they live)
+#     --plugin-root names the installed plugin so its scripts are allowed wherever they live;
+#     the block's `gate` command for the executor and the reviewer)
 #   - enables .githooks if the project ships one
 #   - checks AGENTS.md for the "## Agent loop" block and prints the template if missing
 set -euo pipefail
@@ -48,6 +49,7 @@ agent_loop_value() {  # key → value from the "## Agent loop" block (first matc
 IN_PROGRESS="$(agent_loop_value in-progress-label)"; IN_PROGRESS="${IN_PROGRESS:-in-progress}"
 BLOCKED="$(agent_loop_value blocked-label)"; BLOCKED="${BLOCKED:-is-blocked}"
 NEEDS_OP="$(agent_loop_value needs-operator-label)"; NEEDS_OP="${NEEDS_OP:-needs-operator}"
+GATE="$(agent_loop_value gate)"
 
 echo "agent-loop setup: repo=$REPO role=$ROLE"
 
@@ -105,9 +107,9 @@ if [ "$ROLE" = operator ]; then
 else
   PLUGIN_CACHE="$HOME/.claude/plugins/cache/agent-loop/agent-loop"
   mkdir -p .claude
-  node - "$ROLE" "$PLUGIN_CACHE" "$PLUGIN_ROOT" <<'NODE'
+  node - "$ROLE" "$PLUGIN_CACHE" "$PLUGIN_ROOT" "$GATE" <<'NODE'
 const fs = require('fs')
-const [role, cache, pluginRoot] = process.argv.slice(2)
+const [role, cache, pluginRoot, gate] = process.argv.slice(2)
 const file = '.claude/settings.local.json'
 const common = ['Bash(gh *)', `Bash(node ${cache}/*)`]
 if (pluginRoot && !pluginRoot.startsWith(cache)) common.push(`Bash(node ${pluginRoot.replace(/\/$/, '')}/scripts/*)`)
@@ -117,6 +119,10 @@ const byRole = {
   reviewer: git('status', 'log', 'diff', 'show', 'fetch', 'checkout', 'switch', 'branch'),
   qa: [],
 }
+// The block's `gate` (the command that stands in for CI): the executor runs it before a push and the
+// reviewer on the head before an LGTM, so an unattended loop must not stop on its prompt.
+const gateCmd = (gate ?? '').trim()
+if (gateCmd && role !== 'qa') byRole[role].push(`Bash(${gateCmd})`, `Bash(${gateCmd} *)`)
 let settings = {}
 try { settings = JSON.parse(fs.readFileSync(file, 'utf8')) } catch {}
 settings.permissions ??= {}

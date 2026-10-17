@@ -23,18 +23,24 @@ Three layers. Boundaries are strict.
   reviewers) it honours review claims and keeps state per reviewer; `--check-claim <n>` prints who
   holds a PR. A PR labelled needs-operator that falls into conflict is reported as a standing
   `MERGE_CONFLICT:<n>`.
-- `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]`.
-  Signals then content blocks, exits.
+- `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]
+  [--require-gate]`. Signals then content blocks, exits. `--require-gate` (the block names a
+  `gate`): on a PR with no CI, `MERGE_READY` needs the LGTM's `Gate on <sha>:` line on the head.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
 - `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
   [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n]`. Prints `ISSUE:<n>`,
   `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE`, exits. No state and no `--wait`: it
   lists fresh every call, so an issue filed while the executor waited is seen.
+- `scripts/session.mjs` — one loop session per clone. `--start <id>` (`NEW`, `MINE`, `TOOK_OVER
+  <id> <secs>`), `--beat <id>` (`MINE`, `SUPERSEDED <id|none>`), `--release <id>`. The newest
+  start wins; the old session is recorded as superseded in `.agent-loop/session` and stops (the
+  Claude Code guard hook refuses its tool calls). Run in the clone's root.
 - `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a
   waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:
   "Waiting for events").
-- `scripts/test/run.mjs` — contract tests for all four against a fake `gh`
-  (`scripts/test/fake-gh.mjs`). Run `node scripts/test/run.mjs` before any script change lands.
+- `scripts/test/run.mjs` — contract tests for all of them against a fake `gh`
+  (`scripts/test/fake-gh.mjs`), and for the Claude Code guard hook's session check. Run `node
+  scripts/test/run.mjs` before any script change lands.
 - `spec/SPEC.md` — the protocol contract: roles, config keys, signals, merge policy, collision
   avoidance, state. Version 0.2.
 
@@ -96,6 +102,11 @@ wrappers are never prefix-approvable, and compound commands never match — keep
 reads the full thread alongside the diff, re-reads immediately before posting, and drops its
 comment if the head moved.
 
+**Two sessions in one clone.** A file cannot tell a live session from a dead one, so the newest
+start wins (`scripts/session.mjs`): a restart is never refused, and the old session stops at its
+next tool call (the Claude Code guard hook) or its next wake. It stops without unclaiming, since
+claims belong to the clone.
+
 **Race condition.** Reviewer fetches diff → executor pushes → reviewer posts stale comment.
 Narrowed by the re-read-before-posting rule; no structural fix without real-time locking.
 
@@ -103,7 +114,9 @@ Narrowed by the re-read-before-posting rule; no structural fix without real-time
 
 **Per-clone state** lives in `.agent-loop/` within the project directory (gitignored):
 `role` (executor | reviewer | qa; written by setup; read by the merge-guard hook and the skills'
-wrong-clone check) and, for adapters that need one, stop sentinels.
+wrong-clone check), `session` (which loop session holds the clone and which ones it superseded;
+written by `scripts/session.mjs`, read by the Claude Code guard hook) and, for adapters that need
+one, stop sentinels.
 
 **Script state** persists to `~/.agent-loop/state/` with per-repo paths: `<slug>-pr-state.json`
 (reviewer), `<slug>-pr-poll-<pr>.json` (executor, one per PR, so two executors never share a file;

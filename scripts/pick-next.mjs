@@ -21,8 +21,8 @@
  *                                issues are skipped, it is WAIT on the lowest of them, not NONE
  *
  * Dependencies are named in an issue body as "Depends on #a, #b" (also "#a and #b"); only the list
- * right after "Depends on" counts, so "Depends on #5. See #9." depends on #5 alone; "#a, #b, and #c"
- * and "**Depends on:** #a" are read too. --skip none (or empty) is an empty list. A dependency's
+ * right after "Depends on" counts, so "Depends on #5. See #9." depends on #5 alone; "#a, #b, and #c",
+ * "**Depends on:** #a" and "_Depends on_ #a" are read too. --skip none (or empty) is an empty list. A dependency's
  * state comes from the REST issues endpoint, which also resolves a PR (`gh issue view` reports a
  * merged PR as MERGED, not CLOSED); only state "closed" counts as done. --skip lists issues this session already turned
  * down (author check failed, claim lost), so a pick never returns them again. Labels default to
@@ -69,9 +69,10 @@ function listOpen(title) {
   return gh(...args).sort((a, b) => a.number - b.number)
 }
 
-// "Depends on #a, #b", "#a and #b", "#a, #b, and #c", "**Depends on:** #a". The list ends at the first
-// character that is not a #number, a comma, "and", "&" or a space on the same line.
-const DEPENDS = /\bdepends on\b[*_:]*[ \t]*((?:#\d+|,|&|\band\b|[ \t])+)/gi
+// "Depends on #a, #b", "#a and #b", "#a, #b, and #c", "**Depends on:** #a", "_Depends on_ #a". The list
+// ends at the first character that is not a #number, a comma, "and", "&" or a space on the same line.
+// No \b around "depends on": "_" is a word character, so \b fails inside "_Depends on_".
+const DEPENDS = /(?<![a-z0-9])depends on(?![a-z0-9])[*_:]*[ \t]*((?:#\d+|,|&|\band\b|[ \t])+)/gi
 function dependencies(body) {
   const deps = []
   for (const m of (body ?? '').matchAll(DEPENDS)) {

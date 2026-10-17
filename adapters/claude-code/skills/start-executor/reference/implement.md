@@ -66,6 +66,15 @@ verifiable by a test CI runs, or marked for the operator to confirm), Reference 
   writing config from memory.
 - Run `quality-gates` from the config. If the command does not exist yet (an early bootstrap
   issue is creating it), run the checks the issue itself names and say so in the PR body.
+- **The gate**, only when the block has `gate`. It is the command CI would otherwise be, for a
+  project that can turn CI off. Before opening the PR, and before each later push while the PR
+  reports no CI checks (`gh pr checks <PR> --repo <repo>` says "no checks reported", or every
+  check is `skipping`), commit, then run `<gate>` on the clean tree, in the background when it
+  takes minutes. Run it once when it is the same command as `quality-gates`. A failure is yours to
+  fix before the push. Quote its last line, as `Gate on <short sha>: <last line>`, in the PR body
+  (under the criteria table) or in the `[executor] Pushed fix` comment for that push. The
+  reviewer runs the gate again on the head and quotes it in its LGTM, and `MERGE_READY` needs that
+  quote (`--require-gate`).
 
 ## 4. Self-check before opening the PR
 
@@ -97,6 +106,8 @@ terse and stays true after merge:
 |---|---|
 | <criterion, quoted or named> | `<test file>::<test name>` |
 | <criterion> | by hand, before merge: <exact command or steps> |
+
+Gate on <short sha>: <the gate's last line>   (only with `gate`, and no CI on the PR)
 
 ## Decisions
 - <call you made>: <what and why, one line each>
