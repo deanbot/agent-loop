@@ -239,7 +239,8 @@ lands between that re-read and the post is still reported.
 - `REVIEW_COMMENTS:<n>` — read the thread. A `[qa] PASS` with no `[reviewer]` post since the head
   commit → full review. Only `[qa] BLOCKED` with no executor response → post nothing. Otherwise
   follow up on the executor's or operator's replies: `LGTM`, a further finding, or a clarification,
-  and only if it says something new.
+  and only if it says something new. Any LGTM with `gate` set and no CI on the PR, a follow-up
+  one included, runs the gate on the head first and carries its `Gate on` line.
 - Immediately before posting, re-read the thread and confirm the head has not moved.
 - The reviewer does not relay CI status or echo operator comments; the executor receives both
   directly.

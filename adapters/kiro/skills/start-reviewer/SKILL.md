@@ -122,7 +122,7 @@ Read context: operator comments and `[executor]` responses. Ignore `[reviewer]` 
 - **If new comments include only `[qa] BLOCKED` with no executor responses:** A.C. gate not cleared — post nothing; wait ~120s.
 - **Otherwise** (executor/operator responses to existing findings):
   - CI still failing with unfinished "Human setup required" steps: re-surface steps, add any code findings
-  - Questions answered satisfactorily and CI passing → `gh pr comment <n> --body "[reviewer] LGTM"`
+  - Questions answered satisfactorily and CI passing → `gh pr comment <n> --body "[reviewer] LGTM"` (with `gate` and no CI on the PR, run the gate first and put its `Gate on <short sha>:` line in this LGTM, as under "Gate"; an LGTM without it holds `MERGE_READY` back)
   - Answers raise new issues → `gh pr comment <n> --body "[reviewer] <findings>"`
   - Answers need clarification → `gh pr comment <n> --body "[reviewer] <clarification>"`
   - The operator answered your `[reviewer] Question` → `gh pr edit <n> --repo <repo> --remove-label <needs-operator-label>`, then post your next verdict (`LGTM` or findings).

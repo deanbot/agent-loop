@@ -136,7 +136,10 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
      → full review now. Only `[qa] BLOCKED`, nothing from the executor → post nothing. Otherwise
      this is follow-up: were your findings answered? Did the operator confirm a criterion, or ask
      for something that changes the bar? Post `[reviewer] LGTM`, a follow-up finding, or a
-     clarification — one comment, and only if it says something new.
+     clarification — one comment, and only if it says something new. Any LGTM, a follow-up one
+     included (after an answer, or the operator's reply to your question), runs the gate first
+     when the block has `gate` and the PR has no CI, and quotes it (reference/review.md §4):
+     without the `Gate on` line `MERGE_READY` stays withheld.
    - **`NONE`** → nothing to do (there may still be open PRs with nothing new).
 3. **Immediately before posting**, re-fetch `gh pr view <n> --comments --repo <repo>` and
    `gh api repos/<repo>/pulls/<n>/comments`; fold in anything that arrived while you worked, and

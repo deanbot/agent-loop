@@ -72,7 +72,8 @@ An adapter is valid if:
 5. Loop invariant: every iteration ends with a wait before the next poll (mechanism is
    adapter-specific), and the operator can stop a loop
 6. `MERGE_READY` threshold: `[reviewer] LGTM` + CI passing + no conflict with the base, plus
-   `[qa] PASS` when `qa-gate: on`.
+   `[qa] PASS` when `qa-gate: on`, plus, when the block has `gate` and the PR has no CI, the
+   LGTM's `Gate on <sha>:` line on the head (the reviewer runs the gate before every LGTM then).
    Agents never merge; adapters enforce it structurally where the tool allows
 7. Executor prompt includes the pre-PR self-check: each criterion mapped to a test CI runs, or
    given the exact steps the operator runs by hand. A hand check never blocks an approval; the

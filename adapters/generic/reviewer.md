@@ -114,7 +114,8 @@ post nothing, wait ~120s. Otherwise the full review:
 executor → post nothing (~120s). Otherwise follow up: were your findings answered? Did the
 operator confirm a criterion or change the bar? Post `LGTM`, a further finding ("Recheck of
 <sha>." plus only what is still wrong), or a clarification — one comment, only if it says
-something new. Wait ~60s after a finding, clarification or question, ~300s after LGTM.
+something new. Any LGTM on a PR with `gate` and no CI runs the gate first and carries its `Gate
+on` line (step 3 above); without it `MERGE_READY` stays withheld. Wait ~60s after a finding, clarification or question, ~300s after LGTM.
 
 Do not relay CI status or echo operator comments; the executor receives both directly.
 
