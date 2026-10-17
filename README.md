@@ -66,10 +66,14 @@ pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NON
 ```
 
 A fourth, `pick-next.mjs`, chooses the executor's next issue (`ISSUE:<n>`, `WAIT:<blocker>
-PR:<n|none>`, `MOVE_ON <milestone>`, `NONE`), so a pick always starts from a fresh listing.
+PR:<n|none>`, `MOVE_ON <milestone>`, `NONE`), so a pick always starts from a fresh listing. A
+fifth, `session.mjs`, keeps one loop session per clone: the newest start wins, and an old session
+left running stops.
 
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green + no conflict with `main` (+
-`[qa] PASS` with `qa-gate: on`). The operator merges. A PR that falls into conflict after its
+`[qa] PASS` with `qa-gate: on`). A project that can turn CI off names a `gate` command: on a PR
+with no CI, the reviewer runs it on the head and quotes its last line in the LGTM, and
+`MERGE_READY` needs that quote. The operator merges. A PR that falls into conflict after its
 LGTM (another PR merged) gets `MERGE_CONFLICT` instead, and the executor resolves it. With no
 executor polling it, the reviewer's watch reports the conflict on a PR labelled `needs-operator`,
 and the reviewer takes the label off and says so on the PR.
@@ -112,7 +116,9 @@ models: executor=opus, reviewer=opus/high
 
 `models` is optional: each loop's first line on every start names its model and effort, and a
 second `⚠` line says so when they differ from that role's entry here (a role without an entry
-gets no `⚠` line). It never stops a loop.
+gets no `⚠` line). It never stops a loop. `gate: <command>` is optional too, for a project that
+can turn CI off: on a PR with no CI, the executor runs it before each push and the reviewer on the
+head before an LGTM (spec: `gate`).
 
 Make one clone per role (for example `proj`, `proj-exec`, `proj-review`) and run
 `/agent-loop:setup <operator|executor|reviewer|qa>` inside each. A clone can live anywhere (next to

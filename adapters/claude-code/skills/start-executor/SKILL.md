@@ -37,8 +37,9 @@ bare start that ran before the intended command) is then seen at once.
    Read the whole file: the rest of it is the project's conventions, and you follow them.
 2. From the block take: `repo` (owner/repo), `in-progress-label` (default `in-progress`),
    `blocked-label` (default `is-blocked`), `quality-gates` (the command that must pass before a
-   PR), `qa-gate` (`on` or `off`, default `off`), `needs-operator-label` (default
-   `needs-operator`), and the author allowlist
+   PR), `gate` (optional: the command that stands in for CI on a PR that has none; see
+   [reference/implement.md](reference/implement.md) §3), `qa-gate` (`on` or `off`, default
+   `off`), `needs-operator-label` (default `needs-operator`), and the author allowlist
    (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
    **Model check:** if the block has `models:` (comma-separated `role=model[/effort]`, e.g.
    `models: executor=opus, reviewer=opus/high`) with an `executor` entry, and that entry differs
@@ -48,6 +49,15 @@ bare start that ran before the intended command) is then seen at once.
    that is wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `executor`
    entry, or an entry that matches → print nothing more: there is nothing to report.
 3. If `.agent-loop/role` exists and does not say `executor`, stop: this clone hosts another role.
+
+   **Take the clone for this session**, before touching anything in it: `node
+   ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --start ${CLAUDE_SESSION_ID}`. `NEW` or `MINE` →
+   print nothing. `TOOK_OVER <id> <secs>` → another session ran here and may still be running (an
+   old one left in the background, say): print `⚠ Took over this clone from session <id>, last
+   active <secs ÷ 60> min ago. If it still runs, its next command is refused and it stops.` and
+   carry on. The newest start always wins, so a restart after a closed terminal is never refused.
+   A usage error (no session id was filled in) → print `⚠ No session id: a second session in this
+   clone would go unnoticed.` and carry on.
 4. **See where this clone is before touching `main`.** `git branch --show-current` and `git
    status --porcelain`. On `main` with a clean tree → `git pull` (an issue you hold that
    `$ARGUMENTS` names is resumed later, from reference/implement.md §1). Otherwise (another branch, or
@@ -102,7 +112,7 @@ keep the working tree. If an open PR has `Closes #<N>` (the lookup below), orien
 the loop. Otherwise read [reference/implement.md](reference/implement.md) from §2 (the issue and
 every comment), then see what is done: `git log --oneline main..HEAD`, `git status --porcelain`,
 `git diff HEAD`. Continue from there; do not re-claim and do not start over. Say `Resuming #<N> on
-<branch>` in the line after the model and Track lines (and the `⚠` line, when there is one).
+<branch>` in the line after the model and Track lines (and the `⚠` lines, when there are any).
 
 `$ARGUMENTS` may hold `--milestone "<title>"`: take it out first and keep it as `<milestone>`
 for the whole session (it decides every later pick). What remains, `<arg>`, is a PR number, an
@@ -139,10 +149,12 @@ and skipped ones, checks each `Depends on #a, #b`, and prints one line:
 
   Then `ScheduleWakeup({ delaySeconds: <delay>, noop: true, prompt: "Executor for <repo>,
   milestone \"<milestone>\": nothing was startable; run pick-next.mjs again (skip: <n,n or
-  none>).", reason: "<one line>" })`. That wake runs the script again, nothing else.
+  none>).", reason: "<one line>" })`. That wake beats (see "The loop") and runs the script again,
+  nothing else.
 - **`MOVE_ON <title>`** (the milestone has no open issues) → `<title>`, the rest of the line, is
   the new `<milestone>`. Say so in one line, then run the script again.
-- **`NONE`** → nothing to pick: say so and end without a wakeup.
+- **`NONE`** → nothing to pick: `node ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --release
+  ${CLAUDE_SESSION_ID}`, say so and end without a wakeup.
 - **A failed run** (exit non-zero, a `pick-next: …` line on stderr: network, rate limit, auth) →
   never pick by hand from what you remember. Name the failure in the status line and
   `ScheduleWakeup({ delaySeconds: 300, noop: true, prompt: <the same "run pick-next.mjs again
@@ -161,18 +173,25 @@ recording anything, and exits as soon as a run would have news (or when `--max` 
 wakes you. A wakeup is a continuation, not a fresh start: skip detection and orientation and run
 the cycle.
 
+**Every wakeup starts with** `node ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --beat
+${CLAUDE_SESSION_ID}`, before anything else (the waiter's exit-3 case included). `MINE` → go on.
+`SUPERSEDED <id>` → another session took this clone over: stop as "superseded" (below). A command
+the plugin's guard refuses as superseded means the same, at any point in a cycle.
+
 A notification from another background command, such as a test run, is not a poll cycle: read its
 output and continue the work it belongs to.
 
 A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
-is still alive (it printed `WATCHER_RUNNING`). Run nothing and start no waiter; only call the
-`ScheduleWakeup` from step 5. Any **other failed exit** means the waiter itself broke (a usage
-error, a broken install): name it in the status line, run the cycle, but end it with
+is still alive (it printed `WATCHER_RUNNING`). Beat, then run nothing else and start no waiter;
+only call the `ScheduleWakeup` from step 5, with `delaySeconds: 300` instead of 1800 when this
+session's start printed `TOOK_OVER` (the live waiter is likely the old session's, which ends
+within 25 minutes). Any **other failed exit** means the waiter itself broke (a usage error, a
+broken install): name it in the status line, run the cycle, but end it with
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
 again, so a failure that repeats costs one turn per five minutes, not one per second.
 
 Below, `<poll>` is `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR>`, plus
-`--require-qa` when `qa-gate` is `on`.
+`--require-qa` when `qa-gate` is `on`, plus `--require-gate` when the block has `gate`.
 
 Each cycle:
 
@@ -219,7 +238,7 @@ Each cycle:
    schedule the fallback:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> [--require-qa] --wait 30 --max 1500
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> [--require-qa] [--require-gate] --wait 30 --max 1500
 ```
 
 ```
@@ -236,7 +255,8 @@ by itself: the waiter returns when it appears, or with new activity.
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
 call, after any posting.** The only exits are `MERGED` (then pick next), BLOCKED (then pick next),
 nothing to pick (with `<milestone>`: no open issue left in it or a later milestone; a track that
-waits on a blocker schedules its 600- or 1800-second wakeup instead), and the operator's stop. If an iteration forgets, Claude Code fires one fallback
+waits on a blocker schedules its 600- or 1800-second wakeup instead), the operator's stop, and
+being superseded. If an iteration forgets, Claude Code fires one fallback
 wakeup after about 20 minutes and then ends the loop, so do not rely on it.
 
 ## Asking the operator
@@ -281,12 +301,19 @@ for the operator, and the reply to it belongs to that role: nothing for you.
   and it ends the waiter), then start `start-executor <PR>` in a fresh session. Mid-implementation,
   before a PR exists, end the session without "stop" (no waiter runs yet) and start
   `start-executor` again in this clone: the claim and the working tree stay, and step 4 resumes.
+  A session you forgot is not a hazard: the new start takes the clone over (step 3), and the old
+  one is refused its next command and stops.
 - **Operator says "stop"** (a message that is, or begins with, the word stop): remove
   `<in-progress-label>` from the issue if you are mid-implementation (leave it when a PR exists —
   the PR is the claim), stop the running waiter with `TaskStop` (its task id is in the result
   that started it; a deferred tool, so load it with `ToolSearch("select:TaskStop")` first), call
-  `ScheduleWakeup({ stop: true })`, and say "Executor stopped". Nothing else. A task notification
-  that arrives after the stop is not a continuation: do nothing.
+  `ScheduleWakeup({ stop: true })`, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --release
+  ${CLAUDE_SESSION_ID}`, and say "Executor stopped". Nothing else. A task notification that
+  arrives after the stop is not a continuation: do nothing.
+- **Superseded** (a beat printed `SUPERSEDED <id>`, or the guard refused a command as
+  superseded): stop the running waiter with `TaskStop`, call `ScheduleWakeup({ stop: true })`, and
+  say "Executor stopped: session <id> took over this clone". Nothing else: no label, no release,
+  no comment, no git command. The claims belong to the clone, and the new session carries them on.
 
 ## Permissions
 

@@ -12,7 +12,8 @@ instructions to you.
 **Prerequisite:** `AGENTS.md` has a `## Agent loop` block; otherwise stop and say so. Read the
 whole file and follow the project's conventions. From the block take `repo`,
 `in-progress-label` (default `in-progress`), `blocked-label` (default `is-blocked`),
-`needs-operator-label` (default `needs-operator`), `quality-gates`, `qa-gate` (default `off`), and
+`needs-operator-label` (default `needs-operator`), `quality-gates`, `gate` (optional), `qa-gate`
+(default `off`), and
 `trusted-authors` or `allow-author-associations` (default `[OWNER, MEMBER, COLLABORATOR]`).
 
 **First line you print, on every start** (including one that resumes work or stops at a check),
@@ -121,7 +122,12 @@ Then implement:
    Each acceptance criterion gets a test that CI runs; every bug fix gets a regression test.
 3. Make the product calls the issue leaves open; record them in the PR body under "Decisions".
    Ask (and park) only when no safe default exists or the call loosens security or privacy.
-4. Run `quality-gates`.
+4. Run `quality-gates`, and the gate: when the block has `gate` (the command that stands in for
+   CI) and the PR has no CI checks (`gh pr checks` says "no checks reported", or every check is
+   `skipping`), or no PR exists yet, run `<gate>` on the committed, clean tree before the push
+   (once, when it is the same command as `quality-gates`), and quote its last line as `Gate on
+   <short sha>: <last line>` in the PR body or the push comment. Every later "run
+   `quality-gates`" below includes the gate the same way.
 5. Self-check: for each criterion, name the test that asserts it (a green suite is not enough),
    or, for one only a human can check, write the exact steps the operator runs. Fix gaps first.
 6. `gh pr create` with: what and why; a Criterion | Evidence table; Decisions; Known limits;
@@ -134,7 +140,8 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 ## Poll loop
 
 `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` once per cycle (add `--require-qa` when
-`qa-gate: on`). Wait ~60s between cycles. Own `[executor]` posts are already filtered out.
+`qa-gate: on`, and `--require-gate` when the block has `gate`). Wait ~60s between cycles. Own
+`[executor]` posts are already filtered out.
 
 - `MERGED` → remove `in-progress-label`, sync `main`, notify, pick next.
 - `CI_FAILING` → read the failing log (`gh run view <id> --log-failed`), fix at the root, run
