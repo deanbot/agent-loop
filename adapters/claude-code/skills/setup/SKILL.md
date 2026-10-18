@@ -23,8 +23,8 @@ Arguments given: `$ARGUMENTS`. The script determines the repo from the `## Agent
 not guess a repo yourself: the script creates labels on it.
 
 Then report what the script printed, in a few lines: the repo and role, what it created or found
-in place, whether second-read's guards are in place (quote each `⚠ second-read` line and its next
-command as printed; they're warnings, not failures), and whether `AGENTS.md` already has the
+in place, whether second-read's guards are in place (quote each `⚠ second-read` line and the
+commands under it as printed; they're warnings, not failures), and whether `AGENTS.md` already has the
 `## Agent loop` block. If the block is missing,
 show the template the script printed and say the project owner adds it (this skill never edits
 `AGENTS.md`). End with the next command for this clone's role.
@@ -36,4 +36,4 @@ ignores `.agent-loop/` and `.claude/settings.local.json` (clone-local `.git/info
 runs without permission prompts (agent roles only; the operator clone gets none); runs `git config core.hooksPath .githooks` when the project ships
 hooks; then, since that switches second-read's git hooks off, runs `second-read hooks install` when
 second-read is installed, and warns about each of its guards that's missing (the git hooks; the
-`gh` shim or second-read's Claude Code adapter). Full adapter notes: `${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/README.md`.
+`gh` shim or second-read's Claude Code plugin, read from `claude plugin list --json`). Full adapter notes: `${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/README.md`.
