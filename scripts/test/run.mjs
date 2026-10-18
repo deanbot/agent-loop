@@ -119,6 +119,10 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   check('poll --require-gate: no CI, LGTM quoting the gate on the head → MERGE_READY', ready(poll(ctx, noCi(quoted), gate)))
   check('poll --require-gate: … the full sha, in bold, also counts',
     ready(poll(ctx, noCi(`\n\n**Gate on ${head}:** passed`), gate)))
+  check('poll --require-gate: … a line wrapped in backticks, or a list item, also counts',
+    ready(poll(ctx, noCi('\n\n`Gate on a1b2c3d: ok`'), gate)) && ready(poll(ctx, noCi('\n\n- Gate on a1b2c3d: ok'), gate)))
+  check('poll --require-gate: "Gate on" inside a sentence → no MERGE_READY',
+    !ready(poll(ctx, noCi('\n\nI ran it. Gate on a1b2c3d: ok'), gate)))
   check('poll --require-gate: no CI, the gate quoted on another commit → no MERGE_READY',
     !ready(poll(ctx, noCi('\n\nGate on 9f8e7d6: passed'), gate)))
   check('poll --require-gate: a gate line in an older comment, not the LGTM → no MERGE_READY',

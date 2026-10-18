@@ -316,8 +316,8 @@ function pass({ gh, save, dry }) {
   const hasReviewerLgtm = isLgtm(reviewerVerdict)
   const hasQaPass = isQaPass(newestAfterCommit(qaComments)?.body)
   const qaSatisfied = requireQa ? hasQaPass : true
-  // "Gate on <sha>: …" on a line of its own (markdown emphasis or backticks around it allowed).
-  const gateSha = /^[\s>*_]*Gate on `?([0-9a-f]{7,40})\b/im.exec(reviewerVerdict ?? '')?.[1]?.toLowerCase()
+  // "Gate on <sha>: …" on a line of its own (markdown emphasis, backticks around it, a quote or a list item allowed).
+  const gateSha = /^[\s>*_`-]*Gate on `?([0-9a-f]{7,40})\b/im.exec(reviewerVerdict ?? '')?.[1]?.toLowerCase()
   const gateQuoted = Boolean(gateSha && headSha && headSha.toLowerCase().startsWith(gateSha))
   const gateSatisfied = requireGate && noCi ? gateQuoted : true
   if (hasReviewerLgtm && qaSatisfied && gateSatisfied && unansweredInline.length === 0 && ciPassed && !conflicting) {

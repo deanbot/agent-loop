@@ -475,7 +475,9 @@ GitHub blocks self-approval; formal `APPROVED` is not achievable. `MERGE_READY` 
 5. the PR does not conflict with its base (not yet computed counts as no conflict)
 6. with `gate` (`--require-gate`) and no CI (no checks reported, or every check `skipping`): the
    LGTM of item 1 has a line `Gate on <sha>: …` whose `<sha>` (7 or more hex digits) starts the
-   head commit's sha. With CI checks present, CI is the gate and no quote is needed
+   head commit's sha. The line may sit in Markdown emphasis or backticks, or after a quote or
+   list marker, but starts with nothing else. With CI checks present, CI is the gate and no quote
+   is needed
 
 A "Before you merge" note in the LGTM or PASS does not hold `MERGE_READY` back: it tells the
 operator what to run before clicking merge.
