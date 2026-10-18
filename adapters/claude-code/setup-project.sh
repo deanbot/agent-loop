@@ -12,7 +12,7 @@
 #     the block's `gate` command for the executor and the reviewer)
 #   - enables .githooks if the project ships one
 #   - installs second-read's git hooks when second-read is installed, and warns about each of its
-#     guards that's missing (the git hooks, the gh shim or adapter); never fails on them
+#     guards that's missing (the git hooks, the gh shim or Claude Code plugin); never fails on them
 #   - checks AGENTS.md for the "## Agent loop" block and prints the template if missing
 set -euo pipefail
 
@@ -147,8 +147,9 @@ fi
 # --- second-read ------------------------------------------------------------------------------
 # second-read (github.com/deanbot/second-read) checks what agents post for details about the
 # person running them. Setting core.hooksPath above switches its git hooks off, so they go back on
-# here. Missing guards are a warning, never a failure, until second-read has a release. Found by
-# the markers second-read writes into its hooks and its gh shim.
+# here. Missing guards are a warning, never a failure: a project may not use second-read. Found by
+# the markers second-read writes into its hooks and its gh shim, and for its Claude Code plugin by
+# `claude plugin list --json`.
 if command -v second-read >/dev/null; then
   second-read hooks install >/dev/null || true
 fi
@@ -159,15 +160,39 @@ elif command -v second-read >/dev/null; then
   echo "    so commits and pushes from this clone go unchecked. Fix that, then run it again."
 else
   echo "  ⚠ second-read: no git hooks, so commits and pushes from this clone go unchecked."
-  echo "    Install second-read, then run: second-read hooks install"
+  echo "    Install second-read, then install its hooks:"
+  echo "    npm install -g second-read"
+  echo "    second-read hooks install"
 fi
+# Either the gh shim or the Claude Code plugin guards gh posts. The plugin's state is enabled,
+# disabled, or empty when it isn't listed or the listing can't be read (no claude, an error).
+gh_guard=""
 gh_head="$(head -c 400 "$(command -v gh)" 2>/dev/null | tr -d '\0' || true)"
 case "$gh_head" in
-  *'# Added by second-read: the gh shim.'*) echo "  second-read: gh shim in place" ;;
-  *) echo "  ⚠ second-read: gh posts (PR bodies, comments, issues) go unchecked. Use second-read's"
-     echo "    Claude Code adapter once it's released, or put its gh shim ahead of gh on PATH:"
-     echo "    second-read shim install" ;;
+  *'# Added by second-read: the gh shim.'*) echo "  second-read: gh shim in place"; gh_guard=1 ;;
 esac
+sr_plugin=""
+if command -v claude >/dev/null; then
+  sr_plugin="$(claude plugin list --json </dev/null 2>/dev/null | node -e '
+    let list; try { list = JSON.parse(require("fs").readFileSync(0, "utf8")) } catch { process.exit(0) }
+    const p = Array.isArray(list) && list.find(x => x && x.id === "second-read@second-read")
+    if (p) console.log(p.enabled === true ? "enabled" : "disabled")
+  ')" || sr_plugin=""
+fi
+if [ "$sr_plugin" = enabled ]; then
+  echo "  second-read: Claude Code plugin in place"; gh_guard=1
+fi
+if [ -z "$gh_guard" ] && [ "$sr_plugin" = disabled ]; then
+  echo "  ⚠ second-read: its Claude Code plugin is installed but disabled, so gh posts (PR bodies,"
+  echo "    comments, issues) go unchecked. Turn it back on, then start a new session:"
+  echo "    claude plugin enable second-read@second-read"
+elif [ -z "$gh_guard" ]; then
+  echo "  ⚠ second-read: gh posts (PR bodies, comments, issues) go unchecked. Install second-read's"
+  echo "    Claude Code plugin, then start a new session:"
+  echo "    claude plugin marketplace add deanbot/second-read"
+  echo "    claude plugin install second-read@second-read"
+  echo "    or put its gh shim ahead of gh on PATH: second-read shim install"
+fi
 
 # --- AGENTS.md block --------------------------------------------------------------------------
 if [ -f AGENTS.md ] && grep -q '^## Agent loop' AGENTS.md; then
