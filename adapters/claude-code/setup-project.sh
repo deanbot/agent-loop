@@ -147,7 +147,7 @@ fi
 # --- second-read ------------------------------------------------------------------------------
 # second-read (github.com/deanbot/second-read) checks what agents post for details about the
 # person running them. Setting core.hooksPath above switches its git hooks off, so they go back on
-# here. Missing guards are a warning, never a failure, until second-read has a release. Found by
+# here. Missing guards are a warning, never a failure: a project may not use second-read. Found by
 # the markers second-read writes into its hooks and its gh shim, and for its Claude Code plugin by
 # `claude plugin list --json`.
 if command -v second-read >/dev/null; then
@@ -160,7 +160,9 @@ elif command -v second-read >/dev/null; then
   echo "    so commits and pushes from this clone go unchecked. Fix that, then run it again."
 else
   echo "  ⚠ second-read: no git hooks, so commits and pushes from this clone go unchecked."
-  echo "    Install second-read, then run: second-read hooks install"
+  echo "    Install second-read, then install its hooks:"
+  echo "    npm install -g second-read"
+  echo "    second-read hooks install"
 fi
 # Either the gh shim or the Claude Code plugin guards gh posts. The plugin's state is enabled,
 # disabled, or empty when it isn't listed or the listing can't be read (no claude, an error).
