@@ -11,6 +11,8 @@
 #     --plugin-root names the installed plugin so its scripts are allowed wherever they live;
 #     the block's `gate` command for the executor and the reviewer)
 #   - enables .githooks if the project ships one
+#   - installs second-read's git hooks when second-read is installed, and warns about each of its
+#     guards that's missing (the git hooks, the gh shim or adapter); never fails on them
 #   - checks AGENTS.md for the "## Agent loop" block and prints the template if missing
 set -euo pipefail
 
@@ -22,7 +24,7 @@ while [ $# -gt 0 ]; do
     --role) ROLE="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --plugin-root) PLUGIN_ROOT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR > 1 && /^set -euo/ { exit } NR > 1' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -141,6 +143,31 @@ if [ -d .githooks ]; then
   git config core.hooksPath .githooks
   echo "  git hooks: core.hooksPath = .githooks"
 fi
+
+# --- second-read ------------------------------------------------------------------------------
+# second-read (github.com/deanbot/second-read) checks what agents post for details about the
+# person running them. Setting core.hooksPath above switches its git hooks off, so they go back on
+# here. Missing guards are a warning, never a failure, until second-read has a release. Found by
+# the markers second-read writes into its hooks and its gh shim.
+if command -v second-read >/dev/null; then
+  second-read hooks install >/dev/null || true
+fi
+if grep -qF '# Added by second-read.' "$(git rev-parse --git-path hooks)/pre-push" 2>/dev/null; then
+  echo "  second-read: git hooks in place"
+elif command -v second-read >/dev/null; then
+  echo "  ⚠ second-read: 'second-read hooks install' didn't install its git hooks (its message is above),"
+  echo "    so commits and pushes from this clone go unchecked. Fix that, then run it again."
+else
+  echo "  ⚠ second-read: no git hooks, so commits and pushes from this clone go unchecked."
+  echo "    Install second-read, then run: second-read hooks install"
+fi
+gh_head="$(head -c 400 "$(command -v gh)" 2>/dev/null | tr -d '\0' || true)"
+case "$gh_head" in
+  *'# Added by second-read: the gh shim.'*) echo "  second-read: gh shim in place" ;;
+  *) echo "  ⚠ second-read: gh posts (PR bodies, comments, issues) go unchecked. Use second-read's"
+     echo "    Claude Code adapter once it's released, or put its gh shim ahead of gh on PATH:"
+     echo "    second-read shim install" ;;
+esac
 
 # --- AGENTS.md block --------------------------------------------------------------------------
 if [ -f AGENTS.md ] && grep -q '^## Agent loop' AGENTS.md; then
