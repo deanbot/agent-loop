@@ -99,7 +99,7 @@ terse and stays true after merge:
 
 ```
 ## What and why
-<two or three sentences>
+<one or two sentences: what changed and why, about the work only>
 
 ## Acceptance criteria and evidence
 | Criterion | Evidence |

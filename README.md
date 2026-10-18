@@ -47,6 +47,25 @@ trusted-authors: [your-login]
 (error messages, bug repros) containing injection payloads. The only complete protection is a
 private repo with trusted collaborators.
 
+### What agents post
+
+The agents post a lot of prose on your behalf: PR bodies, comments, issues, commit messages. A
+rule in your `AGENTS.md` against posting details about your machine, your accounts or what you
+told the agent holds most of the time, not every time, and a post is hard to take back.
+[second-read](https://github.com/deanbot/second-read) is the guard for this: git hooks and a `gh`
+shim, or an adapter for your agent tool, that check each post before it goes out. agent-loop only
+checks for it: `/agent-loop:setup` installs second-read's git hooks when second-read is installed
+(setting `core.hooksPath` switches them off), and warns about each guard that's missing. The loop's
+posts keep short, fixed shapes, so there is less to check.
+
+### Sandboxed sessions
+
+A sandbox can let named commands out (in Claude Code, `sandbox.excludedCommands`), and `gh` needs
+the network. The skills run `gh` and `git push|fetch|pull` as commands on their own, with `--repo
+owner/repo` instead of `cd … && gh …`, so an entry for them matches. These scripts call `gh`, so
+exempt them the same way: `scripts/pick-next.mjs`, `scripts/pr-poll.mjs`, `scripts/pr-watch.mjs`,
+`scripts/pr-qa.mjs` (through `scripts/lib/wait.mjs`) and `adapters/claude-code/setup-project.sh`.
+
 ---
 
 ## What this is not

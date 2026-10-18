@@ -48,6 +48,8 @@ bump needed), then restart running loop sessions.
    Claude Code: `/agent-loop:setup operator|executor|reviewer|qa`. It creates the labels, ignores
    `.agent-loop/` and `.claude/settings.local.json`, writes the role marker, adds the role's Bash
    allow rules to `.claude/settings.local.json`, and enables `.githooks` if the project has one.
+   Then it installs [second-read](https://github.com/deanbot/second-read)'s git hooks when
+   second-read is installed, and warns, without failing, about each of its guards that's missing.
 3. Start the loops, one per session, each in its clone:
    `/agent-loop:start-executor [issue-or-PR]`, `/agent-loop:start-reviewer`, and with
    `qa-gate: on` `/agent-loop:start-qa`. Several executors can run separate tracks with
