@@ -43,6 +43,7 @@ is the project's conventions, which the agents follow.
 | `in-progress-label` | no | `in-progress` | label an executor adds when it claims an issue |
 | `blocked-label` | no | `is-blocked` | label that parks an issue; the operator removes it to resume |
 | `quality-gates` | no | — | command that must pass before a PR is opened or a fix is pushed |
+| `gate` | no | — | the command that stands in for CI when a PR has none (no checks reported, or every check skipped), for a project that can turn CI off: the executor runs it before each push and the reviewer on the head before an LGTM, each quoting its last line, and `MERGE_READY` then requires the reviewer's quote (Merge policy). It may be the same command as `quality-gates` |
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process |
@@ -150,7 +151,9 @@ stopped polls nothing (its issue keeps `in-progress-label`), and a PR the operat
 opened, or one whose executor parked it, has no executor; neither gets `MERGE_READY` from a poll.
 So with every LGTM the reviewer checks the `MERGE_READY` threshold itself (its LGTM on the head
 commit, CI green, `[qa] PASS` after the last commit when `qa-gate: on`, no unanswered inline
-thread, no conflict with the base) and adds the label when it holds; adding it twice does nothing. With CI still pending the
+thread, no conflict with the base; with `gate` and no CI, its LGTM quoting the gate on the head in
+place of CI) and adds the label when it holds; adding it twice does nothing. A passing gate puts
+the label on right after the LGTM, since there is no CI to wait for. With CI still pending the
 executor's poll remains the path, and the LGTM says in one line that a stopped or absent executor
 leaves the PR unlabelled until the operator merges it. When the reviewer later posts findings on a
 labelled PR, it removes the label unless a question is still open. The executor still removes the
@@ -229,11 +232,15 @@ lands between that re-read and the post is still reported.
   only the operator can check by hand), or a standalone `[reviewer] Question` when a decision is
   needed first. The reviewer does not wait for CI: nothing re-triggers it when a check finishes,
   and the executor's poll gates `MERGE_READY` on CI. A red check caused by the PR is a
-  finding; a pending check is noted in the LGTM line.
+  finding; a pending check is noted in the LGTM line. With `gate` set and no CI on the PR, the
+  reviewer runs the gate on the head (a clean checkout of it) before an LGTM: a failure is a
+  finding, and a pass goes into the LGTM as the line `Gate on <short sha>: <the gate's last
+  line>`.
 - `REVIEW_COMMENTS:<n>` — read the thread. A `[qa] PASS` with no `[reviewer]` post since the head
   commit → full review. Only `[qa] BLOCKED` with no executor response → post nothing. Otherwise
   follow up on the executor's or operator's replies: `LGTM`, a further finding, or a clarification,
-  and only if it says something new.
+  and only if it says something new. Any LGTM with `gate` set and no CI on the PR, a follow-up
+  one included, runs the gate on the head first and carries its `Gate on` line.
 - Immediately before posting, re-read the thread and confirm the head has not moved.
 - The reviewer does not relay CI status or echo operator comments; the executor receives both
   directly.
@@ -283,8 +290,9 @@ merge" with its steps, and the operator confirms by a comment or by merging.
 
 ## Executor signals (`pr-poll.mjs`)
 
-Script runs once per poll cycle for one PR, emits signals and content blocks, exits. Usage: `pr-poll.mjs --repo owner/repo --pr <n> [--require-qa]`. Adapters
-pass `--require-qa` when `qa-gate: on`.
+Script runs once per poll cycle for one PR, emits signals and content blocks, exits. Usage:
+`pr-poll.mjs --repo owner/repo --pr <n> [--require-qa] [--require-gate]`. Adapters pass
+`--require-qa` when `qa-gate: on`, and `--require-gate` when the block has `gate`.
 
 | Signal | Meaning |
 |---|---|
@@ -294,7 +302,7 @@ pass `--require-qa` when `qa-gate: on`.
 | `NEW_INLINE_COMMENT` | New or still-unanswered line-level comment(s), not the executor's own |
 | `CI_FAILING` | A check failed or was cancelled on the current head; emitted once per distinct failure set (a re-run that fails again is reported again) |
 | `MERGE_CONFLICT` | the PR conflicts with its base (GitHub reports it unmergeable); repeated on every run while it holds, whether or not the head moved |
-| `MERGE_READY` | the reviewer's newest comment after the head commit is an LGTM, CI green, no unanswered inline threads, not in conflict (and QA's newest is a PASS with `--require-qa`) |
+| `MERGE_READY` | the reviewer's newest comment after the head commit is an LGTM, CI green, no unanswered inline threads, not in conflict (and QA's newest is a PASS with `--require-qa`; and with `--require-gate` and no CI, the LGTM quotes the gate on the head) |
 | `MERGED` | PR is merged |
 
 Content blocks follow signal lines, indented two spaces. `CI_FAILING` blocks carry the check name,
@@ -368,7 +376,7 @@ none startable; the PR is the open one whose body says `Closes #<blocker>`), `MO
 lost claim; `none` is an empty list). A milestone whose only open issues are skipped is not empty:
 the pick is `WAIT` on the lowest of them, so an executor that lost a claim keeps its track until
 the winner's issue merges. Dependencies are the `#n` list right after "Depends on" (`#a, #b`,
-`#a, #b, and #c`, `**Depends on:** #a`). Adapters run it for every pick, a wake after a wait included, so an issue filed while
+`#a, #b, and #c`, `**Depends on:** #a`, `_Depends on_ #a`). Adapters run it for every pick, a wake after a wait included, so an issue filed while
 the executor waited is never missed by reasoning from a list it remembers. A failed `gh` call
 exits 2 with one `pick-next: …` line on stderr and nothing on stdout; the executor retries later
 and never picks by hand. A dependency's state is read from the REST issues endpoint, so a merged
@@ -465,6 +473,11 @@ GitHub blocks self-approval; formal `APPROVED` is not achievable. `MERGE_READY` 
 3. no unanswered top-level inline comments
 4. no failing, cancelled, pending or unreadable CI checks (no checks at all is fine)
 5. the PR does not conflict with its base (not yet computed counts as no conflict)
+6. with `gate` (`--require-gate`) and no CI (no checks reported, or every check `skipping`): the
+   LGTM of item 1 has a line `Gate on <sha>: …` whose `<sha>` (7 or more hex digits) starts the
+   head commit's sha. The line may sit in Markdown emphasis or backticks, or after a quote or
+   list marker, but starts with nothing else. With CI checks present, CI is the gate and no quote
+   is needed
 
 A "Before you merge" note in the LGTM or PASS does not hold `MERGE_READY` back: it tells the
 operator what to run before clicking merge.
@@ -508,6 +521,18 @@ refuse to run in a clone marked for another role. A clone may live anywhere; its
 name is the `<clone>` in claims and per-reviewer state, so it must be unique per repo and stable
 (renaming a clone that holds a claim orphans the claim).
 
+**Two sessions in one clone.** A loop restarted in a fresh session while the old one still runs
+(left in the background, say) signs claims as the same clone, and the two move the checkout
+under each other. Mitigation: `scripts/session.mjs`, where the adapter has a session id. A start
+(`--start <id>`) takes the clone, and the **newest start wins**: a file cannot tell whether the
+session it names is alive, and a restart after a closed terminal must not be refused. Claims
+belong to the clone, so the new session carries them on. The old session is recorded as
+superseded; its next wake (`--beat <id>` → `SUPERSEDED <id>`) stops it, without unclaiming or
+posting, and an adapter with a pre-tool hook refuses its commands at once. A stop releases the
+clone (`--release <id>`). The file is `.agent-loop/session`: `{ "owner": { "id", "at" } | null,
+"superseded": [ids, newest last, at most 20] }`. A session the file never named, such as the
+operator looking around in the clone, is not affected.
+
 ---
 
 ## State persistence
@@ -525,7 +550,8 @@ before per-PR files kept; that file is only read, never written. Once every exec
 version with per-PR files, delete the shared file: while it exists, deleting a PR's file restores
 that PR's old cursors instead of re-seeding. Next to each state file,
 `<state>-wait.json` holds the baseline a one-shot run records for waiters and `<state>-wait.lock`
-the running waiter's pid. State is safe to delete: the next run
+the running waiter's pid. `.agent-loop/session` in the clone (`session.mjs`, "Two sessions in one
+clone") is the one piece of script state kept in the clone rather than under `~/.agent-loop/`. State is safe to delete: the next run
 re-seeds cursors and treats current activity as baseline (live verdicts and unanswered inline
 threads are still surfaced).
 
@@ -545,4 +571,7 @@ the standing case handles it the old way, posting "rebase on main" every cycle w
 stays on, so the reviewer restarts with the script that emits it. Breaking changes to signal
 format or prefix convention increment the version. Adapters note which version they implement.
 `scripts/test/run.mjs` holds the contract tests for the scripts. `pick-next.mjs` (later in 0.2) is
-a helper, not a signal source: its output is the executor's pick, not a signal line.
+a helper, not a signal source: its output is the executor's pick, not a signal line. Later in 0.2,
+additive: the `gate` key and `pr-poll --require-gate` (`MERGE_READY` on a PR with no CI needs the
+reviewer's gate quote; without the flag nothing changes), and `session.mjs`, a helper like
+`pick-next.mjs`.

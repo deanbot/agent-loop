@@ -61,7 +61,29 @@ Every finding needs evidence, not inference:
 
 If you cannot demonstrate a suspected problem, drop it.
 
-## 4. Post one comment
+## 4. Run the gate (only with `gate`, on a PR with no CI)
+
+Only when the block has `gate` and the PR has no CI: `gh pr checks` returned no checks ("no checks
+reported"), or every check is `skipping`. The project has turned CI off and the gate stands in for
+it. With CI checks present, skip this section: CI is the gate.
+
+Run it when you have no findings and are about to post an LGTM (a recheck included), on the head
+you reviewed and a clean tree, after your probe files are deleted:
+
+1. `git fetch origin pull/<n>/head`, then `git switch --detach FETCH_HEAD`, then `git status
+   --porcelain` (it must print nothing). The sha `git switch` reports must be the head you
+   reviewed; another one means the head moved: drop the verdict and let the next cycle review it.
+2. `<gate>`, exactly as the block gives it, with Bash `run_in_background: true` when it takes
+   minutes; wait for its notification. No pipes: read the last line from its output.
+3. `git switch main`.
+
+A non-zero exit is a finding: quote the failing step and its last lines, and post findings, not an
+LGTM. A pass goes into the LGTM as its own line, `Gate on <short sha>: <the gate's last line>`,
+with the sha of the head you ran it on. `pr-poll --require-gate` withholds `MERGE_READY` from an
+LGTM without that line on the head commit. A gate the executor quoted is a pointer, not proof:
+run it yourself.
+
+## 5. Post one comment
 
 Confirm the head has not moved (`gh pr view <n> --repo <repo> --json headRefOid`). Write the
 body to a scratchpad file and `gh pr comment <n> --repo <repo> --body-file <file>`.
@@ -83,13 +105,15 @@ CI: <green | red: <check>, see 2 below>
 Nothing missing, or only things the operator confirms by hand:
 
 ```
-[reviewer] LGTM — <short sha> against #<M>, CI <green | pending>. <One line on what the evidence was.>
+[reviewer] LGTM — <short sha> against #<M>, CI <green | pending | none, gate passed>. <One line on what the evidence was.>
 
+Gate on <short sha>: <the gate's last line>
 Before you merge: <criterion> — run <exact steps from the PR body>; expect <what>.
 After merge: <criterion that can only run on main> — <steps>.
 ```
 
-Omit the two trailing lines when every criterion is proven by a test. Never ask the operator to
+Omit the `Gate on` line unless §4 ran. Omit the two trailing lines when every criterion is proven
+by a test. Never ask the operator to
 post a confirmation first; the operator confirms by a comment or by merging.
 
 For a follow-up after the executor's fix: findings start `[reviewer] Recheck of <sha>.` and list
@@ -104,7 +128,9 @@ when its poll sees `MERGE_READY`, but an executor the operator stopped (its issu
 in-progress label) polls nothing, and a PR the operator or a monitor opened, or one an executor
 parked, has no executor at all. So with every LGTM, check the `MERGE_READY` threshold yourself:
 your LGTM is on the head commit, CI is green (every check `pass` or `skipping`, or no checks at
-all), `[qa] PASS` after the last commit when `qa-gate: on`, and no inline thread is unanswered.
+all; with `gate` and no CI, your LGTM quotes the gate on the head instead), `[qa] PASS` after the
+last commit when `qa-gate: on`, and no inline thread is unanswered. A gate that passed puts the
+label on right after the LGTM: there is no CI to wait for.
 
 - All hold → post the LGTM, then `gh pr view <n> --repo <repo> --json headRefOid,mergeable`.
   Still the sha you reviewed and `mergeable` not `CONFLICTING` → `gh pr edit <n> --repo <repo>
@@ -126,7 +152,7 @@ When you later post findings on a PR that carries `<needs-operator-label>`, `--r
 still open: a finding revokes the LGTM, so the PR is no longer ready. The executor still removes
 the label when it pushes, and still adds it when CI turns green after your LGTM.
 
-## 5. Report to the operator
+## 6. Report to the operator
 
 One line per PR in the terminal: the PR, the sha, the acceptance criteria as a compact checklist,
 the findings as a numbered list with one line of evidence each, and last `**PR #<n>: LGTM**` or

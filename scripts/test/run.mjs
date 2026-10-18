@@ -107,6 +107,37 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
+  // --require-gate: with no CI the reviewer's LGTM must quote the gate on the head; with CI, CI is the gate.
+  const ctx = makeEnv()
+  const head = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+  const lgtm = (extra) => comment(`[reviewer] LGTM — a1b2c3d against #3, no CI.${extra}`, T('2026-01-01T12:00:00Z'))
+  const noCi = (body, more = {}) => ({ ...BASE, pr: { merged: false, head: { sha: head } }, checks: null, comments: [lgtm(body)], ...more })
+  const gate = ['--require-gate']
+  const quoted = '\n\nGate on a1b2c3d: `just gate` → ci: check, e2e, mac and fragment passed on a1b2c3d; the tree was clean'
+  const ready = (out) => signals(out).includes('MERGE_READY')
+  check('poll --require-gate: no CI, LGTM without a gate line → no MERGE_READY', !ready(poll(ctx, noCi(''), gate)))
+  check('poll --require-gate: no CI, LGTM quoting the gate on the head → MERGE_READY', ready(poll(ctx, noCi(quoted), gate)))
+  check('poll --require-gate: … the full sha, in bold, also counts',
+    ready(poll(ctx, noCi(`\n\n**Gate on ${head}:** passed`), gate)))
+  check('poll --require-gate: … a line wrapped in backticks, or a list item, also counts',
+    ready(poll(ctx, noCi('\n\n`Gate on a1b2c3d: ok`'), gate)) && ready(poll(ctx, noCi('\n\n- Gate on a1b2c3d: ok'), gate)))
+  check('poll --require-gate: "Gate on" inside a sentence → no MERGE_READY',
+    !ready(poll(ctx, noCi('\n\nI ran it. Gate on a1b2c3d: ok'), gate)))
+  check('poll --require-gate: no CI, the gate quoted on another commit → no MERGE_READY',
+    !ready(poll(ctx, noCi('\n\nGate on 9f8e7d6: passed'), gate)))
+  check('poll --require-gate: a gate line in an older comment, not the LGTM → no MERGE_READY',
+    !ready(poll(ctx, noCi('', { comments: [comment(`[reviewer] Review of a1b2c3d.${quoted}\n\n1. fix x`, T('2026-01-01T11:00:00Z')), lgtm('')] }), gate)))
+  check('poll --require-gate: every check skipped counts as no CI → quote needed',
+    !ready(poll(ctx, noCi('', { checks: [{ name: 'check', state: 'SKIPPED', bucket: 'skipping' }] }), gate)) &&
+    ready(poll(ctx, noCi(quoted, { checks: [{ name: 'check', state: 'SKIPPED', bucket: 'skipping' }] }), gate)))
+  check('poll --require-gate: CI checks present and green → MERGE_READY without a quote',
+    ready(poll(ctx, noCi('', { checks: BASE.checks }), gate)))
+  check('poll --require-gate: no CI, gate quoted, but in conflict → no MERGE_READY',
+    !ready(poll(ctx, noCi(quoted, { pr: { merged: false, head: { sha: head }, mergeable: false, mergeable_state: 'dirty' } }), gate)))
+  check('poll without --require-gate: no CI, LGTM → MERGE_READY as before', ready(poll(ctx, noCi(''))))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
   const ctx = makeEnv()
   poll(ctx, BASE)
   const stale = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T09:00:00Z'))] }
@@ -504,6 +535,13 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
     pick({ issues: [issue(5, { state: 'CLOSED' }), issue(6, { state: 'CLOSED' }), issue(7, { milestone: M4 }), issue(10, { body: 'Depends on #5, #6, and #7' })], milestones, prs: [] }, ms) === 'WAIT:7 PR:none')
   check('pick: "**Depends on:** #7" is read',
     pick({ issues: [issue(7, { milestone: M4 }), issue(10, { body: '**Depends on:** #7' })], milestones, prs: [] }, ms) === 'WAIT:7 PR:none')
+  check('pick: "_Depends on_ #7" (italic) is read',
+    pick({ issues: [issue(7, { milestone: M4 }), issue(10, { body: '_Depends on_ #7' })], milestones, prs: [] }, ms) === 'WAIT:7 PR:none')
+  check('pick: "_Depends on:_ #5, #7" and "__Depends on__ #7" are read',
+    pick({ issues: [issue(5, { state: 'CLOSED' }), issue(7, { milestone: M4 }), issue(10, { body: '_Depends on:_ #5, #7' })], milestones, prs: [] }, ms) === 'WAIT:7 PR:none' &&
+    pick({ issues: [issue(7, { milestone: M4 }), issue(10, { body: '__Depends on__ #7' })], milestones, prs: [] }, ms) === 'WAIT:7 PR:none')
+  check('pick: "independs on #7" is not a dependency',
+    pick({ issues: [issue(7, { milestone: M4 }), issue(10, { body: 'independs on #7' })] }, ms) === 'ISSUE:10')
   check('pick: "Depends on: #7 & #8" is read',
     pick({ issues: [issue(7, { state: 'CLOSED' }), issue(8, { milestone: M4 }), issue(10, { body: 'Depends on: #7 & #8' })], milestones, prs: [] }, ms) === 'WAIT:8 PR:none')
   check('pick: a list ends at the line break ("Depends on #5\\n#9 is related")',
@@ -928,6 +966,77 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   const second = poll(ctx, fx)
   check('poll: a [reviewer] Reviewing claim after an LGTM leaves MERGE_READY and is never surfaced', signals(first).includes('MERGE_READY') && !first.includes('Reviewing') && second.trim() === 'MERGE_READY', `${first}---\n${second}`)
   rmSync(ctx.home, { recursive: true, force: true })
+}
+
+// ---------------------------------------------------------------- session.mjs and the Claude Code guard
+{
+  // One loop session per clone; the newest start wins. Each case runs in a scratch clone directory.
+  const clone = mkdtempSync(path.join(tmpdir(), 'agent-loop-clone-'))
+  const sess = (...args) => {
+    try {
+      return execFileSync('node', [path.join(scripts, 'session.mjs'), ...args], { cwd: clone, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+    } catch (e) {
+      return `EXIT ${e.status} ${String(e.stderr).trim()}`
+    }
+  }
+  const file = path.join(clone, '.agent-loop', 'session')
+  const read = () => JSON.parse(readFileSync(file, 'utf8'))
+
+  check('session: a start in a clone nobody holds → NEW', sess('--start', 'sess-a') === 'NEW')
+  check('session: the same session again → MINE; its beat → MINE', sess('--start', 'sess-a') === 'MINE' && sess('--beat', 'sess-a') === 'MINE')
+  const b = sess('--start', 'sess-b')
+  check('session: another session starts → TOOK_OVER <old id> <secs>', /^TOOK_OVER sess-a \d+$/.test(b), b)
+  check('session: … the old one is recorded as superseded', read().owner.id === 'sess-b' && read().superseded.join() === 'sess-a', JSON.stringify(read()))
+  check('session: the old session\'s beat → SUPERSEDED <new id>, the new one\'s → MINE',
+    sess('--beat', 'sess-a') === 'SUPERSEDED sess-b' && sess('--beat', 'sess-b') === 'MINE')
+  check('session: release by a session that does not hold it → NOT_OWNER, nothing changes',
+    sess('--release', 'sess-a') === 'NOT_OWNER' && read().owner.id === 'sess-b')
+  check('session: release by the holder → RELEASED', sess('--release', 'sess-b') === 'RELEASED' && read().owner === null)
+  check('session: after the release, a superseded session stays superseded → SUPERSEDED none', sess('--beat', 'sess-a') === 'SUPERSEDED none')
+  check('session: … a session never superseded takes the free clone on its beat → MINE', sess('--beat', 'sess-c') === 'MINE' && read().owner.id === 'sess-c')
+  const back = sess('--start', 'sess-a')
+  check('session: the old session started again (the operator chose it) → TOOK_OVER, and is no longer superseded',
+    /^TOOK_OVER sess-c \d+$/.test(back) && !read().superseded.includes('sess-a') && sess('--beat', 'sess-c') === 'SUPERSEDED sess-a', `${back} ${JSON.stringify(read())}`)
+
+  writeFileSync(file, JSON.stringify({ owner: { id: 'sess-old', at: new Date(Date.now() - 600_000).toISOString() }, superseded: [] }))
+  const aged = sess('--start', 'sess-new')
+  check('session: TOOK_OVER reports how long ago the old session was last seen', /^TOOK_OVER sess-old (59\d|60\d)$/.test(aged), aged)
+  writeFileSync(file, '{ not json')
+  check('session: an unreadable file is an empty one → NEW', sess('--start', 'sess-x') === 'NEW')
+  writeFileSync(file, JSON.stringify({ owner: { id: 'sess-0', at: new Date().toISOString() }, superseded: Array.from({ length: 20 }, (_, i) => `old-${i}`) }))
+  sess('--start', 'sess-y')
+  check('session: the superseded list keeps the newest 20', read().superseded.length === 20 && read().superseded.at(-1) === 'sess-0' && !read().superseded.includes('old-0'), JSON.stringify(read().superseded))
+  const literal = sess('--start', '${CLAUDE_SESSION_ID}')
+  const none = sess('--beat')
+  const two = sess('--start', 'a', '--beat', 'a')
+  check('session: an id that was never filled in, a missing id, or two modes → usage error, exit 1',
+    literal.startsWith('EXIT 1') && none.startsWith('EXIT 1') && two.startsWith('EXIT 1'), `${literal}\n${none}\n${two}`)
+
+  // The guard hook (adapters/claude-code/hooks/guard.mjs) reads the same file.
+  const guardPath = path.resolve(scripts, '..', 'adapters', 'claude-code', 'hooks', 'guard.mjs')
+  const guard = (session_id, tool_name, tool_input = {}, cwd = clone) => {
+    const out = execFileSync('node', [guardPath], { input: JSON.stringify({ cwd, session_id, tool_name, tool_input }), encoding: 'utf8' })
+    return out ? JSON.parse(out).hookSpecificOutput.permissionDecisionReason : 'ALLOW'
+  }
+  writeFileSync(path.join(clone, '.agent-loop', 'role'), 'executor\n')
+  writeFileSync(file, JSON.stringify({ owner: { id: 'sess-new', at: new Date().toISOString() }, superseded: ['sess-old'] }))
+  const sup = guard('sess-old', 'Bash', { command: 'git status --porcelain' })
+  check('guard: a superseded session\'s Bash call is refused, naming the session that took over',
+    /superseded/.test(sup) && /session sess-new took over this executor clone/.test(sup), sup)
+  check('guard: … its Edit, Write and NotebookEdit calls too',
+    ['Edit', 'Write', 'NotebookEdit'].every((t) => /superseded/.test(guard('sess-old', t, { file_path: path.join(clone, 'x.txt') }))))
+  check('guard: … but a plain session.mjs call passes (a restart in the old session)',
+    guard('sess-old', 'Bash', { command: 'node /plugins/agent-loop/scripts/session.mjs --start sess-old' }) === 'ALLOW')
+  check('guard: … and nothing chained onto session.mjs slips past',
+    /superseded/.test(guard('sess-old', 'Bash', { command: 'node /p/scripts/session.mjs --beat sess-old && git checkout main' })))
+  check('guard: the session holding the clone, and one the file never named, are not affected',
+    guard('sess-new', 'Bash', { command: 'git status' }) === 'ALLOW' && guard('sess-new', 'Edit', { file_path: 'x' }) === 'ALLOW' &&
+    guard('sess-operator', 'Bash', { command: 'git status' }) === 'ALLOW')
+  check('guard: merging is still refused for the holder', /operator's action/.test(guard('sess-new', 'Bash', { command: 'gh pr merge 7' })))
+  const bare = mkdtempSync(path.join(tmpdir(), 'agent-loop-bare-'))
+  check('guard: no role marker (the operator\'s clone) → nothing refused', guard('sess-old', 'Bash', { command: 'gh pr merge 7' }, bare) === 'ALLOW')
+  rmSync(bare, { recursive: true, force: true })
+  rmSync(clone, { recursive: true, force: true })
 }
 
 console.log(`\n${passes} passed, ${failures} failed`)

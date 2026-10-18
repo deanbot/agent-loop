@@ -3,7 +3,8 @@
  * Poll a PR for new review signals and emit them by type.
  *
  * Usage:
- *   node scripts/pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--wait [secs] [--max secs]]
+ *   node scripts/pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate]
+ *                            [--wait [secs] [--max secs]]
  *
  * Output — signal lines then content blocks, exits when done (with --wait: the first output that is
  * news, see lib/wait.mjs):
@@ -15,8 +16,9 @@
  *                               distinct failure set (re-emitted when a re-run fails again); content follows
  *   MERGE_CONFLICT              the PR's branch conflicts with its base (GitHub reports it unmergeable); emitted on
  *                               every run while it holds, so it can fall into conflict after an LGTM; no content block
- *   MERGE_READY                 [reviewer] LGTM posted after last commit + CI passing (+ [qa] PASS with --require-qa),
- *                               and the PR not in conflict; no content block
+ *   MERGE_READY                 [reviewer] LGTM posted after last commit + CI passing (+ [qa] PASS with --require-qa;
+ *                               + the gate quoted on the head with --require-gate and no CI), and the PR not in
+ *                               conflict; no content block
  *   MERGED                      PR is merged; executor should stop
  *
  * Content block format (after each signal line):
@@ -33,6 +35,11 @@
  *
  * --require-qa: MERGE_READY additionally requires the QA verdict to be PASS. Without it the QA role is
  * optional: a live [qa] BLOCKED is still surfaced as NEW_COMMENT, but no [qa] PASS is needed.
+ *
+ * --require-gate (the project names a `gate` command): when the PR has no CI (no checks reported, or
+ * every check skipped), MERGE_READY additionally requires the reviewer's LGTM to quote the gate on the
+ * head commit: a line "Gate on <sha>: <the gate's last line>", where <sha> (7 or more hex digits)
+ * starts the head sha. With CI checks present, CI is the gate and no quote is needed.
  *
  * A role's verdict is its NEWEST [role] comment posted after the last commit: a later finding revokes
  * an earlier LGTM/PASS without a push. Reviewer comment kinds by prefix: "[reviewer] LGTM" (verdict),
@@ -55,7 +62,7 @@ import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
-const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--wait [secs] [--max secs]]'
+const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--wait [secs] [--max secs]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -68,6 +75,7 @@ function flag(name) {
 const repo = arg('--repo')
 const prNumber = arg('--pr')
 const requireQa = flag('--require-qa')
+const requireGate = flag('--require-gate')
 
 if (!repo || !prNumber) usageError(USAGE)
 if (!/^\d+$/.test(prNumber)) usageError(USAGE, `--pr: expected a PR number, got "${prNumber}"`)
@@ -144,6 +152,9 @@ function pass({ gh, save, dry }) {
   const checks = fetchChecks()
   const failingChecks = (checks ?? []).filter((c) => c.bucket === 'fail' || c.bucket === 'cancel')
   const ciPassed = checks !== null && checks.every((c) => c.bucket === 'pass' || c.bucket === 'skipping')
+  // No CI: nothing reported, or every check skipped (a workflow switched off by an `if:`). With
+  // --require-gate the project's local gate stands in for it (MERGE_READY below).
+  const noCi = checks !== null && checks.every((c) => c.bucket === 'skipping')
 
   // First run: seed cursors to current max IDs and emit nothing.
   // Only subsequent runs emit NEW_* signals for activity since last check.
@@ -295,15 +306,21 @@ function pass({ gh, save, dry }) {
   if (conflicting) out.push('MERGE_CONFLICT')
 
   // Check merge threshold: the reviewer's NEWEST comment after the last commit is an LGTM (and with
-  // --require-qa, QA's newest is a PASS), + CI passing, + not in conflict. Comments predating new
+  // --require-qa, QA's newest is a PASS; with --require-gate and no CI, the LGTM quotes the gate on the
+  // head), + CI passing, + not in conflict. Comments predating new
   // commits are stale — agents must re-approve after each push — and a later finding from the same role revokes its
   // earlier approval even without a push.
   const newestAfterCommit = (list) =>
     lastCommitDate ? list.filter((c) => new Date(c.created_at) > lastCommitDate).at(-1) : undefined
-  const hasReviewerLgtm = isLgtm(newestAfterCommit(reviewerComments)?.body)
+  const reviewerVerdict = newestAfterCommit(reviewerComments)?.body
+  const hasReviewerLgtm = isLgtm(reviewerVerdict)
   const hasQaPass = isQaPass(newestAfterCommit(qaComments)?.body)
   const qaSatisfied = requireQa ? hasQaPass : true
-  if (hasReviewerLgtm && qaSatisfied && unansweredInline.length === 0 && ciPassed && !conflicting) {
+  // "Gate on <sha>: …" on a line of its own (markdown emphasis, backticks around it, a quote or a list item allowed).
+  const gateSha = /^[\s>*_`-]*Gate on `?([0-9a-f]{7,40})\b/im.exec(reviewerVerdict ?? '')?.[1]?.toLowerCase()
+  const gateQuoted = Boolean(gateSha && headSha && headSha.toLowerCase().startsWith(gateSha))
+  const gateSatisfied = requireGate && noCi ? gateQuoted : true
+  if (hasReviewerLgtm && qaSatisfied && gateSatisfied && unansweredInline.length === 0 && ciPassed && !conflicting) {
     out.push('MERGE_READY')
   }
 

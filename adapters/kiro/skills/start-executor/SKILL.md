@@ -28,6 +28,7 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `blocked-label` — label name indicating a blocked issue to skip (default: `is-blocked`)
 - `needs-operator-label` — label on a PR while it waits on the operator: an open question, or `MERGE_READY` (default: `needs-operator`)
 - `quality-gates` — commands to run at each checkpoint
+- `gate` — optional: the command that stands in for CI on a PR that has none. Every "run quality-gates" includes it: when the PR has no CI checks (`gh pr checks` says "no checks reported", or every check is `skipping`), or no PR exists yet, run `<gate>` on the committed, clean tree before the push (once, when it is the same command as `quality-gates`), and quote its last line as `Gate on <short sha>: <last line>` in the PR body or the push comment. Pass `--require-gate` to pr-poll.mjs when it is set.
 - `qa-gate` — `on` or `off` (default `off`). With `on`, pass `--require-qa` to pr-poll.mjs and expect `[qa]` verdicts; with `off` the reviewer verifies acceptance criteria itself.
 - `trusted-authors` — explicit GitHub login allowlist (e.g. `[alice, bob]`). If set, only these logins are processed; `allow-author-associations` is ignored. See README Security section.
 - `allow-author-associations` — fallback when `trusted-authors` is absent. List of `authorAssociation` values (default: `[OWNER, MEMBER, COLLABORATOR]`). See README Security section.
@@ -133,7 +134,7 @@ Output the waiting status block: three lines, each starting `▌ `, with no box,
 ▌ ⏳ Waiting for review
 ```
 
-Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` from the repo root **once per poll cycle** (append `--require-qa` when `qa-gate` is `on`). Your own `[executor]` posts are already filtered out by the script.
+Run `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` from the repo root **once per poll cycle** (append `--require-qa` when `qa-gate` is `on`, and `--require-gate` when the block has `gate`). Your own `[executor]` posts are already filtered out by the script.
 
 **Loop invariant: every path through the signal handlers below ends with a wait before the next poll — no exceptions. MERGED and BLOCKED are the only exits.**
 

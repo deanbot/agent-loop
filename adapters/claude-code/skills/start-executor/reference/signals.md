@@ -4,6 +4,10 @@
 `[executor]` posts are already filtered out. Handle every signal in a cycle before starting the
 waiter and the single `ScheduleWakeup` call.
 
+"Run `quality-gates`" below includes the gate when the block has `gate` and the PR has no CI
+checks: run it before the push and quote its last line in the push comment
+([implement.md](implement.md) §3).
+
 ## MERGED
 
 `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, then `git checkout main`,
@@ -92,7 +96,7 @@ After posting, the PR body may be stale: update it (`gh pr edit <PR> --repo <rep
 
 `[reviewer] LGTM` is newer than the last commit, CI is green, no inline thread is unanswered,
 the PR does not conflict with `main` (and with `qa-gate: on`, `[qa] PASS` is newer than the last
-commit). Every cycle it holds:
+commit; with `gate` and no CI, the LGTM quotes the gate on the head). Every cycle it holds:
 `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (a no-op when it is on). Print
 the status block with "✅ Ready — operator merges when ready", then wait as usual. Do not merge,
 do not offer to, do not ask. If the operator comments after this, handle it. When you push again,

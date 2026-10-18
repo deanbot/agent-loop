@@ -43,6 +43,15 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
    wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `qa` entry, or
    an entry that matches → print nothing more: there is nothing to report.
 3. If `.agent-loop/role` exists and does not say `qa`, stop: this clone hosts another role.
+
+   **Take the clone for this session**, before touching anything in it: `node
+   ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --start ${CLAUDE_SESSION_ID}`. `NEW` or `MINE` →
+   print nothing. `TOOK_OVER <id> <secs>` → another session ran here and may still be running (an
+   old one left in the background, say): print `⚠ Took over this clone from session <id>, last
+   active <secs ÷ 60> min ago. If it still runs, its next command is refused and it stops.` and
+   carry on. The newest start always wins, so a restart after a closed terminal is never refused.
+   A usage error (no session id was filled in) → print `⚠ No session id: a second session in this
+   clone would go unnoticed.` and carry on.
 4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it to the script.
 
 Rules for the whole session: never merge or push; no interactive prompts (a decision you need from
@@ -62,9 +71,16 @@ script with `--wait`, in the background, which polls every 30 seconds without re
 and exits as soon as a run would have news (or after 25 minutes). Its exit wakes you. Any wakeup
 is a continuation: run the cycle.
 
+**Every wakeup starts with** `node ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --beat
+${CLAUDE_SESSION_ID}`, before anything else (the waiter's exit-3 case included). `MINE` → go on.
+`SUPERSEDED <id>` → another session took this clone over: stop as "superseded" (below). A command
+the plugin's guard refuses as superseded means the same, at any point in a cycle.
+
 A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
-is still alive (it printed `WATCHER_RUNNING`). Run nothing and start no waiter; only call the
-`ScheduleWakeup` from step 5. Any **other failed exit** means the waiter itself broke (a usage
+is still alive (it printed `WATCHER_RUNNING`). Beat, then run nothing else and start no waiter;
+only call the `ScheduleWakeup` from step 5, with `delaySeconds: 300` instead of 1800 when this
+session's start printed `TOOK_OVER` (the live waiter is likely the old session's, which ends
+within 25 minutes). Any **other failed exit** means the waiter itself broke (a usage
 error, a broken install): name it in the status line, run the cycle, but end it with
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
 again, so a failure that repeats costs one turn per five minutes, not one per second.
@@ -102,10 +118,16 @@ The waiter gives up after 25 minutes, which wakes you for an ordinary cycle; the
 only if no waiter woke you. Each `ScheduleWakeup` replaces the pending one.
 
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
-call.** The only exit is the operator's stop: on a message that is, or begins with, the word stop,
-stop the running waiter with `TaskStop` (a deferred tool: load it with
-`ToolSearch("select:TaskStop")`), call `ScheduleWakeup({ stop: true })` and say "QA stopped". A
+call.** The only exits are the operator's stop and being superseded. On a message that is, or
+begins with, the word stop, stop the running waiter with `TaskStop` (a deferred tool: load it with
+`ToolSearch("select:TaskStop")`), call `ScheduleWakeup({ stop: true })`, run `node
+${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --release ${CLAUDE_SESSION_ID}` and say "QA stopped". A
 task notification that arrives after the stop is not a continuation: do nothing.
+
+**Superseded** (a beat printed `SUPERSEDED <id>`, or the guard refused a command as
+superseded): stop the running waiter with `TaskStop`, call `ScheduleWakeup({ stop: true })`, and
+say "QA stopped: session <id> took over this clone". Nothing else: no label, no release, no
+comment, no git command. The new session carries on with the clone's work.
 
 ## Permissions
 
