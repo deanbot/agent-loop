@@ -74,7 +74,9 @@ verifiable by a test CI runs, or marked for the operator to confirm), Reference 
   fix before the push. Quote its last line, as `Gate on <short sha>: <last line>`, in the PR body
   (under the criteria table) or in the `[executor] Pushed fix` comment for that push. The
   reviewer runs the gate again on the head and quotes it in its LGTM, and `MERGE_READY` needs that
-  quote (`--require-gate`).
+  quote (`--require-gate`). A project may run the local runner (`local-ci.mjs`), which runs the
+  gate on every head and posts the result as a check (`local-ci` unless the project named another
+  context). While that check is on the PR, the PR has CI: skip the gate and the quote.
 
 ## 4. Self-check before opening the PR
 

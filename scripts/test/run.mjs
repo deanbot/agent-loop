@@ -2,7 +2,7 @@
 // Contract tests for the signal scripts, run against a fake `gh` (fake-gh.mjs).
 //   node scripts/test/run.mjs
 // No dependencies. Each case gets a fresh HOME (so state files start empty) and a fixture.
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync } from 'fs'
+import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { execFileSync, spawn } from 'child_process'
@@ -965,6 +965,195 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   const first = poll(ctx, fx)
   const second = poll(ctx, fx)
   check('poll: a [reviewer] Reviewing claim after an LGTM leaves MERGE_READY and is never surfaced', signals(first).includes('MERGE_READY') && !first.includes('Reviewing') && second.trim() === 'MERGE_READY', `${first}---\n${second}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
+// ---------------------------------------------------------------- local-ci.mjs
+{
+  // A real git origin (a bare repo with refs/pull/<n>/head) and the runner's own clone; gh is faked,
+  // and the fake writes posted statuses back into the fixture. The gate is the repository's gate.sh,
+  // so each pull request's head carries its own: it records start and end lines and the checked-out
+  // sha in $TRACE.
+  const ctx = makeEnv()
+  const trace = path.join(ctx.home, 'trace')
+  const env = {
+    ...ctx.env,
+    TRACE: trace,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@example.com',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@example.com',
+  }
+  const g = (cwd, ...args) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const origin = path.join(ctx.home, 'origin.git')
+  const seed = path.join(ctx.home, 'seed')
+  const runner = path.join(ctx.home, 'runner')
+  g(ctx.home, 'init', '-q', '--bare', origin)
+  g(ctx.home, 'init', '-q', seed)
+  const GATE_SH = [
+    'echo "start $(cat pr.txt) $(git rev-parse HEAD)" >> "$TRACE"',
+    'sleep 0.3',
+    'echo "end $(cat pr.txt)" >> "$TRACE"',
+    'if [ "$(cat pr.txt)" = fail ]; then echo "lint ok"; echo "2 tests failed"; exit 1; fi',
+    "printf '\\033[32mall 3 passed\\033[0m\\n\\n'",
+  ].join('\n')
+  const commitFiles = (files) => {
+    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(seed, name), text)
+    g(seed, 'add', '-A')
+    g(seed, 'commit', '-q', '-m', 'c')
+    return g(seed, 'rev-parse', 'HEAD')
+  }
+  const agentsMd = (authors) => `# Project\n\n## Agent loop\nrepo: ${REPO}\ntrusted-authors: ${authors}\n\n## Other\ntrusted-authors: [nobody]\n`
+  const mainSha = commitFiles({ 'AGENTS.md': agentsMd('[alice, "@bob"]'), 'pr.txt': 'main\n', 'gate.sh': GATE_SH })
+  g(seed, 'push', '-q', origin, 'HEAD:refs/heads/main')
+  g(ctx.home, '--git-dir', origin, 'symbolic-ref', 'HEAD', 'refs/heads/main')
+  const makePr = (n, files) => {
+    g(seed, 'checkout', '-q', '--detach', mainSha)
+    const sha = commitFiles(typeof files === 'string' ? { 'pr.txt': `${files}\n` } : files)
+    g(seed, 'push', '-q', '--force', origin, `HEAD:refs/pull/${n}/head`)
+    return sha
+  }
+  g(ctx.home, 'clone', '-q', origin, runner)
+  const pr = (number, headRefOid, login = 'alice', isCrossRepository = false) => ({ number, headRefOid, author: { login }, isCrossRepository })
+  const lci = (fixture, extra = [], cwd = runner) => {
+    if (fixture) setFixture(ctx, fixture)
+    try {
+      return execFileSync('node', [path.join(scripts, 'local-ci.mjs'), '--repo', REPO, '--gate', 'sh gate.sh', ...extra], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (e) {
+      return `EXIT ${e.status}\n${e.stdout ?? ''}\n${e.stderr ?? ''}`
+    }
+  }
+  const statuses = () => JSON.parse(readFileSync(ctx.fixture, 'utf8')).statuses ?? {}
+  const traceText = () => {
+    try {
+      return readFileSync(trace, 'utf8')
+    } catch {
+      return ''
+    }
+  }
+  const states = (sha) => (statuses()[sha] ?? []).map((s) => s.state).join()
+  const logDir = path.join(ctx.home, '.agent-loop', 'local-ci', 'acme-widgets')
+
+  const s1 = makePr(1, '1')
+  const s3 = makePr(3, '3')
+  const s4 = makePr(4, '4')
+  const fx1 = { prs: [pr(1, s1), pr(3, s3, 'alice', true), pr(4, s4, 'mallory')], statuses: {} }
+  const out1 = lci(fx1)
+  const st1 = statuses()[s1] ?? []
+  check('local-ci: a new head → pending, then success with the gate\'s last line (colour codes removed)',
+    states(s1) === 'pending,success' && st1[1].description === 'all 3 passed' && st1.every((s) => s.context === 'local-ci') &&
+    out1.trim() === `#1 ${s1.slice(0, 7)} success: all 3 passed`, `${out1}${JSON.stringify(st1)}`)
+  check('local-ci: … the gate ran on the head, checked out detached in the runner\'s clone',
+    traceText().includes(`start 1 ${s1}`) && g(runner, 'rev-parse', 'HEAD') === s1 && g(runner, 'status', '--porcelain', '--branch').startsWith('## HEAD (no branch)'), traceText())
+  const logs = readdirSync(logDir)
+  check('local-ci: … its output went to a log file per run, and the status names none (no --log-url)',
+    logs.length === 1 && logs[0].startsWith(`1-${s1.slice(0, 12)}-`) && readFileSync(path.join(logDir, logs[0]), 'utf8').includes('all 3 passed') &&
+    st1.every((s) => !('target_url' in s)), `${logs} ${JSON.stringify(st1)}`)
+  check('local-ci: a fork\'s head and an untrusted author\'s head get no status and no run',
+    !(s3 in statuses()) && !(s4 in statuses()) && !/start [34] /.test(traceText()), JSON.stringify(statuses()))
+  const before = traceText()
+  const out2 = lci(null)
+  check('local-ci: a head already done is skipped → NONE, no post, no run',
+    /^NONE /.test(out2) && states(s1) === 'pending,success' && traceText() === before, out2)
+
+  const s2 = makePr(2, 'fail')
+  const out3 = lci({ prs: [pr(2, s2)], statuses: {} })
+  check('local-ci: a failing gate → pending, then failure with its last line',
+    states(s2) === 'pending,failure' && statuses()[s2][1].description === '2 tests failed' && out3.includes(`#2 ${s2.slice(0, 7)} failure: 2 tests failed`), `${out3}${JSON.stringify(statuses()[s2])}`)
+
+  const s5 = makePr(5, '5')
+  const stale = { [s5]: [{ state: 'success', context: 'other-ci' }, { state: 'pending', context: 'local-ci', description: 'queued: sh gate.sh' }] }
+  const out4 = lci({ prs: [pr(5, s5)], statuses: stale })
+  check('local-ci: a stale pending under its context is run again on start, with no second pending',
+    statuses()[s5].map((s) => `${s.context}:${s.state}`).join() === 'other-ci:success,local-ci:pending,local-ci:success' && traceText().includes(`start 5 ${s5}`), `${out4}${JSON.stringify(statuses()[s5])}`)
+
+  const s6 = makePr(6, '6')
+  const s7 = makePr(7, '7')
+  writeFileSync(ctx.log, '')
+  writeFileSync(trace, '')
+  lci({ prs: [pr(7, s7), pr(6, s6)], statuses: {} })
+  const order = traceText().split('\n').filter(Boolean).map((l) => l.split(' ').slice(0, 2).join(' '))
+  const posts = readFileSync(ctx.log, 'utf8').split('\n').filter((l) => l.includes('/statuses/')).map((l) => `${/statuses\/(\w{7})/.exec(l)[1] === s6.slice(0, 7) ? 6 : 7}:${/state=(\w+)/.exec(l)[1]}`)
+  check('local-ci: two pull requests run one after the other, oldest first',
+    order.join() === 'start 6,end 6,start 7,end 7', order.join())
+  check('local-ci: … both heads show pending before the first gate starts (a queued head has CI too)',
+    posts.join() === '6:pending,7:pending,6:success,7:success', posts.join())
+
+  // Trusted authors come from AGENTS.md on the default branch, never from the checked-out head.
+  const s8 = makePr(8, { 'pr.txt': '8\n', 'AGENTS.md': agentsMd('[alice, mallory]') })
+  const s9 = makePr(9, '9')
+  lci({ prs: [pr(8, s8)], statuses: {} })
+  const out5 = lci({ prs: [pr(9, s9, 'mallory')], statuses: {} })
+  check('local-ci: a pull request that adds its author to trusted-authors does not make them trusted',
+    readFileSync(path.join(runner, 'AGENTS.md'), 'utf8').includes('mallory') && /^NONE /.test(out5) && !(s9 in statuses()), `${out5}${JSON.stringify(statuses())}`)
+  const s10 = makePr(10, '10')
+  lci({ prs: [pr(10, s10, 'bob')], statuses: {} })
+  check('local-ci: … a quoted "@login" in the list counts', states(s10) === 'pending,success', JSON.stringify(statuses()))
+  const out6 = lci({ prs: [pr(9, s9, 'mallory')], statuses: {} }, ['--trusted-authors', 'mallory'])
+  check('local-ci: --trusted-authors replaces the block\'s list', states(s9) === 'pending,success', `${out6}${JSON.stringify(statuses())}`)
+
+  const s11 = makePr(11, { 'pr.txt': '11\n', 'gate.sh': `node -e "console.log('é'.repeat(200))"\n` })
+  lci({ prs: [pr(11, s11)], statuses: {} }, ['--log-url', 'https://ci.example/logs/'])
+  const st11 = statuses()[s11] ?? []
+  check('local-ci: the description is cut to 140 characters, and --log-url names the run\'s log',
+    [...(st11[1]?.description ?? '')].length === 140 && st11[1].description.startsWith('é') &&
+    new RegExp(`^https://ci\\.example/logs/11-${s11.slice(0, 12)}-[^/]+\\.log$`).test(st11[1].target_url) && !('target_url' in st11[0]),
+    JSON.stringify(st11))
+
+  // A head that cannot be fetched (no refs/pull/12/head on the origin) gets error, not a stuck pending.
+  const out7 = lci({ prs: [pr(12, s1)], statuses: {} })
+  check('local-ci: a head that cannot be checked out → error (never left pending)', states(s1) === 'pending,error' && out7.includes('error: could not check out'), `${out7}${JSON.stringify(statuses()[s1])}`)
+
+  const lockFile = path.join(ctx.home, '.agent-loop', 'state', 'acme-widgets-local-ci-local-ci.lock')
+  writeFileSync(lockFile, JSON.stringify({ pid: process.pid, started: 0 }))
+  const held = lci({ prs: [], statuses: {} })
+  rmSync(lockFile)
+  check('local-ci: a second runner while one is alive → RUNNER_RUNNING <pid>, exit 3 (no expiry)', held.startsWith(`EXIT 3\nRUNNER_RUNNING ${process.pid}`), held)
+  const agentClone = path.join(ctx.home, 'agent-clone')
+  g(ctx.home, 'clone', '-q', origin, agentClone)
+  mkdirSync(path.join(agentClone, '.agent-loop'))
+  writeFileSync(path.join(agentClone, '.agent-loop', 'role'), 'executor\n')
+  const inAgent = lci({ prs: [], statuses: {} }, [], agentClone)
+  const inSub = lci(null, [], path.join(runner, '..'))
+  const noTrust = lci(null, ['--trusted-authors', ''])
+  const noGate = run(ctx, 'local-ci.mjs', ['--repo', REPO], { prs: [] })
+  check('local-ci: refuses an agent\'s clone, a directory that is not a clone\'s root, no trusted authors, no --gate (exit 1)',
+    inAgent.startsWith('EXIT 1') && /agent's/.test(inAgent) && inSub.startsWith('EXIT 1') && noTrust.startsWith('EXIT 1') && noGate.startsWith('EXIT 1'),
+    `${inAgent}${inSub}${noTrust}${noGate}`)
+
+  // --wait keeps going after a run; a stop also stops a running gate, whose head stays pending.
+  const s13 = makePr(13, '13')
+  const s14 = makePr(14, { 'pr.txt': '14\n', 'gate.sh': 'echo $$ > "$TRACE.pid"\nsleep 30\n' })
+  setFixture(ctx, { prs: [pr(13, s13)], statuses: {} })
+  const w = spawn('node', [path.join(scripts, 'local-ci.mjs'), '--repo', REPO, '--gate', 'sh gate.sh', '--wait', '1'], { cwd: runner, env })
+  let wOut = ''
+  w.stdout.on('data', (d) => (wOut += d))
+  const waitFor = async (cond, ms = 15000) => {
+    const t0 = Date.now()
+    while (!cond() && Date.now() - t0 < ms) await pause(100)
+    return cond()
+  }
+  const ran = await waitFor(() => states(s13) === 'pending,success')
+  await pause(1500)
+  check('local-ci --wait: runs a new head and keeps polling', ran && w.exitCode === null && wOut.includes(`#13 ${s13.slice(0, 7)} success`), wOut)
+  const fx14 = { ...JSON.parse(readFileSync(ctx.fixture, 'utf8')), prs: [pr(13, s13), pr(14, s14)] }
+  setFixture(ctx, fx14)
+  const started = await waitFor(() => existsSync(`${trace}.pid`))
+  const gatePid = started ? Number(readFileSync(`${trace}.pid`, 'utf8')) : 0
+  w.kill('SIGTERM')
+  await new Promise((r) => (w.exitCode !== null ? r() : w.on('close', r)))
+  await pause(300)
+  let gateAlive = false
+  try {
+    process.kill(gatePid, 0)
+    gateAlive = true
+  } catch {
+    // gone
+  }
+  check('local-ci --wait: a stop stops the running gate and releases the lock; the head stays pending',
+    started && !gateAlive && states(s14) === 'pending' && !existsSync(lockFile), `${started} ${gateAlive} ${states(s14)}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 

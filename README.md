@@ -87,7 +87,8 @@ pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NON
 A fourth, `pick-next.mjs`, chooses the executor's next issue (`ISSUE:<n>`, `WAIT:<blocker>
 PR:<n|none>`, `MOVE_ON <milestone>`, `NONE`), so a pick always starts from a fresh listing. A
 fifth, `session.mjs`, keeps one loop session per clone: the newest start wins, and an old session
-left running stops.
+left running stops. A sixth, `local-ci.mjs`, is no agent's: a local CI runner for a project with
+a `gate` (below).
 
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green + no conflict with `main` (+
 `[qa] PASS` with `qa-gate: on`). A project that can turn CI off names a `gate` command: on a PR
@@ -138,6 +139,19 @@ second `⚠` line says so when they differ from that role's entry here (a role w
 gets no `⚠` line). It never stops a loop. `gate: <command>` is optional too, for a project that
 can turn CI off: on a PR with no CI, the executor runs it before each push and the reviewer on the
 head before an LGTM (spec: `gate`).
+
+**Local CI.** With a `gate`, you can run it once per head instead, outside the agents. Give it a
+clone of its own (no setup, no role) and leave this running in a terminal or as a login item:
+
+```bash
+node <plugin root>/scripts/local-ci.mjs --repo owner/repo --gate "<your gate>" --wait
+```
+
+It runs the gate on each open PR from a `trusted-authors` login (never a fork), oldest first, one
+at a time, and posts the result as a commit status named `local-ci`. `gh pr checks` lists it, so
+the PR has CI: the agents skip the gate, `MERGE_READY` waits for it, and a failure reaches the
+executor as `CI_FAILING`. Logs go to `~/.agent-loop/local-ci/`. While it is down, new heads get no
+status and the reviewer's quoted run is the merge signal as before (spec: "Local CI runner").
 
 Make one clone per role (for example `proj`, `proj-exec`, `proj-review`) and run
 `/agent-loop:setup <operator|executor|reviewer|qa>` inside each. A clone can live anywhere (next to

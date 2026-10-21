@@ -228,3 +228,11 @@ Say "stop" in a loop's session to end it. Your inbox:
   gh pr list --repo $REPO --label $NEEDS_OP      (a question for you, or a PR ready to merge)
   gh issue list --repo $REPO --label $NEEDS_OP   (a question asked before a PR exists)
 NEXT
+
+if [ -n "$GATE" ]; then
+  cat <<LOCALCI
+Optional: run the gate once per PR head instead, as a local CI check. In a clone of its own (no
+setup, no role), leave this running in a terminal or as a login item:
+  node ${PLUGIN_ROOT:-<plugin root>}/scripts/local-ci.mjs --repo $REPO --gate '$GATE' --wait
+LOCALCI
+fi

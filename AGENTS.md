@@ -35,6 +35,11 @@ Three layers. Boundaries are strict.
   <id> <secs>`), `--beat <id>` (`MINE`, `SUPERSEDED <id|none>`), `--release <id>`. The newest
   start wins; the old session is recorded as superseded in `.agent-loop/session` and stops (the
   Claude Code guard hook refuses its tool calls). Run in the clone's root.
+- `scripts/local-ci.mjs` — a local CI runner, no agent's. `--repo owner/repo --gate "<command>"
+  [--context local-ci] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]`, from the
+  root of a clone of its own (it refuses one with a role marker). Runs the gate once per trusted,
+  same-repository PR head, one at a time, and posts the result as a commit status, which
+  `gh pr checks` and `pr-poll.mjs` read as CI. One runner per repo and context (pid lock).
 - `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a
   waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:
   "Waiting for events").

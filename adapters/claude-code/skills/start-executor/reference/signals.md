@@ -6,7 +6,7 @@ waiter and the single `ScheduleWakeup` call.
 
 "Run `quality-gates`" below includes the gate when the block has `gate` and the PR has no CI
 checks: run it before the push and quote its last line in the push comment
-([implement.md](implement.md) §3).
+([implement.md](implement.md) §3). The local runner's check is CI.
 
 ## MERGED
 
@@ -26,6 +26,12 @@ Emitted once per head commit, with the failing check names and links. `gh run vi
   --failed --repo <repo>`). Never call a real failure a flake.
 - The project's PR body or docs name a human setup step (a secret, an external service): post
   the exact step for the operator and keep polling.
+- A failing check from the local runner (`local-ci.mjs`; `local-ci` unless the project named
+  another context) is a commit status, not a run: no `gh run` id, and its description is the
+  gate's last line. Its log is on the runner's machine, so run `<gate>` on your committed, clean
+  tree to read the failure, then handle it as above. To re-run a flake, post `pending` under its
+  name: `gh api -X POST repos/<repo>/statuses/<head sha> -f state=pending -f context=<check name>
+  -f description=re-run`. The runner runs every pending head it finds.
 
 ## MERGE_CONFLICT
 

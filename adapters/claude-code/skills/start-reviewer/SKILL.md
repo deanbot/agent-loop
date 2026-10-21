@@ -208,7 +208,7 @@ Every comment starts with its kind, because the executor's poll script classifie
   with the exact steps from the PR body. The operator confirms by a comment or by merging, and a
   failure comes back as an unprefixed comment you treat as a finding. The exception is a PR that
   must record the operator's results: they are part of the PR, so wait for them like any criterion. Note the CI state in the first line (`CI green` /
-  `CI pending`, or `CI none, gate passed`), but CI is not a precondition either: the executor's poll gates `MERGE_READY` on
+  `CI pending`, or `CI none, gate passed`; the local runner's check is CI: `CI green (local-ci)`), but CI is not a precondition either: the executor's poll gates `MERGE_READY` on
   CI and receives `CI_FAILING` itself, and nothing would re-trigger you when CI finishes. A red
   check caused by this PR *is* a finding, so then you post findings, not LGTM. With `gate` in the
   block and no CI on the PR, the gate is the precondition: you run it on the head, a failure is a
