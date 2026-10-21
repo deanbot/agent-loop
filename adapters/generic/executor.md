@@ -152,7 +152,8 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 
 - `MERGED` → remove `in-progress-label`, `git checkout main`, then `node scripts/pull.mjs --start
   "<how this loop is started>"` plus `--milestone "<milestone>"` when you have one (the rules
-  diff as above), notify, print its `RESTART: …` line as given (a restart is a new session, and
+  diff as above), notify, print its `RESTART: …` line as given, a failed pull (exit 2)
+  included (a restart is a new session, and
   this is the between-issues point to take it; nothing is printed mid-task), pick next.
 - `CI_FAILING` → read the failing log (`gh run view <id> --log-failed`), fix at the root, run
   `quality-gates`, push once, post one `[executor] Pushed fix: …`. A failure `main` shares, or a

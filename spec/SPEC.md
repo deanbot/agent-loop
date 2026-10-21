@@ -407,7 +407,9 @@ clearing a conversation loads a new plugin version or ends its background waiter
 wakeup. After `MERGED`, the executor's pull takes `--start <its start command>` and
 `--milestone <its track>`, and prints one line for the operator, which the executor prints as is:
 `RESTART: exit this session, start a new one in this clone, then run: <command> [--milestone
-"<title>"]`. That is the between-issues point. Nothing is printed mid-task.
+"<title>"]`. That is the between-issues point. Nothing is printed mid-task. The line does not
+depend on the pull: a failed pull prints it too. In the `git diff` line, a path with a space or a
+shell character is single-quoted.
 
 ### Claim comments
 

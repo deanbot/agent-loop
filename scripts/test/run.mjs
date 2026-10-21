@@ -1255,6 +1255,16 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   const dir = pull()
   check('pull: a rules path ending in "/" covers the directory', /^RULES_CHANGED: AGENTS\.md docs\/c\.md\n/.test(dir.stdout), dir.stdout)
 
+  land({ 'AGENTS.md': block("docs/my rules.md, docs/it's.md"), 'docs/my rules.md': 'a\n', "docs/it's.md": 'a\n' })
+  pull()
+  land({ 'docs/my rules.md': 'b\n', "docs/it's.md": 'b\n' })
+  const spaced = pull()
+  const cmd = spaced.stdout.split('\n')[1]?.trim() ?? ''
+  const shown = cmd ? spawnSync('sh', ['-c', cmd], { cwd: loop, env, encoding: 'utf8' }).stdout : ''
+  check('pull: a rules path with a space or a quote is one shell word in the diff command, which shows its change',
+    spaced.stdout.startsWith("RULES_CHANGED: docs/my rules.md docs/it's.md\n") && cmd.endsWith(`-- 'docs/my rules.md' 'docs/it'\\''s.md'`) &&
+    shown.includes('+++ b/docs/my rules.md') && shown.includes("+++ b/docs/it's.md"), `${spaced.stdout}---\n${shown}`)
+
   land({ 'src/a.js': '5\n' })
   const restart = pull('--start', '/agent-loop:start-executor', '--milestone', 'M3 "core" loop')
   const bare = pull('--start', '/agent-loop:start-executor')
@@ -1269,6 +1279,11 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   land({ 'src/a.js': '6\n' })
   const diverged = pull()
   const lone = pull('--milestone', 'M3')
+  const failedRestart = pull('--start', '/agent-loop:start-executor', '--milestone', 'M3')
+  check('pull --start: a failed pull still prints the restart line (exit 2, the pull: line on stderr)',
+    failedRestart.status === 2 && /^pull: (fatal|error): /.test(failedRestart.stderr) &&
+    failedRestart.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor --milestone "M3"\n',
+    `${failedRestart.status} ${failedRestart.stdout}${failedRestart.stderr}`)
   check('pull: a diverged branch → exit 2, one pull: line, nothing on stdout; --milestone without --start → usage error',
     diverged.status === 2 && diverged.stdout === '' && /^pull: (fatal|error): /.test(diverged.stderr) && diverged.stderr.split('\n').filter(Boolean).length === 1 && lone.status === 1, `${diverged.status} ${diverged.stdout}${diverged.stderr}${lone.stderr}`)
   rmSync(home, { recursive: true, force: true })

@@ -11,15 +11,16 @@
  * directory), prints:
  *   RULES_CHANGED: <file> <file> …
  *     git diff <before>..<after> -- <file> <file> …
- * The second line is the command that shows what changed: read it, never the whole files. No such
- * file changed (or nothing was pulled) → nothing.
+ * The second line is the command that shows what changed: read it, never the whole files (a path
+ * with a space or a shell character is single-quoted there). No such file changed (or nothing was
+ * pulled) → nothing.
  *
  * --start <command> (a between-issues point): then prints the operator's restart line, with the
  * loop's own start arguments:
  *   RESTART: exit this session, start a new one in this clone, then run: <command> [--milestone "<title>"]
  *
  * A failed pull (no upstream, a diverged branch, network) prints `pull: <message>` on stderr and
- * exits 2 with nothing on stdout.
+ * exits 2; stdout then has the RESTART line alone (with --start), or nothing.
  */
 
 import { execFileSync } from 'child_process'
@@ -56,6 +57,15 @@ function rulesPaths(agents) {
     .filter(Boolean)
 }
 
+// A path as one shell word: bare when plain, else single-quoted, so the printed command diffs it.
+const shellWord = (p) => (/^[\w./@%+=:,-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`)
+
+// The restart line does not depend on the pull: a failed pull still reaches the operator with it.
+const restart =
+  start === null
+    ? null
+    : `RESTART: exit this session, start a new one in this clone, then run: ${start}${milestone !== null ? ` --milestone "${milestone.replace(/(["\\])/g, '\\$1')}"` : ''}`
+
 const lines = []
 try {
   const before = git('rev-parse', 'HEAD').trim()
@@ -79,7 +89,7 @@ try {
     }
     if (hits.length > 0) {
       lines.push(`RULES_CHANGED: ${hits.join(' ')}`)
-      lines.push(`  git diff ${before.slice(0, 12)}..${after.slice(0, 12)} -- ${hits.join(' ')}`)
+      lines.push(`  git diff ${before.slice(0, 12)}..${after.slice(0, 12)} -- ${hits.map(shellWord).join(' ')}`)
     }
   }
 } catch (e) {
@@ -87,11 +97,9 @@ try {
   // git leads with hint: lines; the fatal: or error: line is the one that says what stopped it.
   const all = detail.split('\n')
   process.stderr.write(`pull: ${all.find((l) => /^(fatal|error):/.test(l)) ?? all[0]}\n`)
+  if (restart) process.stdout.write(`${restart}\n`)
   process.exit(2)
 }
 
-if (start !== null) {
-  const args = milestone !== null ? ` --milestone "${milestone.replace(/(["\\])/g, '\\$1')}"` : ''
-  lines.push(`RESTART: exit this session, start a new one in this clone, then run: ${start}${args}`)
-}
+if (restart) lines.push(restart)
 if (lines.length > 0) process.stdout.write(lines.join('\n') + '\n')

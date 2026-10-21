@@ -15,7 +15,8 @@ then the pull, with the restart line: `node ${CLAUDE_PLUGIN_ROOT}/scripts/pull.m
 "/agent-loop:start-executor"`, plus `--milestone "<milestone>"` when you have one (the current
 track, after any `MOVE_ON`). A `RULES_CHANGED:` line → run the `git diff …` command under it and
 follow what changed (SKILL.md, "Rules that hold"). Tell the operator in one line, then print the
-`RESTART: …` line exactly as the script gave it, on its own line. Pick next (SKILL.md); if there
+`RESTART: …` line exactly as the script gave it, on its own line. A failed pull (exit 2) prints
+the `RESTART:` line too: print it, after the `⚠ main not pulled` line. Pick next (SKILL.md); if there
 is a next issue, go straight into implementing it. No waiter or wakeup for the merged PR.
 
 ## CI_FAILING
