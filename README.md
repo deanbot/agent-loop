@@ -87,8 +87,9 @@ pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NON
 A fourth, `pick-next.mjs`, chooses the executor's next issue (`ISSUE:<n>`, `WAIT:<blocker>
 PR:<n|none>`, `MOVE_ON <milestone>`, `NONE`), so a pick always starts from a fresh listing. A
 fifth, `session.mjs`, keeps one loop session per clone: the newest start wins, and an old session
-left running stops. A sixth, `local-ci.mjs`, is no agent's: a local CI runner for a project with
-a `gate` (below).
+left running stops. `pull.mjs` is every pull of `main` in a loop: it names the rules files the
+pull changed, so a running loop reads their diff. `local-ci.mjs` is no agent's: a local CI
+runner for a project with a `gate` (below).
 
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green + no conflict with `main` (+
 `[qa] PASS` with `qa-gate: on`). A project that can turn CI off names a `gate` command: on a PR
@@ -170,7 +171,10 @@ Anything you check by hand is listed in the LGTM under "Before you merge"; you c
 comment or by merging.
 Details: [`adapters/claude-code/README.md`](adapters/claude-code/README.md).
 
-> **Updating:** `claude plugin update agent-loop@agent-loop`, then restart loop sessions.
+> **Updating:** `claude plugin update agent-loop@agent-loop`, then restart loop sessions. A
+> restart is a new session in the clone, not `/clear`; after each merge the executor prints the
+> exact restart line, its start arguments included. Rules merged into `AGENTS.md` (or a file the
+> block lists under `rules:`) need no restart: every loop pull shows the loop their diff.
 
 ### Path B — Generic (any tool)
 

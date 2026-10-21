@@ -59,7 +59,8 @@ bare start that ran before the intended command) is then seen at once.
    A usage error (no session id was filled in) → print `⚠ No session id: a second session in this
    clone would go unnoticed.` and carry on.
 4. **See where this clone is before touching `main`.** `git branch --show-current` and `git
-   status --porcelain`. On `main` with a clean tree → `git pull` (an issue you hold that
+   status --porcelain`. On `main` with a clean tree → pull (`pull.mjs`, under "Rules that hold";
+   an issue you hold that
    `$ARGUMENTS` names is resumed later, from reference/implement.md §1). Otherwise (another branch, or
    uncommitted changes anywhere) you may have stopped mid-implementation, for example for a plugin
    update. Take `<N>` from the branch name (`issue-<N>-…`, or the project's issue-branch
@@ -79,7 +80,7 @@ bare start that ran before the intended command) is then seen at once.
      "stop") → claim it again (implement.md §1). You win → you hold it: go on as in the first
      bullet. You lose → as the next bullet.
    - **Anything else** (another clone holds it, it is closed or blocked, or there is no `<N>`):
-     with a clean tree, `git checkout main` then `git pull` (committed work stays on its
+     with a clean tree, `git checkout main` then pull (committed work stays on its
      branch); with uncommitted changes, **stop** and say `<branch> has uncommitted changes and
      this clone does not hold #<N>: commit, stash or discard them, then restart.` Never switch
      branches over uncommitted work.
@@ -100,6 +101,13 @@ Rules that hold for the whole session:
   default, never both.
 - **Never `sleep`.** Waiting is a background waiter plus a fallback `ScheduleWakeup` (below).
   Long commands run with `run_in_background`.
+- **Pull `main` with the script, never a bare `git pull`:** `node
+  ${CLAUDE_PLUGIN_ROOT}/scripts/pull.mjs`. You read `AGENTS.md` once, at the start, so a rule
+  merged while you run reaches you only through it. When it prints `RULES_CHANGED: <files>`, run
+  the `git diff …` command on the line after it, before anything else (the next pick included),
+  and follow what changed from then on. Read only that diff, never the whole files. Nothing
+  printed → no rule changed. A failed pull (exit 2, a `pull:` line) → name it in the status line
+  and carry on from the `main` you have.
 - **One plain command per Bash call** in the loop (`gh …`, `node …`): no `$(…)`, no `;`, no
   pipes. Compound forms defeat the permission allowlist and prompt on every cycle.
 - **`gh` and `git push|fetch|pull` run on their own**, from the clone's root: `gh … --repo
@@ -210,8 +218,8 @@ Each cycle:
    `NEW_INLINE_COMMENT`, `NEW_REVIEW_SUBMISSION`, `NEW_COMMENT`, `MERGE_READY`, `NONE`. Signal
    handling is in [reference/signals.md](reference/signals.md); read it the first time a non-`NONE` signal
    arrives and keep it in mind after that. The short form:
-   - `MERGED` → remove `<in-progress-label>` from the issue, `git checkout main`, `git pull`,
-     tell the operator, pick next (no wakeup for this PR).
+   - `MERGED` → remove `<in-progress-label>` from the issue, `git checkout main`, pull with
+     `--start` (the restart line), tell the operator, pick next (no wakeup for this PR).
    - `CI_FAILING` → read the failing job's log, fix at the root, run the quality gates, push once,
      post one `[executor] Pushed fix: …`.
    - `MERGE_CONFLICT` → the branch conflicts with `main` (often another PR merged after the
@@ -307,7 +315,10 @@ for the operator, and the reply to it belongs to that role: nothing for you.
   BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on
   <PR #n | issue #N>.` on the PR if one exists, else on the issue. Then pick next. Never open a
   speculative PR and never keep building a blocked issue.
-- **Restarting** (a plugin update, a new model): with a PR open, say "stop" (the PR is the claim,
+- **Restarting** is a new session, not `/clear`: nothing says `/clear` loads a new plugin version
+  or ends the old conversation's waiter and scheduled wakeup. Between issues, the restart line
+  (`RESTART: …`, from the pull after a merge) tells the operator exactly how; nothing is printed
+  mid-task. With a PR open, say "stop" (the PR is the claim,
   and it ends the waiter), then start `start-executor <PR>` in a fresh session. Mid-implementation,
   before a PR exists, end the session without "stop" (no waiter runs yet) and start
   `start-executor` again in this clone: the claim and the working tree stay, and step 4 resumes.

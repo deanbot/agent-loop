@@ -115,7 +115,13 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
    you do not hold yet goes through the claim first ("Several reviewers").
    - **`CLOSED:<n>`** (the operator merged or closed it) → nothing to post, whatever was
      outstanding; the operator's merge is the final word. Say "PR #<n> merged or closed; dropped"
-     in the status line and forget it.
+     in the status line and forget it. Then bring `main` up to date, since a merge may have
+     changed the rules you review against (you read `AGENTS.md` once, at the start): `git switch
+     main` when you are not on it, then `node ${CLAUDE_PLUGIN_ROOT}/scripts/pull.mjs`. It prints
+     `RULES_CHANGED: <files>` when `AGENTS.md` or a file the block lists under `rules` changed:
+     run the `git diff …` command on the line after it, before the next review, and review against
+     what changed from then on. Read only that diff, never the whole files. Nothing printed → no
+     rule changed. A failed pull (exit 2, a `pull:` line) → name it in the status line and go on.
    - **`MERGE_CONFLICT:<n>`** → do not review the diff. Two cases:
      - The PR carries `<needs-operator-label>` (it was ready, and `main` moved under it; the
        script reports this whoever owns the PR, executor or not) → `gh pr edit <n> --repo <repo>

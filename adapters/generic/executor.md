@@ -49,8 +49,13 @@ comments (the claim command under "Implement"):
   that is not the issue's.
 - Open with neither `in-progress-label` nor `blocked-label` → claim it; win → you hold it, so as
   the two bullets above; lose → as below.
-- Anything else → clean tree: `git checkout main`, `git pull`; uncommitted changes: stop and say
-  so. Never switch branches over uncommitted work.
+- Anything else → clean tree: `git checkout main`, `node scripts/pull.mjs`; uncommitted
+  changes: stop and say so. Never switch branches over uncommitted work.
+
+Pull `main` with `node scripts/pull.mjs`, never a bare `git pull`: you read `AGENTS.md` once, so a
+rule merged while you run reaches you only through it. On `RULES_CHANGED: <files>`, run the `git
+diff …` command on the line after it before the next pick and follow what changed; read only that
+diff, never the whole files. Nothing printed → no rule changed.
 
 To restart for a plugin update: with a PR open, use the stop file and re-run on the PR;
 mid-implementation, end the session without the stop file: the claim and the working tree stay,
@@ -145,7 +150,10 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 `qa-gate: on`, and `--require-gate` when the block has `gate`). Wait ~60s between cycles. Own
 `[executor]` posts are already filtered out.
 
-- `MERGED` → remove `in-progress-label`, sync `main`, notify, pick next.
+- `MERGED` → remove `in-progress-label`, `git checkout main`, then `node scripts/pull.mjs --start
+  "<how this loop is started>"` plus `--milestone "<milestone>"` when you have one (the rules
+  diff as above), notify, print its `RESTART: …` line as given (a restart is a new session, and
+  this is the between-issues point to take it; nothing is printed mid-task), pick next.
 - `CI_FAILING` → read the failing log (`gh run view <id> --log-failed`), fix at the root, run
   `quality-gates`, push once, post one `[executor] Pushed fix: …`. A failure `main` shares, or a
   documented flake: say so with evidence and re-run; never call a real failure a flake. A

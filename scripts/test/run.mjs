@@ -1194,6 +1194,86 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- pull.mjs
+{
+  // A real origin, a clone that plays the loop's (on main), and a seed clone that lands merges.
+  const home = mkdtempSync(path.join(tmpdir(), 'agent-loop-pull-'))
+  const env = {
+    ...process.env,
+    HOME: home,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@example.com',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@example.com',
+  }
+  const g = (cwd, ...args) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const origin = path.join(home, 'origin.git')
+  const seed = path.join(home, 'seed')
+  const loop = path.join(home, 'loop')
+  g(home, 'init', '-q', '--bare', origin)
+  g(home, 'clone', '-q', origin, seed)
+  g(seed, 'checkout', '-q', '-b', 'main')
+  const land = (files) => {
+    for (const [name, text] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(seed, name)), { recursive: true })
+      writeFileSync(path.join(seed, name), text)
+    }
+    g(seed, 'add', '-A')
+    g(seed, 'commit', '-q', '-m', 'merge')
+    g(seed, 'push', '-q', 'origin', 'HEAD:main')
+    return g(seed, 'rev-parse', 'HEAD')
+  }
+  const block = (rules) => `# P\n\n## Agent loop\nrepo: ${REPO}\n${rules ? `rules: ${rules}\n` : ''}\n## Conventions\nrules: not-this.md\n`
+  land({ 'AGENTS.md': block(''), 'src/a.js': '1\n' })
+  g(home, 'clone', '-q', '--branch', 'main', origin, loop)
+  const pull = (...args) => spawnSync('node', [path.join(scripts, 'pull.mjs'), ...args], { cwd: loop, env, encoding: 'utf8' })
+
+  const head0 = g(loop, 'rev-parse', 'HEAD')
+  land({ 'src/a.js': '2\n' })
+  const code = pull()
+  check('pull: a pull that changes no rules file → nothing printed, exit 0, the clone is at the new head',
+    code.status === 0 && code.stdout === '' && g(loop, 'rev-parse', 'HEAD') !== head0, `${code.status} ${code.stdout}${code.stderr}`)
+  const idle = pull()
+  check('pull: nothing new to pull → nothing printed', idle.status === 0 && idle.stdout === '', `${idle.stdout}${idle.stderr}`)
+
+  const before = g(loop, 'rev-parse', 'HEAD')
+  const after = land({ 'AGENTS.md': block('docs/a.md, ./docs/b.md'), 'src/a.js': '3\n' })
+  const agents = pull()
+  check('pull: AGENTS.md changed → RULES_CHANGED: AGENTS.md, and the diff command for exactly that range',
+    agents.stdout === `RULES_CHANGED: AGENTS.md\n  git diff ${before.slice(0, 12)}..${after.slice(0, 12)} -- AGENTS.md\n`, agents.stdout)
+
+  land({ 'docs/b.md': 'b\n', 'not-this.md': 'x\n', 'src/a.js': '4\n' })
+  const one = pull()
+  land({ 'docs/a.md': 'a\n', 'docs/b.md': 'b2\n' })
+  const two = pull()
+  check('pull: a rules key with two paths → each listed file that changed, and nothing outside the block\'s list',
+    /^RULES_CHANGED: docs\/b\.md\n/.test(one.stdout) && /^RULES_CHANGED: docs\/a\.md docs\/b\.md\n {2}git diff \w+\.\.\w+ -- docs\/a\.md docs\/b\.md\n$/.test(two.stdout),
+    `${one.stdout}---\n${two.stdout}`)
+  land({ 'AGENTS.md': block('docs/'), 'docs/c.md': 'c\n' })
+  const dir = pull()
+  check('pull: a rules path ending in "/" covers the directory', /^RULES_CHANGED: AGENTS\.md docs\/c\.md\n/.test(dir.stdout), dir.stdout)
+
+  land({ 'src/a.js': '5\n' })
+  const restart = pull('--start', '/agent-loop:start-executor', '--milestone', 'M3 "core" loop')
+  const bare = pull('--start', '/agent-loop:start-executor')
+  check('pull --start: the restart line reproduces the start, --milestone included, exactly',
+    restart.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor --milestone "M3 \\"core\\" loop"\n' &&
+    bare.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor\n',
+    `${restart.stdout}${bare.stdout}`)
+
+  writeFileSync(path.join(loop, 'local.txt'), 'x\n')
+  g(loop, 'add', 'local.txt')
+  g(loop, 'commit', '-q', '-m', 'local')
+  land({ 'src/a.js': '6\n' })
+  const diverged = pull()
+  const lone = pull('--milestone', 'M3')
+  check('pull: a diverged branch → exit 2, one pull: line, nothing on stdout; --milestone without --start → usage error',
+    diverged.status === 2 && diverged.stdout === '' && /^pull: (fatal|error): /.test(diverged.stderr) && diverged.stderr.split('\n').filter(Boolean).length === 1 && lone.status === 1, `${diverged.status} ${diverged.stdout}${diverged.stderr}${lone.stderr}`)
+  rmSync(home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- session.mjs and the Claude Code guard
 {
   // One loop session per clone; the newest start wins. Each case runs in a scratch clone directory.

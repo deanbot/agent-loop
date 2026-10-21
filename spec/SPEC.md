@@ -49,6 +49,7 @@ is the project's conventions, which the agents follow.
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status) |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
+| `rules` | no | — | further files the agents follow as the project's rules, comma-separated paths (a path ending in `/` covers a directory); like `AGENTS.md`, a pull that changes one shows a running loop the diff ("Rules that change while a loop runs") |
 | `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
 
 Every start of a loop, including one that resumes held work, prints its role, model and effort
@@ -211,7 +212,8 @@ lands between that re-read and the post is still reported.
 ### Reviewer handling per signal
 
 - `CLOSED:<n>` — the operator merged or closed the PR; nothing to post. Say so in the status line
-  and forget the PR, whatever was outstanding on it.
+  and forget the PR, whatever was outstanding on it. Then switch to `main` and pull it with
+  `pull.mjs`, reading the rules diff it names ("Rules that change while a loop runs").
 - `MERGE_CONFLICT:<n>` — no review. On a PR carrying `needs-operator-label` (it was ready and the
   base moved under it), remove the label unless a question is still open, and post once
   `[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready to merge; …`
@@ -320,7 +322,8 @@ again.
 
 ### Executor handling per signal
 
-- `MERGED` — remove `in-progress-label`, sync `main`, notify, pick next.
+- `MERGED` — remove `in-progress-label`, sync `main` with `pull.mjs --start` (below), notify,
+  print the restart line, pick next.
 - `CI_FAILING` — read the failing log, fix at the root, run quality gates, push once, post one
   `[executor] Pushed fix: …`. A failure `main` shares or a documented flake: say so with evidence
   and re-run; never call a real failure a flake.
@@ -381,6 +384,30 @@ the executor waited is never missed by reasoning from a list it remembers. A fai
 exits 2 with one `pick-next: …` line on stderr and nothing on stdout; the executor retries later
 and never picks by hand. A dependency's state is read from the REST issues endpoint, so a merged
 PR named as a dependency counts as closed.
+
+### Rules that change while a loop runs
+
+A loop reads `AGENTS.md` once, at its start, so a rule merged while it runs would reach it only at
+a restart. Every pull of `main` is therefore `pull.mjs`, never a bare `git pull`: the executor's
+at its start and after `MERGED`, the reviewer's after `CLOSED:<n>`. It runs `git pull --ff-only`
+and, when the pull changed `AGENTS.md` or a file under `rules`, prints
+
+```
+RULES_CHANGED: <file> <file> …
+  git diff <before>..<after> -- <file> <file> …
+```
+
+and nothing otherwise. The loop runs that `git diff` before its next pick or review and follows
+what changed. It reads only the diff, never the whole files, since a project's docs can run to
+hundreds of KB. A failed pull exits 2 with one `pull: …` line on stderr. Skill and plugin changes
+still need a restart.
+
+**Restarting between issues.** A restart is a new session, not a cleared one: nothing says
+clearing a conversation loads a new plugin version or ends its background waiter and scheduled
+wakeup. After `MERGED`, the executor's pull takes `--start <its start command>` and
+`--milestone <its track>`, and prints one line for the operator, which the executor prints as is:
+`RESTART: exit this session, start a new one in this clone, then run: <command> [--milestone
+"<title>"]`. That is the between-issues point. Nothing is printed mid-task.
 
 ### Claim comments
 
@@ -625,4 +652,6 @@ additive: the `gate` key and `pr-poll --require-gate` (`MERGE_READY` on a PR wit
 reviewer's gate quote; without the flag nothing changes), and `session.mjs`, a helper like
 `pick-next.mjs`. Later in 0.2, additive: `local-ci.mjs`, a runner that posts the gate's result as a
 commit status, which the scripts read as a CI check; `pr-poll` tells two runs of a commit status
-apart by its REST id, so a re-run that fails again is `CI_FAILING` again.
+apart by its REST id, so a re-run that fails again is `CI_FAILING` again. Later in 0.2, additive:
+the `rules` key and `pull.mjs`, a helper like `pick-next.mjs` whose `RULES_CHANGED:` and
+`RESTART:` lines are not signal lines.
