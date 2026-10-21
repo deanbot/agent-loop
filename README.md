@@ -65,6 +65,8 @@ the network. The skills run `gh` and `git push|fetch|pull` as commands on their 
 owner/repo` instead of `cd … && gh …`, so an entry for them matches. These scripts call `gh`, so
 exempt them the same way: `scripts/pick-next.mjs`, `scripts/pr-poll.mjs`, `scripts/pr-watch.mjs`,
 `scripts/pr-qa.mjs` (through `scripts/lib/wait.mjs`) and `adapters/claude-code/setup-project.sh`.
+`scripts/pull.mjs` runs `git pull`, so it needs the same exemption: without it every loop pull
+fails, and the loop says so in a `⚠` line each time.
 
 ---
 

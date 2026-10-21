@@ -121,7 +121,9 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
      `RULES_CHANGED: <files>` when `AGENTS.md` or a file the block lists under `rules` changed:
      run the `git diff …` command on the line after it, before the next review, and review against
      what changed from then on. Read only that diff, never the whole files. Nothing printed → no
-     rule changed. A failed pull (exit 2, a `pull:` line) → name it in the status line and go on.
+     rule changed. A failed pull (exit 2, a `pull:` line) → print `⚠ main not pulled: <the
+     pull: line>` for the operator (in a sandbox, the script needs the exemption the README
+     names), and go on.
    - **`MERGE_CONFLICT:<n>`** → do not review the diff. Two cases:
      - The PR carries `<needs-operator-label>` (it was ready, and `main` moved under it; the
        script reports this whoever owns the PR, executor or not) → `gh pr edit <n> --repo <repo>

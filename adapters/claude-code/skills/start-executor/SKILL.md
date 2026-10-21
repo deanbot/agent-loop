@@ -106,8 +106,9 @@ Rules that hold for the whole session:
   merged while you run reaches you only through it. When it prints `RULES_CHANGED: <files>`, run
   the `git diff …` command on the line after it, before anything else (the next pick included),
   and follow what changed from then on. Read only that diff, never the whole files. Nothing
-  printed → no rule changed. A failed pull (exit 2, a `pull:` line) → name it in the status line
-  and carry on from the `main` you have.
+  printed → no rule changed. A failed pull (exit 2, a `pull:` line) → print `⚠ main not pulled:
+  <the pull: line>` for the operator (in a sandbox, the script needs the exemption the README
+  names), and carry on from the `main` you have.
 - **One plain command per Bash call** in the loop (`gh …`, `node …`): no `$(…)`, no `;`, no
   pipes. Compound forms defeat the permission allowlist and prompt on every cycle.
 - **`gh` and `git push|fetch|pull` run on their own**, from the clone's root: `gh … --repo
