@@ -300,7 +300,7 @@ Script runs once per poll cycle for one PR, emits signals and content blocks, ex
 | `NEW_COMMENT` | New PR-level comment(s), not the executor's own |
 | `NEW_REVIEW_SUBMISSION` | New formal review (APPROVED / CHANGES_REQUESTED / COMMENTED) |
 | `NEW_INLINE_COMMENT` | New or still-unanswered line-level comment(s), not the executor's own |
-| `CI_FAILING` | A check failed or was cancelled on the current head; emitted once per distinct failure set (a re-run that fails again is reported again) |
+| `CI_FAILING` | A check failed or was cancelled on the current head; emitted once per distinct failure set (a re-run that fails again is reported again; a commit status, which `gh pr checks` gives no completion time, is told apart by its REST status id) |
 | `MERGE_CONFLICT` | the PR conflicts with its base (GitHub reports it unmergeable); repeated on every run while it holds, whether or not the head moved |
 | `MERGE_READY` | the reviewer's newest comment after the head commit is an LGTM, CI green, no unanswered inline threads, not in conflict (and QA's newest is a PASS with `--require-qa`; and with `--require-gate` and no CI, the LGTM quotes the gate on the head) |
 | `MERGED` | PR is merged |
@@ -619,4 +619,5 @@ a helper, not a signal source: its output is the executor's pick, not a signal l
 additive: the `gate` key and `pr-poll --require-gate` (`MERGE_READY` on a PR with no CI needs the
 reviewer's gate quote; without the flag nothing changes), and `session.mjs`, a helper like
 `pick-next.mjs`. Later in 0.2, additive: `local-ci.mjs`, a runner that posts the gate's result as a
-commit status, which the scripts read as a CI check with no change.
+commit status, which the scripts read as a CI check; `pr-poll` tells two runs of a commit status
+apart by its REST id, so a re-run that fails again is `CI_FAILING` again.

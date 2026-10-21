@@ -13,7 +13,8 @@
  *   NEW_REVIEW_SUBMISSION       new formal review (approve/request-changes/comment); content follows
  *   NEW_INLINE_COMMENT          new line-level review comment(s); content follows
  *   CI_FAILING                  a CI check failed or was cancelled on the current head; emitted once per
- *                               distinct failure set (re-emitted when a re-run fails again); content follows
+ *                               distinct failure set (re-emitted when a re-run fails again; a commit status's
+ *                               run is told apart by its REST status id); content follows
  *   MERGE_CONFLICT              the PR's branch conflicts with its base (GitHub reports it unmergeable); emitted on
  *                               every run while it holds, so it can fall into conflict after an LGTM; no content block
  *   MERGE_READY                 [reviewer] LGTM posted after last commit + CI passing (+ [qa] PASS with --require-qa;
@@ -289,9 +290,19 @@ function pass({ gh, save, dry }) {
   // CI_FAILING — once per distinct failure set on a head commit. The key is the head sha plus the
   // failing checks' names and completion times, so a new push, a re-run that fails again, or a
   // different check failing later on the same head is reported, while an unchanged failing head is
-  // not re-reported every poll.
+  // not re-reported every poll. A commit status (local-ci.mjs posts one) has no completion time:
+  // gh reads only its creation and reports the zero time, the same for every run. Its id in the
+  // REST combined status, new with each post, stands in for it.
+  let statusIds = null
+  const runOf = (c) => {
+    if (c.completedAt && !c.completedAt.startsWith('0001-')) return c.completedAt
+    statusIds ??= new Map(
+      (JSON.parse(gh(`gh api "repos/${repo}/commits/${headSha}/status"`)).statuses ?? []).map((s) => [s.context, s.id])
+    )
+    return `status:${statusIds.get(c.name) ?? ''}`
+  }
   const ciFailedKey = failingChecks.length > 0 && headSha
-    ? `${headSha}:${failingChecks.map((c) => `${c.name}@${c.completedAt ?? ''}`).sort().join(',')}`
+    ? `${headSha}:${failingChecks.map((c) => `${c.name}@${runOf(c)}`).sort().join(',')}`
     : null
   if (ciFailedKey && prState.ciFailedKey !== ciFailedKey) {
     out.push('CI_FAILING')

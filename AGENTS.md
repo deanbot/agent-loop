@@ -128,7 +128,9 @@ one, stop sentinels.
 (reviewer), `<slug>-pr-poll-<pr>.json` (executor, one per PR, so two executors never share a file;
 the older shared `<slug>-pr-poll-state.json` is read once per PR as a migration source; delete it
 once every executor runs per-PR files, or deleting a PR's file restores that PR's old cursors),
-`<slug>-pr-qa-state.json` (QA). Safe to delete.
+`<slug>-pr-qa-state.json` (QA). Safe to delete. `local-ci.mjs` keeps no state (the commit
+statuses are its record): only its pid lock, `<slug>-local-ci-<context>.lock`, and its run logs
+under `~/.agent-loop/local-ci/<slug>/`.
 
 ## One clone per role
 

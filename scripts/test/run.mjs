@@ -252,6 +252,25 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
+  // A commit status (local-ci.mjs) comes from gh pr checks with the zero time as completedAt; its REST
+  // status id tells one run from the next.
+  const ctx = makeEnv()
+  const zero = '0001-01-01T00:00:00Z'
+  const fx = (bucket, id) => ({
+    ...BASE,
+    checks: [{ name: 'local-ci', state: bucket === 'fail' ? 'FAILURE' : 'PENDING', bucket, link: '', completedAt: zero }],
+    statuses: { abc123: [{ id, context: 'local-ci', state: bucket === 'fail' ? 'failure' : 'pending' }] },
+  })
+  const first = poll(ctx, fx('fail', 1))
+  const same = poll(ctx, fx('fail', 1))
+  const rerunning = poll(ctx, fx('pending', 2))
+  const again = poll(ctx, fx('fail', 3))
+  check('poll: a commit status that fails, is re-run (pending) and fails again on the same head → CI_FAILING twice',
+    signals(first).includes('CI_FAILING') && !signals(same).includes('CI_FAILING') && !signals(rerunning).includes('CI_FAILING') && signals(again).includes('CI_FAILING'),
+    `${first}---\n${same}---\n${rerunning}---\n${again}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
   const ctx = makeEnv()
   poll(ctx, BASE)
   const lgtmThenFinding = { ...BASE, comments: [
