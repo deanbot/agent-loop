@@ -35,6 +35,11 @@ Three layers. Boundaries are strict.
   <id> <secs>`), `--beat <id>` (`MINE`, `SUPERSEDED <id|none>`), `--release <id>`. The newest
   start wins; the old session is recorded as superseded in `.agent-loop/session` and stops (the
   Claude Code guard hook refuses its tool calls). Run in the clone's root.
+- `scripts/local-ci.mjs` — a local CI runner, no agent's. `--repo owner/repo --gate "<command>"
+  [--context local-ci] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]`, from the
+  root of a clone of its own (it refuses one with a role marker). Runs the gate once per trusted,
+  same-repository PR head, one at a time, and posts the result as a commit status, which
+  `gh pr checks` and `pr-poll.mjs` read as CI. One runner per repo and context (pid lock).
 - `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a
   waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:
   "Waiting for events").
@@ -74,7 +79,8 @@ An adapter is valid if:
 6. `MERGE_READY` threshold: `[reviewer] LGTM` + CI passing + no conflict with the base, plus
    `[qa] PASS` when `qa-gate: on`, plus, when the block has `gate` and the PR has no CI, the
    LGTM's `Gate on <sha>:` line on the head (the reviewer runs the gate before every LGTM then).
-   Agents never merge; adapters enforce it structurally where the tool allows
+   Agents never merge, and never post a commit status but `pending` (a status is CI, and the
+   local runner posts as the same login); adapters enforce both structurally where the tool allows
 7. Executor prompt includes the pre-PR self-check: each criterion mapped to a test CI runs, or
    given the exact steps the operator runs by hand. A hand check never blocks an approval; the
    operator confirms by a comment or by merging
@@ -123,7 +129,9 @@ one, stop sentinels.
 (reviewer), `<slug>-pr-poll-<pr>.json` (executor, one per PR, so two executors never share a file;
 the older shared `<slug>-pr-poll-state.json` is read once per PR as a migration source; delete it
 once every executor runs per-PR files, or deleting a PR's file restores that PR's old cursors),
-`<slug>-pr-qa-state.json` (QA). Safe to delete.
+`<slug>-pr-qa-state.json` (QA). Safe to delete. `local-ci.mjs` keeps no state (the commit
+statuses are its record): only its pid lock, `<slug>-local-ci-<context>.lock`, and its run logs
+under `~/.agent-loop/local-ci/<slug>/`.
 
 ## One clone per role
 

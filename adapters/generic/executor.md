@@ -127,7 +127,9 @@ Then implement:
    `skipping`), or no PR exists yet, run `<gate>` on the committed, clean tree before the push
    (once, when it is the same command as `quality-gates`), and quote its last line as `Gate on
    <short sha>: <last line>` in the PR body or the push comment. Every later "run
-   `quality-gates`" below includes the gate the same way.
+   `quality-gates`" below includes the gate the same way. A check from the project's local
+   runner (`local-ci.mjs`, which runs the gate on every head) is CI: with it on the PR, skip the
+   gate and the quote.
 5. Self-check: for each criterion, name the test that asserts it (a green suite is not enough),
    or, for one only a human can check, write the exact steps the operator runs. Fix gaps first.
 6. `gh pr create` with: what and why; a Criterion | Evidence table; Decisions; Known limits;
@@ -146,7 +148,13 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 - `MERGED` → remove `in-progress-label`, sync `main`, notify, pick next.
 - `CI_FAILING` → read the failing log (`gh run view <id> --log-failed`), fix at the root, run
   `quality-gates`, push once, post one `[executor] Pushed fix: …`. A failure `main` shares, or a
-  documented flake: say so with evidence and re-run; never call a real failure a flake.
+  documented flake: say so with evidence and re-run; never call a real failure a flake. A
+  failing check from the local runner (`local-ci` unless the project named another context) is
+  a commit status with no run and its log on the runner's machine: run `<gate>` on your clean
+  tree to read the failure. Re-run a flake by posting `pending` under its name (`gh api -X POST
+  repos/<repo>/statuses/<head sha> -f state=pending -f context=<check name> -f
+  description=re-run`); the runner runs every pending head it finds. Post `pending` only, never
+  another state: a result is CI's, the runner's alone.
 - `MERGE_CONFLICT` → the branch conflicts with `main` (often another PR merged after the LGTM);
   it repeats every poll while it holds and withholds `MERGE_READY`. Remove the
   `needs-operator-label` unless a question is still open, bring `main` in the project's way (none

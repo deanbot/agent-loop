@@ -43,10 +43,10 @@ is the project's conventions, which the agents follow.
 | `in-progress-label` | no | `in-progress` | label an executor adds when it claims an issue |
 | `blocked-label` | no | `is-blocked` | label that parks an issue; the operator removes it to resume |
 | `quality-gates` | no | — | command that must pass before a PR is opened or a fix is pushed |
-| `gate` | no | — | the command that stands in for CI when a PR has none (no checks reported, or every check skipped), for a project that can turn CI off: the executor runs it before each push and the reviewer on the head before an LGTM, each quoting its last line, and `MERGE_READY` then requires the reviewer's quote (Merge policy). It may be the same command as `quality-gates` |
+| `gate` | no | — | the command that stands in for CI when a PR has none (no checks reported, or every check skipped), for a project that can turn CI off: the executor runs it before each push and the reviewer on the head before an LGTM, each quoting its last line, and `MERGE_READY` then requires the reviewer's quote (Merge policy). It may be the same command as `quality-gates`. A local runner can run it for them ("Local CI runner") |
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
-| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process |
+| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status) |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
 | `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
@@ -300,7 +300,7 @@ Script runs once per poll cycle for one PR, emits signals and content blocks, ex
 | `NEW_COMMENT` | New PR-level comment(s), not the executor's own |
 | `NEW_REVIEW_SUBMISSION` | New formal review (APPROVED / CHANGES_REQUESTED / COMMENTED) |
 | `NEW_INLINE_COMMENT` | New or still-unanswered line-level comment(s), not the executor's own |
-| `CI_FAILING` | A check failed or was cancelled on the current head; emitted once per distinct failure set (a re-run that fails again is reported again) |
+| `CI_FAILING` | A check failed or was cancelled on the current head; emitted once per distinct failure set (a re-run that fails again is reported again; a commit status, which `gh pr checks` gives no completion time, is told apart by its REST status id) |
 | `MERGE_CONFLICT` | the PR conflicts with its base (GitHub reports it unmergeable); repeated on every run while it holds, whether or not the head moved |
 | `MERGE_READY` | the reviewer's newest comment after the head commit is an LGTM, CI green, no unanswered inline threads, not in conflict (and QA's newest is a PASS with `--require-qa`; and with `--require-gate` and no CI, the LGTM quotes the gate on the head) |
 | `MERGED` | PR is merged |
@@ -464,6 +464,54 @@ node pr-watch.mjs --repo R --wait && node pr-watch.mjs --repo R
 
 ---
 
+## Local CI runner (`local-ci.mjs`)
+
+A project with `gate` can run the gate once per head commit outside any agent session, and post
+the result where CI would be: a commit status (REST `POST /repos/{owner}/{repo}/statuses/{sha}`,
+no Actions needed). `gh pr checks` lists commit statuses beside check runs, so `pr-poll` reads it
+like any check: `pending` withholds `MERGE_READY`, `failure` gives `CI_FAILING`, `success` counts
+as CI passed.
+
+```
+node scripts/local-ci.mjs --repo owner/repo --gate "<command>" [--context local-ci]
+                          [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]
+```
+
+- It runs as a plain process (a terminal or a login item), from the root of a clone kept for it.
+  It refuses a clone with a role marker: it checks heads out with `--force` and cleans the tree.
+- It takes open PRs whose head branch is in the repository (never a fork) and whose author is in
+  `trusted-authors`, read from the `## Agent loop` block on the default branch (fetched each pass,
+  never the working tree, which sits at a PR head), or from `--trusted-authors`. No list → it
+  does not start. These are the PRs whose code the agents already run.
+- Each pass posts `pending` under its context (default `local-ci`) on every such head with no
+  status there, so a head waiting its turn already has CI. Then, oldest PR first and one at a
+  time, for each head `pending` under its context: fetch it, check it out detached, run the gate
+  (its output to a log file per run), and post `success` or `failure` with the gate's last
+  non-empty line as the description (140 characters at most). A head it cannot fetch or check out
+  gets `error`. Any other state under the context is done.
+- One runner per repository and context (a pid lock; a second prints `RUNNER_RUNNING <pid>` and
+  exits 3). So a `pending` it finds is never a run of its own: it runs it. A crash or a stop
+  leaves a head `pending`, and the next start runs it; posting `pending` under the context by
+  hand re-runs a head.
+- The status's `target_url` is `<log-url>/<log file>` with `--log-url`, and none without: a local
+  path means nothing on GitHub.
+- One-shot without `--wait` (exit 2 on a failed `gh` or `git` call). With `--wait` it polls every
+  interval (default 30s) and keeps going: a failed pass is reported on stderr and retried.
+
+**How it meets `gate`.** While its status is on a head, the PR has CI: the executor and the
+reviewer do not run the gate, no `Gate on` quote is needed, and the reviewer's LGTM names the
+check (`CI green (local-ci)`) instead. A failing status is `CI_FAILING`; the log is on the
+runner's machine, so the executor runs the gate itself to read it. With the runner down there is
+no status on new heads, and the reviewer's quoted run is the merge signal as before. A runner
+stopped mid-run leaves the head `pending`, which withholds `MERGE_READY` until it runs again.
+
+**Agents post `pending` only.** In single-account mode the runner and every role post as one
+login, so `pr-poll` cannot tell the runner's `success` from an agent's. An agent may post
+`pending` under the context (a re-run request) and never another state; adapters refuse the rest
+structurally where the tool allows, like a merge.
+
+---
+
 ## Merge policy (single-account mode)
 
 GitHub blocks self-approval; formal `APPROVED` is not achievable. `MERGE_READY` is emitted when:
@@ -542,6 +590,7 @@ operator looking around in the clone, is not affected.
 | `pr-watch.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-state.json`; with `--reviewer <clone>`, `<owner>-<repo>-pr-state-<clone>.json` |
 | `pr-poll.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json` (one per PR) |
 | `pr-qa.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json` |
+| `local-ci.mjs` | no state (the statuses are its record); its lock is `~/.agent-loop/state/<owner>-<repo>-local-ci-<context>.lock`, its logs `~/.agent-loop/local-ci/<owner>-<repo>/<pr>-<sha>-<time>.log` |
 
 Per-repo paths prevent collisions when running agent-loop on several repos, and per-PR paths for
 `pr-poll` let two executors run on one repo without writing the same file. A PR with no `pr-poll`
@@ -574,4 +623,6 @@ format or prefix convention increment the version. Adapters note which version t
 a helper, not a signal source: its output is the executor's pick, not a signal line. Later in 0.2,
 additive: the `gate` key and `pr-poll --require-gate` (`MERGE_READY` on a PR with no CI needs the
 reviewer's gate quote; without the flag nothing changes), and `session.mjs`, a helper like
-`pick-next.mjs`.
+`pick-next.mjs`. Later in 0.2, additive: `local-ci.mjs`, a runner that posts the gate's result as a
+commit status, which the scripts read as a CI check; `pr-poll` tells two runs of a commit status
+apart by its REST id, so a re-run that fails again is `CI_FAILING` again.

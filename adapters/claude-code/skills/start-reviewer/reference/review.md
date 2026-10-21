@@ -65,7 +65,12 @@ If you cannot demonstrate a suspected problem, drop it.
 
 Only when the block has `gate` and the PR has no CI: `gh pr checks` returned no checks ("no checks
 reported"), or every check is `skipping`. The project has turned CI off and the gate stands in for
-it. With CI checks present, skip this section: CI is the gate.
+it. With CI checks present, skip this section: CI is the gate. That includes a check from the
+local runner (`local-ci.mjs`; `local-ci` unless the project named another context), even while
+it is pending: the runner runs the gate on the head itself. The runner posts its check shortly
+after a push, so read `gh pr checks <n> --repo <repo> --json name,state,bucket` again just before
+step 1, and skip this section if a check has appeared. Never post a commit status yourself: a
+result is CI's, the runner's alone (the guard hook refuses any state but `pending`).
 
 Run it when you have no findings and are about to post an LGTM (a recheck included), on the head
 you reviewed and a clean tree, after your probe files are deleted:
@@ -112,7 +117,8 @@ Before you merge: <criterion> — run <exact steps from the PR body>; expect <wh
 After merge: <criterion that can only run on main> — <steps>.
 ```
 
-Omit the `Gate on` line unless §4 ran. Omit the two trailing lines when every criterion is proven
+Omit the `Gate on` line unless §4 ran. When the local runner's check is on the head, the first
+line names it in place of a quote: `CI green (local-ci)`, or `CI pending (local-ci)`. Omit the two trailing lines when every criterion is proven
 by a test. Never ask the operator to
 post a confirmation first; the operator confirms by a comment or by merging.
 

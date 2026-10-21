@@ -15,9 +15,13 @@
 //               gh api repos/o/r/issues/N → { state: 'open' | 'closed' } (array: { number, body, labels,
 //               state?: 'OPEN' | 'CLOSED' | 'MERGED', milestone? }; a MERGED entry is a PR)
 //   milestones → gh api repos/o/r/milestones?…                 (array: { number, title, state })
+//   repo      → gh api repos/o/r                              (object; default { default_branch: 'main' })
+//   statuses  → commit statuses by sha, oldest first           (object: sha → [{ state, context, description, target_url? }])
+//               gh api repos/o/r/commits/SHA/status serves the newest per context; gh api -X POST
+//               repos/o/r/statuses/SHA -f k=v … appends one and writes the fixture back
 //   fail      → every call fails like a network error         (true)
 //   delayMs   → every call takes this long before answering    (number)
-import { readFileSync, appendFileSync } from 'fs'
+import { readFileSync, appendFileSync, writeFileSync, renameSync } from 'fs'
 
 const args = process.argv.slice(2)
 const fixture = JSON.parse(readFileSync(process.env.FAKE_GH_FIXTURE, 'utf8'))
@@ -45,7 +49,28 @@ function outList(key) {
 
 const joined = args.join(' ')
 if (args[0] === 'api') {
-  const target = args.filter((a) => !a.startsWith('--')).at(-1)
+  // The path: the argument naming repos/…, or else the last one that is not a flag.
+  const target = args.find((a) => a.startsWith('repos/')) ?? args.filter((a) => !a.startsWith('--')).at(-1)
+  if (/^repos\/[^/]+\/[^/]+$/.test(target)) out(fixture.repo ?? { default_branch: 'main' })
+  if (/\/commits\/[0-9a-f]+\/status$/.test(target)) {
+    const list = fixture.statuses?.[target.split('/').at(-2)] ?? []
+    const newest = [...list].reverse().filter((s, i, all) => all.findIndex((t) => t.context === s.context) === i)
+    out({ state: newest[0]?.state ?? 'pending', statuses: newest })
+  }
+  if (/\/statuses\/[0-9a-f]+$/.test(target) && args.includes('POST')) {
+    const sha = target.split('/').at(-1)
+    const status = {}
+    args.forEach((a, i) => {
+      if (args[i - 1] === '-f') status[a.slice(0, a.indexOf('='))] = a.slice(a.indexOf('=') + 1)
+    })
+    // Re-read: a test may have rewritten the fixture since this call started.
+    const current = JSON.parse(readFileSync(process.env.FAKE_GH_FIXTURE, 'utf8'))
+    current.statuses ??= {}
+    ;(current.statuses[sha] ??= []).push(status)
+    writeFileSync(`${process.env.FAKE_GH_FIXTURE}.tmp`, JSON.stringify(current))
+    renameSync(`${process.env.FAKE_GH_FIXTURE}.tmp`, process.env.FAKE_GH_FIXTURE)
+    out(status)
+  }
   if (/\/issues\/\d+\/comments$/.test(target)) outList('comments')
   if (/\/pulls\/\d+\/reviews$/.test(target)) outList('reviews')
   if (/\/pulls\/\d+\/comments$/.test(target)) outList('inline')
