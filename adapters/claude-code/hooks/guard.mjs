@@ -85,14 +85,17 @@ if (pushesToDefaultBranch(command)) reasons.push('`git push` to main/master')
 
 // A commit status is CI to pr-poll (scripts/local-ci.mjs posts them), and every role posts as the
 // runner's login, so an agent's `success` would fabricate a CI pass. An agent may post `pending`
-// alone, which asks the runner for a re-run; any other state, or a body the command does not show
-// (--input), is refused.
+// alone, which asks the runner for a re-run; any other state, no state, or --input (a body the
+// command does not show) is refused.
 const statusPosts = command.match(/\bgh\s+api\b[^\n;&|]*\/statuses\/[^\s;&|]*[^\n;&|]*/g) ?? []
 for (const call of statusPosts) {
   // A read (no method, no fields) is harmless; any field makes gh POST.
   const writes = /(?:^|\s)(?:-X|--method)[\s=]*['"]?(POST|PUT|PATCH)\b|(?:^|\s)(?:-f|-F|--field|--raw-field|--input)/i.test(call)
   const states = [...call.matchAll(/(?:^|\s)(?:-f|-F|--field|--raw-field)[\s=]?['"]?state=([^\s'"]*)/g)].map((m) => m[1])
-  if (writes && (states.length === 0 || states.some((s) => s !== 'pending'))) {
+  // With --input the body sets the state and the fields go to the query string, so --input is
+  // refused whatever fields it carries: a re-run never needs a body.
+  const input = /(?:^|\s)--input\b/.test(call)
+  if (writes && (input || states.length === 0 || states.some((s) => s !== 'pending'))) {
     deny(
       `agent-loop: this is the ${role()} clone (.agent-loop/role). A commit status other than \`pending\` is CI's result, which only the local runner posts; never post one here. To re-run the runner on a head, post \`state=pending\` and nothing else.`
     )

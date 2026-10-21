@@ -1262,7 +1262,8 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   const status = (fields) => guard('sess-new', 'Bash', { command: `gh api -X POST repos/o/r/statuses/abc123 ${fields}` })
   check('guard: a commit status other than pending is refused (success, failure, error, quoted, no gap, no state, --input)',
     ['-f state=success -f context=local-ci', '-f state=failure', '-f state=error', "-f 'state=success'", '-fstate=success', '-F state=success',
-      '-f context=local-ci', '--input body.json', '-f state=pending -f state=success'].every((f) => /only the local runner posts/.test(status(f))),
+      '-f context=local-ci', '--input body.json', '-f state=pending -f state=success',
+      '--input body.json -f state=pending', '--input - -f state=pending', '-f state=pending --input=body.json'].every((f) => /only the local runner posts/.test(status(f))),
     status('-f state=success'))
   check('guard: … state=pending (a re-run request) passes, and so does reading statuses',
     status('-f state=pending -f context=local-ci -f description=re-run') === 'ALLOW' &&
