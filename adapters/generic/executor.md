@@ -153,7 +153,8 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
   a commit status with no run and its log on the runner's machine: run `<gate>` on your clean
   tree to read the failure. Re-run a flake by posting `pending` under its name (`gh api -X POST
   repos/<repo>/statuses/<head sha> -f state=pending -f context=<check name> -f
-  description=re-run`); the runner runs every pending head it finds.
+  description=re-run`); the runner runs every pending head it finds. Post `pending` only, never
+  another state: a result is CI's, the runner's alone.
 - `MERGE_CONFLICT` → the branch conflicts with `main` (often another PR merged after the LGTM);
   it repeats every poll while it holds and withholds `MERGE_READY`. Remove the
   `needs-operator-label` unless a question is still open, bring `main` in the project's way (none

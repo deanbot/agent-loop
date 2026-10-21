@@ -69,7 +69,8 @@ it. With CI checks present, skip this section: CI is the gate. That includes a c
 local runner (`local-ci.mjs`; `local-ci` unless the project named another context), even while
 it is pending: the runner runs the gate on the head itself. The runner posts its check shortly
 after a push, so read `gh pr checks <n> --repo <repo> --json name,state,bucket` again just before
-step 1, and skip this section if a check has appeared.
+step 1, and skip this section if a check has appeared. Never post a commit status yourself: a
+result is CI's, the runner's alone (the guard hook refuses any state but `pending`).
 
 Run it when you have no findings and are about to post an LGTM (a recheck included), on the head
 you reviewed and a clean tree, after your probe files are deleted:

@@ -296,9 +296,14 @@ function pass({ gh, save, dry }) {
   let statusIds = null
   const runOf = (c) => {
     if (c.completedAt && !c.completedAt.startsWith('0001-')) return c.completedAt
-    statusIds ??= new Map(
-      (JSON.parse(gh(`gh api "repos/${repo}/commits/${headSha}/status"`)).statuses ?? []).map((s) => [s.context, s.id])
-    )
+    // An unreadable status costs only this distinction (the key falls back to no id), not the poll.
+    if (statusIds === null) {
+      try {
+        statusIds = new Map((JSON.parse(gh(`gh api "repos/${repo}/commits/${headSha}/status"`)).statuses ?? []).map((s) => [s.context, s.id]))
+      } catch {
+        statusIds = new Map()
+      }
+    }
     return `status:${statusIds.get(c.name) ?? ''}`
   }
   const ciFailedKey = failingChecks.length > 0 && headSha

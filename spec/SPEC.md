@@ -46,7 +46,7 @@ is the project's conventions, which the agents follow.
 | `gate` | no | — | the command that stands in for CI when a PR has none (no checks reported, or every check skipped), for a project that can turn CI off: the executor runs it before each push and the reviewer on the head before an LGTM, each quoting its last line, and `MERGE_READY` then requires the reviewer's quote (Merge policy). It may be the same command as `quality-gates`. A local runner can run it for them ("Local CI runner") |
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
-| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process |
+| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status) |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
 | `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
@@ -504,6 +504,11 @@ check (`CI green (local-ci)`) instead. A failing status is `CI_FAILING`; the log
 runner's machine, so the executor runs the gate itself to read it. With the runner down there is
 no status on new heads, and the reviewer's quoted run is the merge signal as before. A runner
 stopped mid-run leaves the head `pending`, which withholds `MERGE_READY` until it runs again.
+
+**Agents post `pending` only.** In single-account mode the runner and every role post as one
+login, so `pr-poll` cannot tell the runner's `success` from an agent's. An agent may post
+`pending` under the context (a re-run request) and never another state; adapters refuse the rest
+structurally where the tool allows, like a merge.
 
 ---
 

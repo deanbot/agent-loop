@@ -230,9 +230,10 @@ Say "stop" in a loop's session to end it. Your inbox:
 NEXT
 
 if [ -n "$GATE" ]; then
+  GATE_QUOTED="$(printf '%q' "$GATE")"
   cat <<LOCALCI
 Optional: run the gate once per PR head instead, as a local CI check. In a clone of its own (no
 setup, no role), leave this running in a terminal or as a login item:
-  node ${PLUGIN_ROOT:-<plugin root>}/scripts/local-ci.mjs --repo $REPO --gate '$GATE' --wait
+  node ${PLUGIN_ROOT:-<plugin root>}/scripts/local-ci.mjs --repo $REPO --gate $GATE_QUOTED --wait
 LOCALCI
 fi

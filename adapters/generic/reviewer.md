@@ -79,7 +79,8 @@ post nothing, wait ~120s. Otherwise the full review:
    local runner (`local-ci.mjs`; `local-ci` unless the project named another context), pending
    included, is CI: skip the gate, and name the check in the LGTM line (`CI green (local-ci)`)
    in place of a quote. The runner posts it shortly after a push, so read `gh pr checks` again
-   just before you would run the gate.
+   just before you would run the gate. Never post a commit status yourself: a result is CI's,
+   the runner's alone.
 4. Re-read the thread and the inline comments, confirm the head has not moved, then post one comment:
    - findings, numbered — each one claim, why, evidence (the probe and its output), which
      criterion or rule it breaks, the concrete fix and the regression test to add;

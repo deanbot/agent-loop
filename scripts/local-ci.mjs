@@ -91,6 +91,16 @@ try {
   // not a checkout
 }
 if (!top || realpathSync(top) !== realpathSync(root)) usageError('run it from the root of a clone kept for the runner')
+// origin must be --repo: pull/<n>/head from another repository never matches a listed head, and
+// its pending would wait forever.
+let originUrl = ''
+try {
+  originUrl = git('remote', 'get-url', 'origin').trim()
+} catch {
+  // no origin
+}
+const repoAt = new RegExp(`[/:]${repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\.git)?/?$`, 'i')
+if (!repoAt.test(originUrl)) usageError(`origin is ${originUrl ? `"${originUrl}"` : 'not set'}, not ${repo}: the runner's clone must be a clone of --repo`)
 if (existsSync(path.join(root, '.agent-loop', 'role'))) {
   usageError(`this clone is an agent's (.agent-loop/role is ${readFileSync(path.join(root, '.agent-loop', 'role'), 'utf8').trim()}): give the runner a clone of its own`)
 }
@@ -234,9 +244,12 @@ async function runOne(pr) {
   try {
     git('fetch', '--quiet', 'origin', `pull/${pr.number}/head`)
     const fetched = git('rev-parse', 'FETCH_HEAD').trim()
-    // The head moved since the listing: the next pass lists the new one. The old head's status no
-    // longer matters to the pull request.
-    if (fetched !== sha) return null
+    // The head moved since the listing: the next pass lists the new one, and the old head's status
+    // no longer matters to the pull request. Said on stderr, so a mismatch that persists is seen.
+    if (fetched !== sha) {
+      process.stderr.write(`${new Date().toISOString()} local-ci: #${pr.number} is listed at ${short} but origin's pull/${pr.number}/head is ${fetched.slice(0, 7)}; skipped this pass\n`)
+      return null
+    }
     git('checkout', '--quiet', '--force', '--detach', sha)
     git('clean', '-fdq')
   } catch (e) {

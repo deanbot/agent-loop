@@ -5,7 +5,7 @@
 import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { execFileSync, spawn } from 'child_process'
+import { execFileSync, spawn, spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -1006,7 +1006,7 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
     GIT_COMMITTER_EMAIL: 't@example.com',
   }
   const g = (cwd, ...args) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-  const origin = path.join(ctx.home, 'origin.git')
+  const origin = path.join(ctx.home, 'acme', 'widgets.git')
   const seed = path.join(ctx.home, 'seed')
   const runner = path.join(ctx.home, 'runner')
   g(ctx.home, 'init', '-q', '--bare', origin)
@@ -1125,6 +1125,24 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   const out7 = lci({ prs: [pr(12, s1)], statuses: {} })
   check('local-ci: a head that cannot be checked out → error (never left pending)', states(s1) === 'pending,error' && out7.includes('error: could not check out'), `${out7}${JSON.stringify(statuses()[s1])}`)
 
+  // A listed head that origin's pull/<n>/head does not match (the head moved, or it persists): skipped
+  // this pass, said on stderr.
+  const s15a = makePr(15, '15a')
+  makePr(15, '15b')
+  setFixture(ctx, { prs: [pr(15, s15a)], statuses: {} })
+  const mis = spawnSync('node', [path.join(scripts, 'local-ci.mjs'), '--repo', REPO, '--gate', 'sh gate.sh'], { cwd: runner, env, encoding: 'utf8' })
+  check('local-ci: a listed head origin does not have → skipped, with a stderr line naming both heads',
+    mis.status === 0 && states(s15a) === 'pending' && new RegExp(`#15 is listed at ${s15a.slice(0, 7)} but origin's pull/15/head is [0-9a-f]{7}`).test(mis.stderr),
+    `${mis.stdout}${mis.stderr}`)
+  const otherClone = path.join(ctx.home, 'other-clone')
+  g(ctx.home, 'clone', '-q', origin, otherClone)
+  g(otherClone, 'remote', 'set-url', 'origin', 'https://github.com/acme/widgets-fork.git')
+  const wrongOrigin = lci({ prs: [], statuses: {} }, [], otherClone)
+  g(otherClone, 'remote', 'set-url', 'origin', 'git@github.com:Acme/Widgets.git')
+  const sshOrigin = lci({ prs: [], statuses: {} }, ['--trusted-authors', 'alice'], otherClone)
+  check('local-ci: a clone whose origin is not --repo → exit 1; an ssh origin naming it (any case) is fine',
+    wrongOrigin.startsWith('EXIT 1') && /not acme\/widgets/.test(wrongOrigin) && /^NONE /.test(sshOrigin), `${wrongOrigin}${sshOrigin}`)
+
   const lockFile = path.join(ctx.home, '.agent-loop', 'state', 'acme-widgets-local-ci-local-ci.lock')
   writeFileSync(lockFile, JSON.stringify({ pid: process.pid, started: 0 }))
   const held = lci({ prs: [], statuses: {} })
@@ -1241,6 +1259,15 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
     guard('sess-new', 'Bash', { command: 'git status' }) === 'ALLOW' && guard('sess-new', 'Edit', { file_path: 'x' }) === 'ALLOW' &&
     guard('sess-operator', 'Bash', { command: 'git status' }) === 'ALLOW')
   check('guard: merging is still refused for the holder', /operator's action/.test(guard('sess-new', 'Bash', { command: 'gh pr merge 7' })))
+  const status = (fields) => guard('sess-new', 'Bash', { command: `gh api -X POST repos/o/r/statuses/abc123 ${fields}` })
+  check('guard: a commit status other than pending is refused (success, failure, error, quoted, no gap, no state, --input)',
+    ['-f state=success -f context=local-ci', '-f state=failure', '-f state=error', "-f 'state=success'", '-fstate=success', '-F state=success',
+      '-f context=local-ci', '--input body.json', '-f state=pending -f state=success'].every((f) => /only the local runner posts/.test(status(f))),
+    status('-f state=success'))
+  check('guard: … state=pending (a re-run request) passes, and so does reading statuses',
+    status('-f state=pending -f context=local-ci -f description=re-run') === 'ALLOW' &&
+    guard('sess-new', 'Bash', { command: 'gh api repos/o/r/commits/abc123/status' }) === 'ALLOW' &&
+    guard('sess-new', 'Bash', { command: 'gh api repos/o/r/statuses/abc123' }) === 'ALLOW')
   const bare = mkdtempSync(path.join(tmpdir(), 'agent-loop-bare-'))
   check('guard: no role marker (the operator\'s clone) → nothing refused', guard('sess-old', 'Bash', { command: 'gh pr merge 7' }, bare) === 'ALLOW')
   rmSync(bare, { recursive: true, force: true })

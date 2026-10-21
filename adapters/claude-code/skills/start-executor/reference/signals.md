@@ -31,7 +31,8 @@ Emitted once per head commit, with the failing check names and links. `gh run vi
   gate's last line. Its log is on the runner's machine, so run `<gate>` on your committed, clean
   tree to read the failure, then handle it as above. To re-run a flake, post `pending` under its
   name: `gh api -X POST repos/<repo>/statuses/<head sha> -f state=pending -f context=<check name>
-  -f description=re-run`. The runner runs every pending head it finds.
+  -f description=re-run`. The runner runs every pending head it finds. Post `pending` only, never
+  another state: a result is CI's, the runner's alone (the guard hook refuses any other).
 
 ## MERGE_CONFLICT
 

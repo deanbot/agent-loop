@@ -18,7 +18,7 @@ adapters/claude-code/
   skills/start-executor/            /agent-loop:start-executor    SKILL.md + reference/
   skills/start-reviewer/            /agent-loop:start-reviewer    SKILL.md + reference/
   skills/start-qa/                  /agent-loop:start-qa          SKILL.md + reference/
-  hooks/hooks.json, guard.mjs       PreToolUse: deny `gh pr merge` in clones with .agent-loop/role,
+  hooks/hooks.json, guard.mjs       PreToolUse: deny `gh pr merge` (and a non-pending commit status) in clones with .agent-loop/role,
                                     and every command from a session another one took over
   setup-project.sh                  what the setup skill runs
   install.sh                        marketplace add + plugin install
@@ -114,8 +114,9 @@ of `ScheduleWakeup({ stop: true })`.
 
 `hooks/guard.mjs` runs on every `PreToolUse` for Bash, Edit, Write and NotebookEdit. When the
 working directory holds `.agent-loop/role` it denies, anywhere in the Bash command text, `gh pr
-merge`, the REST and GraphQL merge routes, and `git push` to `main`/`master`, with a reason the
-agent reads. It also denies every one of those tools to a session `.agent-loop/session` lists as
+merge`, the REST and GraphQL merge routes, `git push` to `main`/`master`, and a commit status
+posted with any state but `pending` (a status is CI to `pr-poll`, and every role posts as the local
+runner's login, so an agent's `success` would fake a pass), with a reason the agent reads. It also denies every one of those tools to a session `.agent-loop/session` lists as
 superseded (a plain `node …/scripts/session.mjs` call excepted), so an old loop session stops at
 its next step instead of moving the checkout under the new one. The operator's
 clone has no marker, so nothing changes there. It is a safety net behind the prompt rule, not a

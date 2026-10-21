@@ -79,7 +79,8 @@ An adapter is valid if:
 6. `MERGE_READY` threshold: `[reviewer] LGTM` + CI passing + no conflict with the base, plus
    `[qa] PASS` when `qa-gate: on`, plus, when the block has `gate` and the PR has no CI, the
    LGTM's `Gate on <sha>:` line on the head (the reviewer runs the gate before every LGTM then).
-   Agents never merge; adapters enforce it structurally where the tool allows
+   Agents never merge, and never post a commit status but `pending` (a status is CI, and the
+   local runner posts as the same login); adapters enforce both structurally where the tool allows
 7. Executor prompt includes the pre-PR self-check: each criterion mapped to a test CI runs, or
    given the exact steps the operator runs by hand. A hand check never blocks an approval; the
    operator confirms by a comment or by merging
