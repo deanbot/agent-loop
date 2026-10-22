@@ -220,7 +220,9 @@ Each cycle:
    handling is in [reference/signals.md](reference/signals.md); read it the first time a non-`NONE` signal
    arrives and keep it in mind after that. The short form:
    - `MERGED` → remove `<in-progress-label>` from the issue, `git checkout main`, pull with
-     `--start` (the restart line), tell the operator, pick next (no wakeup for this PR).
+     `--start`, then write, as your own text, a one-line note to the operator and the `RESTART: …`
+     line verbatim on its own line (the Bash output alone isn't enough), then pick next (no
+     wakeup for this PR).
    - `CI_FAILING` → read the failing job's log, fix at the root, run the quality gates, push once,
      post one `[executor] Pushed fix: …`.
    - `MERGE_CONFLICT` → the branch conflicts with `main` (often another PR merged after the
