@@ -124,8 +124,8 @@ Narrowed by the re-read-before-posting rule; no structural fix without real-time
 ## State files
 
 **Per-clone state** lives in `.agent-loop/` within the project directory (gitignored):
-`role` (executor | reviewer | qa; written by setup; read by the merge-guard hook and the skills'
-wrong-clone check), `session` (which loop session holds the clone and which ones it superseded;
+`role` (executor | reviewer | qa; written by setup; read by the merge-guard hook, the Claude Code
+RESTART-line hook and the skills' wrong-clone check), `session` (which loop session holds the clone and which ones it superseded;
 written by `scripts/session.mjs`, read by the Claude Code guard hook) and, for adapters that need
 one, stop sentinels.
 

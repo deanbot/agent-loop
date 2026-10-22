@@ -1370,6 +1370,54 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   rmSync(clone, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- the Claude Code RESTART-line hook
+{
+  // After a merge, pull.mjs --start prints the RESTART line; the hook shows it to the operator.
+  const hookPath = path.resolve(scripts, '..', 'adapters', 'claude-code', 'hooks', 'restart-line.mjs')
+  const run = (input) => spawnSync('node', [hookPath], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' })
+  const shown = (input) => {
+    const r = run(input)
+    if (r.status !== 0) return `EXIT ${r.status}`
+    return r.stdout ? JSON.parse(r.stdout).systemMessage : 'SILENT'
+  }
+  const clone = (role) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'agent-loop-hook-'))
+    if (role) {
+      mkdirSync(path.join(dir, '.agent-loop'))
+      writeFileSync(path.join(dir, '.agent-loop', 'role'), `${role}\n`)
+    }
+    return dir
+  }
+  const exec = clone('executor')
+  const pull = 'node /plugins/agent-loop/scripts/pull.mjs --start "/agent-loop:start-executor" --milestone "M7"'
+  const restart = 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor --milestone "M7"'
+  const ok = (command, stdout, cwd = exec) => ({ cwd, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command }, tool_response: { stdout, stderr: '', interrupted: false, isImage: false } })
+
+  check('restart hook: executor clone, pull.mjs --start, a RESTART line → that line as the systemMessage, exactly',
+    shown(ok(pull, `${restart}\n`)) === restart, shown(ok(pull, `${restart}\n`)))
+  const rules = `RULES_CHANGED: AGENTS.md\n  git diff abc..def -- AGENTS.md\n${restart}\n`
+  check('restart hook: RULES_CHANGED lines before it → only the RESTART line', shown(ok(pull, rules)) === restart, shown(ok(pull, rules)))
+  const failed = { cwd: exec, hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: pull }, error: `Exit code 2\npull: Not possible to fast-forward, aborting.\n${restart}` }
+  check('restart hook: a failed pull (exit 2, PostToolUseFailure shape) → the line', shown(failed) === restart, shown(failed))
+  check('restart hook: pull.mjs without --start → silent', shown(ok('node /p/scripts/pull.mjs', restart)) === 'SILENT')
+  check('restart hook: other commands (pick-next, git diff, session.mjs --start, a grep naming pull.mjs) → silent, even with a RESTART-looking line',
+    ['node /p/scripts/pick-next.mjs --repo o/r --skip none', 'git diff abc..def -- AGENTS.md', 'node /p/scripts/session.mjs --start sess-a',
+      'node /p/scripts/repull.mjs --start x', 'grep -n RESTART scripts/pull.mjs'].every((c) => shown(ok(c, restart)) === 'SILENT'))
+  const reviewer = clone('reviewer')
+  const bare = clone(null)
+  check('restart hook: a reviewer clone, or a clone with no role marker → silent',
+    shown(ok(pull, restart, reviewer)) === 'SILENT' && shown(ok(pull, restart, bare)) === 'SILENT')
+  check('restart hook: output without a RESTART line → silent', shown(ok(pull, 'RULES_CHANGED: AGENTS.md\n')) === 'SILENT')
+  check('restart hook: another tool, malformed or empty stdin → silent, exit 0',
+    shown({ ...ok(pull, restart), tool_name: 'Edit' }) === 'SILENT' && shown('{ not json') === 'SILENT' && shown('') === 'SILENT')
+  const hooks = JSON.parse(readFileSync(path.resolve(scripts, '..', 'adapters', 'claude-code', 'hooks', 'hooks.json'), 'utf8')).hooks
+  const runs = (event, file) => (hooks[event] ?? []).some((e) => e.matcher === 'Bash' && e.hooks.some((h) => h.command.includes(`hooks/${file}`)))
+  check('restart hook: hooks.json runs it after Bash on PostToolUse and PostToolUseFailure; the guard entry is unchanged',
+    runs('PostToolUse', 'restart-line.mjs') && runs('PostToolUseFailure', 'restart-line.mjs') &&
+    hooks.PreToolUse.length === 1 && hooks.PreToolUse[0].matcher === 'Bash|Edit|Write|NotebookEdit' && hooks.PreToolUse[0].hooks[0].command.includes('hooks/guard.mjs'))
+  for (const dir of [exec, reviewer, bare]) rmSync(dir, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- .github/workflows/ci.yml
 {
   const ci = readFileSync(path.resolve(scripts, '..', '.github', 'workflows', 'ci.yml'), 'utf8')

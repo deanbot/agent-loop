@@ -20,6 +20,7 @@ adapters/claude-code/
   skills/start-qa/                  /agent-loop:start-qa          SKILL.md + reference/
   hooks/hooks.json, guard.mjs       PreToolUse: deny `gh pr merge` (and a non-pending commit status) in clones with .agent-loop/role,
                                     and every command from a session another one took over
+  hooks/restart-line.mjs            PostToolUse(Failure): show the operator pull.mjs's RESTART line in an executor clone
   setup-project.sh                  what the setup skill runs
   install.sh                        marketplace add + plugin install
 ```
@@ -122,6 +123,16 @@ its next step instead of moving the checkout under the new one. The operator's
 clone has no marker, so nothing changes there. It is a safety net behind the prompt rule, not a
 security boundary: the same action through another program (a script, `sh -c`, the API from node)
 is not caught. A comment body that quotes the literal phrase `gh pr merge` is refused too; reword.
+
+## RESTART-line hook
+
+`hooks/restart-line.mjs` runs after every Bash call (`PostToolUse`, and `PostToolUseFailure` for
+a failed pull, which exits 2 and still prints the line). In a clone whose `.agent-loop/role` says
+`executor`, after a `pull.mjs --start …` call, it returns the `RESTART: …` line from the output as
+a `systemMessage`, so the operator sees it even when the terminal collapses the tool's output or
+the session skips writing it. Anything else, it prints nothing. It only reads its input and never
+blocks a call. The executor still writes the line in its own text; the hook is the copy that
+doesn't depend on the model.
 
 ## Known limitations
 

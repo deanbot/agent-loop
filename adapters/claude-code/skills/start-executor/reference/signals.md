@@ -22,7 +22,8 @@ it. A failed pull (exit 2) prints the `RESTART:` line too: write it, after the `
 pulled` line. The `RESTART:` line is for the operator to act on later, not an instruction to this
 session: don't exit, and don't end your turn on it. In the same reply, run `pick-next.mjs`
 (SKILL.md, "Pick next") right after the note and the line; if there is a next issue, go straight
-into implementing it. No waiter or wakeup for the merged PR.
+into implementing it. If the turn ends after the pick on a `WAIT` or `NONE` status, repeat the
+`RESTART: …` line in that closing text. No waiter or wakeup for the merged PR.
 
 ## CI_FAILING
 

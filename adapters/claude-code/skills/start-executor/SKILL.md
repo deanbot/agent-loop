@@ -219,13 +219,17 @@ Each cycle:
    `NEW_INLINE_COMMENT`, `NEW_REVIEW_SUBMISSION`, `NEW_COMMENT`, `MERGE_READY`, `NONE`. Signal
    handling is in [reference/signals.md](reference/signals.md); read it the first time a non-`NONE` signal
    arrives and keep it in mind after that. The short form:
-   - `MERGED` → remove `<in-progress-label>` from the issue, `git checkout main`, then `node
-     ${CLAUDE_PLUGIN_ROOT}/scripts/pull.mjs --start "/agent-loop:start-executor"`, plus
-     `--milestone "<milestone>"` when you have one. Write, as your own text, a one-line note to
-     the operator and the `RESTART: …` line verbatim on its own line (the Bash output alone isn't
-     enough). That line is for the operator to act on later, not an instruction to you, and
-     writing it doesn't end your turn: in the same reply, run `pick-next.mjs` right after it (no
-     wakeup for this PR).
+   - `MERGED` → in this order, every step, `RULES_CHANGED` or not (no wakeup for this PR):
+     1. Remove `<in-progress-label>` from the issue, then `git checkout main`.
+     2. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pull.mjs --start "/agent-loop:start-executor"`, plus
+        `--milestone "<milestone>"` when you have one.
+     3. On `RULES_CHANGED:`, run the `git diff …` command under it and follow what changed.
+     4. Write, as your own text, a one-line note to the operator and the `RESTART: …` line
+        verbatim on its own line (the Bash output alone isn't enough). The line is for the
+        operator to act on later, not an instruction to you, and writing it doesn't end your
+        turn.
+     5. In the same reply, run `pick-next.mjs`. If the turn then ends on a `WAIT` or `NONE`
+        status, repeat the `RESTART: …` line in that closing text.
    - `CI_FAILING` → read the failing job's log, fix at the root, run the quality gates, push once,
      post one `[executor] Pushed fix: …`.
    - `MERGE_CONFLICT` → the branch conflicts with `main` (often another PR merged after the
@@ -277,8 +281,8 @@ scheduling it every cycle never stacks wakeups. A standing `MERGE_READY` does no
 by itself: the waiter returns when it appears, or with new activity.
 
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
-call, after any posting.** The only exits are `MERGED` (then pick next; the `RESTART:` text is not an exit), BLOCKED (then pick next),
-nothing to pick (with `<milestone>`: no open issue left in it or a later milestone; a track that
+call, after any posting.** The only exits are `MERGED` (then pick next; the `RESTART:` text
+is not an exit), BLOCKED (then pick next), nothing to pick (with `<milestone>`: no open issue left in it or a later milestone; a track that
 waits on a blocker schedules its 600- or 1800-second wakeup instead), the operator's stop, and
 being superseded. If an iteration forgets, Claude Code fires one fallback
 wakeup after about 20 minutes and then ends the loop, so do not rely on it.
