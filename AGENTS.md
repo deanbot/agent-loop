@@ -178,7 +178,11 @@ block). `claude plugin validate .` checks the manifests (by hand: CI doesn't ins
 every push to `main`, on Node 22 and 24, with a read-only token and actions pinned to commit shas
 (the contract tests check both). The check to require in a ruleset is `contract-tests`: it passes
 when the tests pass on both versions, or when the change touches only Markdown files (the tests
-are skipped then).
+are skipped then). The jobs check out the PR's head commit and compare it with the event's base,
+never GitHub's merge commit, and a change of base branch (`edited`) starts a new run. **After a
+PR's base branch changes, wait for the new run before merging:** until `gh pr checks` shows
+nothing pending and `contract-tests` from the new run, the head still shows the result from the
+old base.
 
 - **Switch it off:** `gh variable set AGENT_LOOP_CI --body off --repo deanbot/agent-loop`. No job
   runs, and the one check that reports is `contract-tests (off)`, so a required `contract-tests`

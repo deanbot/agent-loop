@@ -11,8 +11,14 @@
 
 name: CI
 
+# Every checkout is the pull request's head commit (the pushed commit on main), and the change
+# detection compares the event's base and head: never GitHub's merge commit, which is made when the
+# event fires and isn't remade when the base branch changes.
 on:
+  # `edited` is for a change of base branch, which changes what a pull request merges without a
+  # push. It also fires on title and body edits, which the workflow doesn't read: one more run.
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
 
@@ -32,6 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       # code=false only when every changed path ends in .md. Anything uncertain (a new branch, a
@@ -63,6 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
