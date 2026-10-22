@@ -207,3 +207,8 @@ mechanism. The core (scripts + spec) has no tool assumptions. Adding a new tool 
 adapter; nothing in core changes.
 
 See [`AGENTS.md`](AGENTS.md) for architecture principles and the adapter contract.
+
+## Contributing
+
+Issues, pull requests, running the tests and reporting a security problem:
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
