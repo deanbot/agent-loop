@@ -9,7 +9,7 @@ node scripts/test/run.mjs
 ```
 
 They run every script against a fake `gh`, so they need no GitHub access. CI runs them on every
-pull request, on Node 22 and 24.
+pull request that changes more than Markdown, on Node 22 and 24.
 
 ## Trying a plugin change without installing it
 
