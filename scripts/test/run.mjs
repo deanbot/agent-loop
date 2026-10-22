@@ -1283,6 +1283,16 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   const perms = /^permissions:\n((?:[ \t]+.*\n)+)/m.exec(ci)?.[1].trim()
   check('ci: the token is read-only (permissions: contents: read, nothing else, no job overrides)',
     perms === 'contents: read' && ci.match(/^\s*permissions:/gm).length === 1 && !/pull_request_target/.test(ci), perms)
+  const types = /^  pull_request:\n    types: \[(.*)\]$/m.exec(ci)?.[1].split(',').map((s) => s.trim()) ?? []
+  check('ci: a pull request reruns on edited (a change of base branch), and on the default types',
+    ['opened', 'synchronize', 'reopened', 'edited'].every((t) => types.includes(t)), types.join())
+  const checkouts = [...ci.matchAll(/uses: actions\/checkout@\S+.*\n((?: {8}.*\n)*)/g)].map((m) => m[1])
+  check('ci: every checkout is the pull request\'s head commit (or the pushed one), never the merge commit',
+    checkouts.length === 2 && checkouts.every((w) => /^\s+ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}$/m.test(w)), checkouts.join('---\n'))
+  check('ci: the change detection diffs the event\'s base and head shas',
+    ci.includes("BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}") &&
+    ci.includes("HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}") &&
+    ci.includes('git diff --name-only --no-renames "$BASE...$HEAD"'))
   const jobs = ci.slice(ci.indexOf('\njobs:'))
   const jobIfs = [...jobs.matchAll(/^  [\w-]+:\n(?:    .*\n)*?    if: (.*)$/gm)].map((m) => m[1])
   check('ci: every job is off while AGENT_LOOP_CI is off', jobIfs.length === 3 && jobIfs.every((c) => c.includes("vars.AGENT_LOOP_CI != 'off'")), jobIfs.join('\n'))
