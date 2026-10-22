@@ -155,7 +155,9 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
   diff as above), then write in your own reply a one-line note and its `RESTART: …` line as
   given, on its own line, a failed pull (exit 2) included. The command's output alone may be
   collapsed or never shown (a restart is a new session, and this is the between-issues point to
-  take it; nothing is printed mid-task). Then pick next.
+  take it; nothing is printed mid-task). The line is for the operator to act on later, not an
+  instruction to you, and writing it doesn't end your turn: in the same reply, run
+  `pick-next.mjs` right after it.
 - `CI_FAILING` → read the failing log (`gh run view <id> --log-failed`), fix at the root, run
   `quality-gates`, push once, post one `[executor] Pushed fix: …`. A failure `main` shares, or a
   documented flake: say so with evidence and re-run; never call a real failure a flake. A

@@ -19,8 +19,10 @@ text a one-line note to the operator, and the `RESTART: …` line exactly as the
 its own line. The script's output is not enough: a terminal can collapse or cut a tool's output,
 and a session summary doesn't carry it, so the operator may never see the line unless you write
 it. A failed pull (exit 2) prints the `RESTART:` line too: write it, after the `⚠ main not
-pulled` line. Pick next (SKILL.md); if there is a next issue, go straight into implementing it.
-No waiter or wakeup for the merged PR.
+pulled` line. The `RESTART:` line is for the operator to act on later, not an instruction to this
+session: don't exit, and don't end your turn on it. In the same reply, run `pick-next.mjs`
+(SKILL.md, "Pick next") right after the note and the line; if there is a next issue, go straight
+into implementing it. No waiter or wakeup for the merged PR.
 
 ## CI_FAILING
 
