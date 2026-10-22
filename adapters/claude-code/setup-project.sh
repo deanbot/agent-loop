@@ -167,7 +167,9 @@ fi
 # Either the gh shim or the Claude Code plugin guards gh posts. The plugin's state is enabled,
 # disabled, or empty when it isn't listed or the listing can't be read (no claude, an error).
 gh_guard=""
-gh_head="$(head -c 400 "$(command -v gh)" 2>/dev/null | tr -d '\0' || true)"
+# LC_ALL=C: a compiled gh is not valid UTF-8, and macOS tr in a UTF-8 locale stops on it with
+# "Illegal byte sequence".
+gh_head="$(head -c 400 "$(command -v gh)" 2>/dev/null | LC_ALL=C tr -d '\0' || true)"
 case "$gh_head" in
   *'# Added by second-read: the gh shim.'*) echo "  second-read: gh shim in place"; gh_guard=1 ;;
 esac

@@ -41,6 +41,10 @@ n,n]` (plus `--reviewer <clone>` with several reviewers, below). Then:
 **`NONE`** → wait ~120s.
 
 **`CLOSED:<n>`** → the operator merged or closed it; nothing to post. Note it and forget the PR.
+Then `git switch main` and `node scripts/pull.mjs` (never a bare `git pull`): a merge may have
+changed the rules you review against. On `RULES_CHANGED: <files>`, run the `git diff …` command
+on the line after it before the next review and follow what changed; read only that diff, never
+the whole files. Nothing printed → no rule changed.
 
 **`MERGE_CONFLICT:<n>`** → do not review the diff. When the PR carries the `needs-operator-label`
 (it was ready and `main` moved under it; reported whoever owns the PR), remove the label unless a

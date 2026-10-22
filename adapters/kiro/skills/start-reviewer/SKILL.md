@@ -77,7 +77,7 @@ Then re-invoke this skill to start the next cycle.
 No activity. Wait ~120 seconds before next cycle.
 
 **`CLOSED:<n>`**
-The operator merged or closed the PR; nothing to post. Note it and forget the PR.
+The operator merged or closed the PR; nothing to post. Note it and forget the PR. Then `git switch main` and `node scripts/pull.mjs` (never a bare `git pull`): a merge may have changed the rules you review against. On `RULES_CHANGED: <files>`, run the `git diff …` command on the line after it before the next review and follow what changed; read only that diff, never the whole files. Nothing printed → no rule changed.
 
 **`MERGE_CONFLICT:<n>`**
 Do not review the diff. The PR carries `<needs-operator-label>` (it was ready and `main` moved under it; reported whoever owns the PR) → `gh pr edit <n> --repo <repo> --remove-label <needs-operator-label>` unless a question is still open, and, unless your newest `[reviewer]` comment already says so, post `gh pr comment <n> --repo <repo> --body "[reviewer] Merge conflicts — PR #<n> now conflicts with main, so it is not ready to merge; <label state>. Whoever owns it: bring main in, resolve, push."`, where `<label state>` is `<needs-operator-label> is off`, or `<needs-operator-label> stays on for the open question` when one kept it (the signal repeats while the label stays on, so post once). No label and a head new since your last `[reviewer]` post (new commits on a conflicting branch): `gh pr comment <n> --repo <repo> --body "[reviewer] Merge conflicts — rebase on main before review."`. No label and a head you already posted on (the executor took the label off meanwhile): post nothing.
