@@ -172,7 +172,25 @@ worktrees live in `.worktrees/` (gitignored). No build step, no `node_modules`.
 
 Test a plugin change without installing it: `claude --plugin-dir /path/to/agent-loop -p
 "/agent-loop:start-reviewer"` in a scratch git repo (it should refuse without a `## Agent loop`
-block). `claude plugin validate .` checks the manifests.
+block). `claude plugin validate .` checks the manifests (by hand: CI doesn't install Claude Code).
+
+**CI** (`.github/workflows/ci.yml`) runs `node scripts/test/run.mjs` on every pull request and
+every push to `main`, on Node 22 and 24, with a read-only token and actions pinned to commit shas
+(the contract tests check both). The check to require in a ruleset is `contract-tests`: it passes
+when the tests pass on both versions, or when the change touches only Markdown files (the tests
+are skipped then).
+
+- **Switch it off:** `gh variable set AGENT_LOOP_CI --body off --repo deanbot/agent-loop`. No job
+  runs, and the one check that reports is `contract-tests (off)`, so a required `contract-tests`
+  keeps PRs waiting rather than passing them untested.
+- **Switch it back on:** `gh variable delete AGENT_LOOP_CI --repo deanbot/agent-loop` (unset, or
+  any value but `off`, means on). A PR opened while it was off gets the check at its next push (or
+  close and reopen it).
+- **While it's off**, `contract-tests` can come from `scripts/local-ci.mjs --gate "node
+  scripts/test/run.mjs" --context contract-tests`: a commit status satisfies a required check of
+  the same name unless the ruleset pins that check to the GitHub Actions app. It runs only trusted,
+  same-repository PRs, so a fork's PR waits for CI or a maintainer's bypass. Never run it under
+  that name while CI is on: the two would report the same check.
 
 ## Issue format convention
 
@@ -184,7 +202,8 @@ description.
 ## Commit policy
 
 Direct commits to `main` for docs, spec and adapter stubs. Script changes go through a PR —
-scripts affect all adopters — and `node scripts/test/run.mjs` must pass. After a PR merges, run
+scripts affect all adopters — and `node scripts/test/run.mjs` must pass; CI runs it on the PR
+(the `contract-tests` check). After a PR merges, run
 `claude plugin update agent-loop@agent-loop` so the installed plugin follows `main`.
 
 Every PR body carries a **restart note**: which roles need a fresh session to pick the change up

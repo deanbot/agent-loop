@@ -1275,5 +1275,21 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   rmSync(clone, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- .github/workflows/ci.yml
+{
+  const ci = readFileSync(path.resolve(scripts, '..', '.github', 'workflows', 'ci.yml'), 'utf8')
+  const uses = [...ci.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map((m) => m[1])
+  check('ci: every action is pinned to a full commit sha', uses.length > 0 && uses.every((u) => /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/.test(u)), uses.join('\n'))
+  const perms = /^permissions:\n((?:[ \t]+.*\n)+)/m.exec(ci)?.[1].trim()
+  check('ci: the token is read-only (permissions: contents: read, nothing else, no job overrides)',
+    perms === 'contents: read' && ci.match(/^\s*permissions:/gm).length === 1 && !/pull_request_target/.test(ci), perms)
+  const jobs = ci.slice(ci.indexOf('\njobs:'))
+  const jobIfs = [...jobs.matchAll(/^  [\w-]+:\n(?:    .*\n)*?    if: (.*)$/gm)].map((m) => m[1])
+  check('ci: every job is off while AGENT_LOOP_CI is off', jobIfs.length === 3 && jobIfs.every((c) => c.includes("vars.AGENT_LOOP_CI != 'off'")), jobIfs.join('\n'))
+  const agg = /^  contract-tests:\n((?:    .*\n|\s*\n)*)/m.exec(jobs)?.[1] ?? ''
+  check('ci: the required check runs after a failed or cancelled test job (always()), and is named contract-tests only while on',
+    /^    if: always\(\) /m.test(agg) && agg.includes("name: ${{ vars.AGENT_LOOP_CI == 'off' && 'contract-tests (off)' || 'contract-tests' }}"), agg)
+}
+
 console.log(`\n${passes} passed, ${failures} failed`)
 process.exit(failures ? 1 : 0)
