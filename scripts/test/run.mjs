@@ -1286,7 +1286,7 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   const jobs = ci.slice(ci.indexOf('\njobs:'))
   const jobIfs = [...jobs.matchAll(/^  [\w-]+:\n(?:    .*\n)*?    if: (.*)$/gm)].map((m) => m[1])
   check('ci: every job is off while AGENT_LOOP_CI is off', jobIfs.length === 3 && jobIfs.every((c) => c.includes("vars.AGENT_LOOP_CI != 'off'")), jobIfs.join('\n'))
-  const agg = /^  contract-tests:\n((?:    .*\n|\s*\n)*)/m.exec(jobs)?.[1] ?? ''
+  const agg = /^  required:\n((?:    .*\n|\s*\n)*)/m.exec(jobs)?.[1] ?? ''
   check('ci: the required check runs after a failed or cancelled test job (always()), and is named contract-tests only while on',
     /^    if: always\(\) /m.test(agg) && agg.includes("name: ${{ vars.AGENT_LOOP_CI == 'off' && 'contract-tests (off)' || 'contract-tests' }}"), agg)
 }

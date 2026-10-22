@@ -70,8 +70,9 @@ jobs:
       - run: node scripts/test/run.mjs
 
   # The check to require. always(): without it a failed or cancelled test job would skip this one,
-  # and a skipped job passes a required check.
-  contract-tests:
+  # and a skipped job passes a required check. The id is not `contract-tests`, so a name that falls
+  # back to the id can never report as the required check.
+  required:
     needs: [changes, test]
     if: always() && vars.AGENT_LOOP_CI != 'off'
     name: ${{ vars.AGENT_LOOP_CI == 'off' && 'contract-tests (off)' || 'contract-tests' }}

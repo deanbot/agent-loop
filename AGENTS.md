@@ -186,11 +186,14 @@ are skipped then).
 - **Switch it back on:** `gh variable delete AGENT_LOOP_CI --repo deanbot/agent-loop` (unset, or
   any value but `off`, means on). A PR opened while it was off gets the check at its next push (or
   close and reopen it).
-- **While it's off**, `contract-tests` can come from `scripts/local-ci.mjs --gate "node
-  scripts/test/run.mjs" --context contract-tests`: a commit status satisfies a required check of
-  the same name unless the ruleset pins that check to the GitHub Actions app. It runs only trusted,
-  same-repository PRs, so a fork's PR waits for CI or a maintainer's bypass. Never run it under
-  that name while CI is on: the two would report the same check.
+- **While it's off**, `contract-tests` can come from the local runner, from the root of a clone
+  kept for it (no role marker: it refuses an agent's clone): `node scripts/local-ci.mjs --repo
+  deanbot/agent-loop --trusted-authors deanbot --gate "node scripts/test/run.mjs" --context
+  contract-tests --wait` (`--trusted-authors` is needed: this repo has no `## Agent loop` block to
+  read it from). A commit status satisfies a required check of the same name unless the ruleset
+  pins that check to the GitHub Actions app. It runs only trusted, same-repository PRs, so a fork's
+  PR waits for CI or a maintainer's bypass. Never run it under that name while CI is on: the two
+  would report the same check.
 
 ## Issue format convention
 
