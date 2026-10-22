@@ -1399,6 +1399,9 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   check('restart hook: RULES_CHANGED lines before it → only the RESTART line', shown(ok(pull, rules)) === restart, shown(ok(pull, rules)))
   const failed = { cwd: exec, hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: pull }, error: `Exit code 2\npull: Not possible to fast-forward, aborting.\n${restart}` }
   check('restart hook: a failed pull (exit 2, PostToolUseFailure shape) → the line', shown(failed) === restart, shown(failed))
+  const quoted = ['node "/Users/x/My Plugins/agent-loop/scripts/pull.mjs" --start "/agent-loop:start-executor"', "node '/p/scripts/pull.mjs' --start '/agent-loop:start-executor'"]
+  check('restart hook: a double- or single-quoted pull.mjs path (a plugin root with a space) → the line',
+    quoted.every((c) => shown(ok(c, `${restart}\n`)) === restart), quoted.map((c) => shown(ok(c, restart))).join(' | '))
   check('restart hook: pull.mjs without --start → silent', shown(ok('node /p/scripts/pull.mjs', restart)) === 'SILENT')
   check('restart hook: other commands (pick-next, git diff, session.mjs --start, a grep naming pull.mjs) → silent, even with a RESTART-looking line',
     ['node /p/scripts/pick-next.mjs --repo o/r --skip none', 'git diff abc..def -- AGENTS.md', 'node /p/scripts/session.mjs --start sess-a',
@@ -1408,8 +1411,9 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   check('restart hook: a reviewer clone, or a clone with no role marker → silent',
     shown(ok(pull, restart, reviewer)) === 'SILENT' && shown(ok(pull, restart, bare)) === 'SILENT')
   check('restart hook: output without a RESTART line → silent', shown(ok(pull, 'RULES_CHANGED: AGENTS.md\n')) === 'SILENT')
-  check('restart hook: another tool, malformed or empty stdin → silent, exit 0',
-    shown({ ...ok(pull, restart), tool_name: 'Edit' }) === 'SILENT' && shown('{ not json') === 'SILENT' && shown('') === 'SILENT')
+  check('restart hook: another tool, malformed, empty or null stdin → silent, exit 0',
+    shown({ ...ok(pull, restart), tool_name: 'Edit' }) === 'SILENT' && ['{ not json', '', 'null', '[]', '7'].every((s) => shown(s) === 'SILENT'),
+    ['{ not json', '', 'null', '[]', '7'].map(shown).join(' | '))
   const hooks = JSON.parse(readFileSync(path.resolve(scripts, '..', 'adapters', 'claude-code', 'hooks', 'hooks.json'), 'utf8')).hooks
   const runs = (event, file) => (hooks[event] ?? []).some((e) => e.matcher === 'Bash' && e.hooks.some((h) => h.command.includes(`hooks/${file}`)))
   check('restart hook: hooks.json runs it after Bash on PostToolUse and PostToolUseFailure; the guard entry is unchanged',

@@ -21,9 +21,10 @@ try {
 } catch {
   process.exit(0)
 }
-if (input.tool_name !== 'Bash') process.exit(0)
+if (input?.tool_name !== 'Bash') process.exit(0)
 const command = String(input.tool_input?.command ?? '')
-if (!/(^|[\s"'/])pull\.mjs(\s|$)/.test(command) || !/\s--start(\s|=|$)/.test(command)) process.exit(0)
+// The script path may be quoted (a plugin root with a space in it).
+if (!/(^|[\s"'/])pull\.mjs(["'\s]|$)/.test(command) || !/\s--start(\s|=|$)/.test(command)) process.exit(0)
 
 let role = null
 try {
