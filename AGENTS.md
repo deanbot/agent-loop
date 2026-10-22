@@ -35,6 +35,10 @@ Three layers. Boundaries are strict.
   <id> <secs>`), `--beat <id>` (`MINE`, `SUPERSEDED <id|none>`), `--release <id>`. The newest
   start wins; the old session is recorded as superseded in `.agent-loop/session` and stops (the
   Claude Code guard hook refuses its tool calls). Run in the clone's root.
+- `scripts/pull.mjs` — every pull of `main` in a loop. `[--start <command> [--milestone
+  <title>]]`. `git pull --ff-only`, then `RULES_CHANGED: <files>` plus the `git diff` command
+  that shows it when `AGENTS.md` or a block `rules` file changed, nothing otherwise; with
+  `--start`, the operator's `RESTART:` line. Run in the clone's root.
 - `scripts/local-ci.mjs` — a local CI runner, no agent's. `--repo owner/repo --gate "<command>"
   [--context local-ci] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]`, from the
   root of a clone of its own (it refuses one with a role marker). Runs the gate once per trusted,
