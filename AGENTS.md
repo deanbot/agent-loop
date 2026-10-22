@@ -184,20 +184,20 @@ PR's base branch changes, wait for the new run before merging:** until `gh pr ch
 nothing pending and `contract-tests` from the new run, the head still shows the result from the
 old base.
 
-- **Switch it off:** `gh variable set AGENT_LOOP_CI --body off --repo deanbot/agent-loop`. No job
-  runs, and the one check that reports is `contract-tests (off)`, so a required `contract-tests`
-  keeps PRs waiting rather than passing them untested.
+- **Switch it off:** `gh variable set AGENT_LOOP_CI --body off --repo deanbot/agent-loop`. Every
+  job is skipped, so no tests run and no `contract-tests` check is reported on a new head: the
+  required check stays expected, never passed. The skipped jobs are still listed, and a job
+  skipped by its `if` counts as passing, which is why the final job's name changes while CI is off
+  (`contract-tests (off)` in `ci.yml`). Whether GitHub lists it under that name or under the
+  unexpanded expression hasn't been seen (a skipped matrix job is listed unexpanded, `test (node
+  ${{ matrix.node }})`); neither is `contract-tests`. A head tested before CI went off keeps the
+  result it had.
+- **While it's off, nothing merges.** The ruleset requires `contract-tests` from the GitHub Actions
+  app, so a commit status of that name from anything else (the local runner included) doesn't
+  satisfy it, and the ruleset has no bypass.
 - **Switch it back on:** `gh variable delete AGENT_LOOP_CI --repo deanbot/agent-loop` (unset, or
-  any value but `off`, means on). A PR opened while it was off gets the check at its next push (or
-  close and reopen it).
-- **While it's off**, `contract-tests` can come from the local runner, from the root of a clone
-  kept for it (no role marker: it refuses an agent's clone): `node scripts/local-ci.mjs --repo
-  deanbot/agent-loop --trusted-authors deanbot --gate "node scripts/test/run.mjs" --context
-  contract-tests --wait` (`--trusted-authors` is needed: this repo has no `## Agent loop` block to
-  read it from). A commit status satisfies a required check of the same name unless the ruleset
-  pins that check to the GitHub Actions app. It runs only trusted, same-repository PRs, so a fork's
-  PR waits for CI or a maintainer's bypass. Never run it under that name while CI is on: the two
-  would report the same check.
+  any value but `off`, means on). Merging resumes once `contract-tests` runs again on a PR's head:
+  push a commit, or close and reopen the PR (an edit of its title or body also starts a run).
 
 ## Workflow
 

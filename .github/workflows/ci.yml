@@ -5,9 +5,11 @@
 # otherwise.
 #
 # Off switch: the repository variable AGENT_LOOP_CI set to `off` (unset or anything else means on).
-# While it's off no job runs, and the one job that reports is named `contract-tests (off)`, so a
-# ruleset requiring `contract-tests` keeps a pull request waiting instead of passing it untested.
-# A job skipped by its `if` counts as passing a required check, which is why the name changes.
+# While it's off every job is skipped, and no check named `contract-tests` is reported, so a
+# ruleset requiring it keeps a pull request waiting instead of passing it untested (nothing merges
+# until CI is back on: see AGENTS.md). A job skipped by its `if` counts as passing a required
+# check, which is why the final job's name changes while CI is off. Whether GitHub lists the
+# skipped job as `contract-tests (off)` or as the unexpanded expression hasn't been seen.
 
 name: CI
 
