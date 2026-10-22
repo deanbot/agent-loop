@@ -190,13 +190,15 @@ old base.
   skipped by its `if` counts as passing, which is why the final job's name changes while CI is off
   (`contract-tests (off)` in `ci.yml`). Whether GitHub lists it under that name or under the
   unexpanded expression hasn't been seen (a skipped matrix job is listed unexpanded, `test (node
-  ${{ matrix.node }})`); neither is `contract-tests`. A head tested before CI went off keeps the
-  result it had.
-- **While it's off, nothing merges.** The ruleset requires `contract-tests` from the GitHub Actions
-  app, so a commit status of that name from anything else (the local runner included) doesn't
-  satisfy it, and the ruleset has no bypass.
+  ${{ matrix.node }})`); neither is `contract-tests`.
+- **While it's off, nothing new is tested, so nothing merges except a head that already passed
+  `contract-tests` before CI went off and is still up to date with `main`** (a check belongs to
+  its commit, and switching the variable reruns nothing). Every other PR waits until CI is back
+  on. The ruleset requires `contract-tests` from the GitHub Actions app, so a commit status of that
+  name from anything else (the local runner included) doesn't satisfy it, and the ruleset has no
+  bypass.
 - **Switch it back on:** `gh variable delete AGENT_LOOP_CI --repo deanbot/agent-loop` (unset, or
-  any value but `off`, means on). Merging resumes once `contract-tests` runs again on a PR's head:
+  any value but `off`, means on). A waiting PR can merge once `contract-tests` runs again on its head:
   push a commit, or close and reopen the PR (an edit of its title or body also starts a run).
 
 ## Workflow
