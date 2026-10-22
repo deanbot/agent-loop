@@ -1,0 +1,100 @@
+# The contract tests (node scripts/test/run.mjs) on every pull request and push to main.
+#
+# Require the `contract-tests` check in a ruleset. It passes when the tests pass on every Node
+# version, or when the change touches only Markdown files (the tests are skipped then), and fails
+# otherwise.
+#
+# Off switch: the repository variable AGENT_LOOP_CI set to `off` (unset or anything else means on).
+# While it's off no job runs, and the one job that reports is named `contract-tests (off)`, so a
+# ruleset requiring `contract-tests` keeps a pull request waiting instead of passing it untested.
+# A job skipped by its `if` counts as passing a required check, which is why the name changes.
+
+name: CI
+
+# Every checkout is the pull request's head commit (the pushed commit on main), and the change
+# detection compares the event's base and head: never GitHub's merge commit, which is made when the
+# event fires and isn't remade when the base branch changes.
+on:
+  # `edited` is for a change of base branch, which changes what a pull request merges without a
+  # push. It also fires on title and body edits, which the workflow doesn't read: one more run.
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    if: vars.AGENT_LOOP_CI != 'off'
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # code=false only when every changed path ends in .md. Anything uncertain (a new branch, a
+      # force-push whose old head is gone, an empty diff) runs the tests.
+      - id: diff
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          code=true
+          if [ -n "$BASE" ] && [ "$BASE" != 0000000000000000000000000000000000000000 ] &&
+            files=$(git diff --name-only --no-renames "$BASE...$HEAD") && [ -n "$files" ] &&
+            ! printf '%s\n' "$files" | grep -qv '\.md$'; then
+            code=false
+          fi
+          printf '%s\n' "$files"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "code=$code"
+
+  test:
+    needs: changes
+    if: vars.AGENT_LOOP_CI != 'off' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    name: test (node ${{ matrix.node }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node scripts/test/run.mjs
+
+  # The check to require. always(): without it a failed or cancelled test job would skip this one,
+  # and a skipped job passes a required check. The id is not `contract-tests`, so a name that falls
+  # back to the id can never report as the required check.
+  required:
+    needs: [changes, test]
+    if: always() && vars.AGENT_LOOP_CI != 'off'
+    name: ${{ vars.AGENT_LOOP_CI == 'off' && 'contract-tests (off)' || 'contract-tests' }}
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          echo "changes: $CHANGES (code=$CODE), test: $TEST"
+          if [ "$CHANGES" = success ] && [ "$TEST" = success ]; then exit 0; fi
+          if [ "$CHANGES" = success ] && [ "$CODE" = false ] && [ "$TEST" = skipped ]; then
+            echo "Markdown only: tests skipped"
+            exit 0
+          fi
+          exit 1
