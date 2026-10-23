@@ -10,7 +10,7 @@
  *   RESUME:<n> PR:<p>            with --clone only, before anything else: an open PR <p> whose body
  *                                says "Closes #<n>", where #<n> is open, carries neither the
  *                                in-progress nor the blocked label, is not skipped, and its newest
- *                                "[executor] Claimed by" comment names <clone>: an issue this
+ *                                "[executor] Claimed by" comment by the PR's author names <clone>: an issue this
  *                                executor parked with a PR open and the operator has unblocked.
  *                                Lowest <n> first, whatever the milestone; never a fork's PR
  *   ISSUE:<n>                    the lowest-numbered open issue (in the milestone, when given) without
@@ -102,18 +102,19 @@ function isOpen(n, openNumbers) {
 const hasLabel = (issue, name) => (issue.labels ?? []).some((l) => l.name === name)
 
 let prCache = null
-const openPrs = () => (prCache ??= gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,body,isCrossRepository'))
+const openPrs = () => (prCache ??= gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,body,isCrossRepository,author'))
 
 // An issue this clone parked while its PR was open, unblocked since: its PR comes back to it, so
-// the review findings on it keep an owner. The claim comment is the record of whose it was. A
-// fork's PR is never offered: anyone can write "Closes #<n>" in one.
+// the review findings on it keep an owner. The claim comment is the record of whose it was. Both
+// are text others can write, so a fork's PR is never offered ("Closes #<n>" in its body), and only
+// claims posted by the PR's own author count.
 function resumable() {
   const closing = []
-  for (const p of openPrs().filter((p) => p.isCrossRepository !== true)) {
-    for (const m of (p.body ?? '').matchAll(/Closes #(\d+)(?![0-9])/gi)) closing.push({ n: Number(m[1]), pr: p.number })
+  for (const p of openPrs().filter((p) => p.isCrossRepository !== true && p.author?.login)) {
+    for (const m of (p.body ?? '').matchAll(/Closes #(\d+)(?![0-9])/gi)) closing.push({ n: Number(m[1]), pr: p.number, author: p.author.login })
   }
   closing.sort((a, b) => a.n - b.n || a.pr - b.pr)
-  for (const { n, pr } of closing) {
+  for (const { n, pr, author } of closing) {
     if (skip.has(n)) continue
     let issue
     try {
@@ -125,7 +126,7 @@ function resumable() {
     }
     if (issue.state !== 'open' || hasLabel(issue, inProgress) || hasLabel(issue, blocked)) continue
     const pages = gh('api', '--paginate', '--slurp', `repos/${repo}/issues/${n}/comments`)
-    const claims = pages.flat().filter((c) => (c.body ?? '').startsWith('[executor] Claimed by '))
+    const claims = pages.flat().filter((c) => c.user?.login === author && (c.body ?? '').startsWith('[executor] Claimed by '))
     const newest = claims.sort((a, b) => a.id - b.id).at(-1)
     if (newest && newest.body.trim() === `[executor] Claimed by ${clone}`) return `RESUME:${n} PR:${pr}`
   }

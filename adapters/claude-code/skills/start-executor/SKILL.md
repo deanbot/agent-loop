@@ -145,9 +145,9 @@ number.
   number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first |
   .number'`. A PR found → orient on it and enter the loop. If the issue carries
   `<in-progress-label>`, do not re-claim. If it carries neither label (it was parked, then
-  unblocked), claim it first with steps 1–4 of the claim in
-  [reference/implement.md](reference/implement.md) §1, so a parked PR never gets two executors:
-  lost → add it to your skip list and pick next. None → claim and
+  unblocked), run the author check in [reference/implement.md](reference/implement.md) §1, then
+  claim it with steps 1–4 of the claim there, so a parked PR never gets two executors: turned
+  down or lost → add it to your skip list and pick next. None → claim and
   implement
   (read [reference/implement.md](reference/implement.md) now; it covers the author check, the
   claim, dependencies, tests-first, the pre-PR self-check and the PR body).
@@ -163,9 +163,9 @@ base name of your working directory. It lists the open issues, drops claimed, bl
 ones, checks each `Depends on #a, #b`, and prints one line:
 
 - **`RESUME:<n> PR:<p>`** → an issue you parked while PR #<p> was open, unblocked since: its review
-  findings are yours. It comes before any new issue, whatever the milestone. Claim #<n> again with
-  steps 1–4 of the claim in [reference/implement.md](reference/implement.md) §1 (no author check:
-  you claimed it before). Won → switch to the PR's branch (its name: `gh pr view <p> --repo
+  findings are yours. It comes before any new issue, whatever the milestone. Run the author check
+  in [reference/implement.md](reference/implement.md) §1 (a claim comment is text anyone can
+  post), then claim #<n> again with steps 1–4 of the claim there. Won → switch to the PR's branch (its name: `gh pr view <p> --repo
   <repo> --json headRefName`; then `git switch <branch>`, after a `git fetch` when it is not in
   this clone; never over uncommitted changes), orient on PR #<p> (below) and enter the loop. Lost → add `<n>` to your skip list and run the script again.
 - **`ISSUE:<n>`** → treat it as an issue number (above). If implement.md §1 turns it down, add it

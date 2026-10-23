@@ -584,7 +584,7 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   const claim = (clone, id) => ({ id, body: `[executor] Claimed by ${clone}`, created_at: '2026-01-01T10:00:00Z', user: user('acme') })
   const parked = (over = {}) => ({
     issues: [issue(11), issue(20, { milestone: M4 }), ...(over.issues ?? [])],
-    prs: [{ number: 49, body: 'Closes #200' }, { number: 50, body: 'Fix.\n\nCloses #20', isCrossRepository: false }],
+    prs: [{ number: 49, body: 'Closes #200', author: user('acme') }, { number: 50, body: 'Fix.\n\nCloses #20', isCrossRepository: false, author: user('acme') }],
     issueComments: { 20: [claim('exec-b', 1), claim('exec-a', 2), { id: 3, body: '[executor] BLOCKED: needs a call', created_at: '2026-01-01T11:00:00Z', user: user('acme') }] },
     milestones,
     ...over,
@@ -604,7 +604,9 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
     pick(parked({ issues: [issue(11), issue(20, { state: 'CLOSED' })] }), asA) === 'ISSUE:11')
   check('pick --clone: skipped → no RESUME', pick(parked(), [...asA, '--skip', '20']) === 'ISSUE:11')
   check('pick --clone: a fork\'s PR that says "Closes #20" → no RESUME',
-    pick(parked({ prs: [{ number: 50, body: 'Closes #20', isCrossRepository: true }] }), asA) === 'ISSUE:11')
+    pick(parked({ prs: [{ number: 50, body: 'Closes #20', isCrossRepository: true, author: user('acme') }] }), asA) === 'ISSUE:11')
+  check('pick --clone: a newer claim naming this clone, posted by someone other than the PR\'s author, does not count → no RESUME',
+    pick(parked({ issueComments: { 20: [claim('exec-b', 1), { ...claim('exec-a', 2), user: user('stranger') }] } }), asA) === 'ISSUE:11')
   check('pick --clone: no claim comment at all → no RESUME', pick(parked({ issueComments: { 20: [] } }), asA) === 'ISSUE:11')
   check('pick: without --clone nothing changes → ISSUE:11', pick(parked()) === 'ISSUE:11')
   check('pick --clone: … the open PR saying "Closes #200" (no such issue) is passed over, not a failure, and #200 is not #20',
