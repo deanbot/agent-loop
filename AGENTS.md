@@ -44,6 +44,11 @@ Three layers. Boundaries are strict.
   root of a clone of its own (it refuses one with a role marker). Runs the gate once per trusted,
   same-repository PR head, one at a time, and posts the result as a commit status, which
   `gh pr checks` and `pr-poll.mjs` read as CI. One runner per repo and context (pid lock).
+- `scripts/inbox.mjs` — a folder of message files as a signal source. `[--dir <folder>]` (default
+  `.agent-loop/inbox`) prints `MESSAGE:<messageId>` per message not reported before (`INVALID:<id>`
+  for a file that is not one), or `NONE`; `--send [--dir <folder>] --role user|agent --from …
+  --to … --context … [--task …] --text …` writes one atomically (default `.agent-loop/outbox`) and
+  prints `SENT:<messageId>`. The folder logic is `scripts/lib/inbox.mjs` (spec: "Inbox folder").
 - `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a
   waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:
   "Waiting for events").
@@ -127,7 +132,9 @@ Narrowed by the re-read-before-posting rule; no structural fix without real-time
 `role` (executor | reviewer | qa; written by setup; read by the merge-guard hook, the Claude Code
 RESTART-line hook and the skills' wrong-clone check), `session` (which loop session holds the
 clone and which ones it superseded; written by `scripts/session.mjs`, read by the Claude Code
-guard hook) and, for adapters that need one, stop sentinels.
+guard hook), `inbox/` and `outbox/` (message files, `scripts/inbox.mjs`; its record of what it
+reported is `inbox-<hash>.json` with the script state below) and, for adapters that need one, stop
+sentinels.
 
 **Script state** persists to `~/.agent-loop/state/` with per-repo paths: `<slug>-pr-state.json`
 (reviewer), `<slug>-pr-poll-<pr>.json` (executor, one per PR, so two executors never share a file;

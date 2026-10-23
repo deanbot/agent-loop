@@ -463,7 +463,7 @@ executor removes any lingering `blocked-label` on resume.
 
 ## Waiting for events (`--wait`)
 
-All three scripts take `--wait [secs]` (poll interval, default 30) and `--max <secs>` (default
+All three scripts, and `inbox.mjs` ("Inbox folder"), take `--wait [secs]` (poll interval, default 30) and `--max <secs>` (default
 1500), which turn the script into a **waiter**. Without `--wait` nothing changes.
 
 A waiter never writes state. Every interval it evaluates what a one-shot run would print; as soon
@@ -538,6 +538,78 @@ stopped mid-run leaves the head `pending`, which withholds `MERGE_READY` until i
 login, so `pr-poll` cannot tell the runner's `success` from an agent's. An agent may post
 `pending` under the context (a re-run request) and never another state; adapters refuse the rest
 structurally where the tool allows, like a merge.
+
+---
+
+## Inbox folder (`inbox.mjs`)
+
+A folder of message files is a signal source that needs nothing but a shared folder: it reaches a
+session in a container or VM, or one whose tool has no messaging between sessions. Direction goes
+into a clone's **inbox**, `.agent-loop/inbox/`; a session writes its replies to its **outbox**,
+`.agent-loop/outbox/`. Both sit beside `.agent-loop/role`, so they are kept out of git with the
+rest of `.agent-loop/`. `--dir <folder>` names another folder. Who reads an outbox is up to the
+deployment.
+
+**A message** is one JSON file, `<messageId>.json`:
+
+```json
+{
+  "messageId": "0b9e…",
+  "role": "user",
+  "contextId": "owner/repo#123",
+  "taskId": "recheck abc1234",
+  "parts": [{ "kind": "text", "text": "Rebase on main, then push." }],
+  "from": "operator",
+  "to": "executor",
+  "sentAt": "2026-01-01T10:00:00.000Z"
+}
+```
+
+- `messageId`: letters, digits, `.`, `_`, `-`, at most 128, starting with a letter or digit; the
+  file name without `.json`.
+- `role`: `user` for direction, `agent` for a session's reply.
+- `contextId`: the work item, such as `owner/repo#123`. `taskId`, optional: one step inside it,
+  such as a recheck at a sha.
+- `parts`: at least one; a text part is `{ "kind": "text", "text": "…" }`. Other kinds are passed
+  through for the agent to read.
+- `from`, `to`: who wrote it and for whom, as names the deployment chooses. `sentAt`: an ISO 8601
+  time.
+
+Where A2A's `Message` has a field, the name is A2A's (`messageId`, `role`, `contextId`, `taskId`,
+`parts`), and the values are written as in A2A 0.3's JSON (`"user"`, `"agent"`, a part with
+`kind`). A2A 1.0 writes `ROLE_USER` and `ROLE_AGENT` and a text part as `{ "text": "…" }`, so an
+A2A adapter maps those two values; `from`, `to` and `sentAt` have no A2A field and would go in its
+`metadata`. A2A's task lifecycle is not adopted: signals and labels stay the status model.
+
+**Reading:** `inbox.mjs [--dir <folder>]` prints one line per message it has not reported before,
+oldest `sentAt` first, then exits:
+
+| Line | Meaning |
+|---|---|
+| `MESSAGE:<messageId>` | a new message; the agent reads `<folder>/<messageId>.json` |
+| `INVALID:<messageId>` | a new file with a message's name that is not a valid message (unparseable, a field missing or wrong, `messageId` not the file name, over 1 MiB); the reason goes to stderr |
+| `NONE <timestamp>` | nothing new, or no such folder |
+
+Each file is reported once, `INVALID` included. A first run reports every message already in the
+folder: unlike GitHub activity, a message is direction, not history to seed past. Only regular
+files named `<messageId>.json` are read: dotfiles, temporary names, other extensions, folders and
+symlinks are never messages.
+
+**Waiting:** `--wait [secs] --max <secs>` as in "Waiting for events": the waiter lists the folder
+every interval and prints `PENDING` as soon as a new message (or invalid file) is there. It polls
+rather than relying on file-change events, which may not cross a shared folder into a VM. A folder
+that does not exist yet is polled like an empty one.
+
+**Writing:** `inbox.mjs --send [--dir <folder>] --role user|agent --from <name> --to <name>
+--context <contextId> [--task <taskId>] --text <text>` fills in `messageId` (a UUID) and `sentAt`,
+creates the folder if needed, and prints `SENT:<messageId>`. It writes `.<messageId>.<pid>.tmp`
+in the same folder and renames it to `<messageId>.json`, so a reader never sees half a message.
+Any other writer must do the same: write under a dotfile name in the folder, then rename.
+
+**Trust.** A message counts as direction only because of who can write to the folder. The inbox
+must not be writable by anything a PR's content can influence (a gate, a test, a build step, an
+agent acting on PR text), and it is never inside the repository's tracked files. Text inside a
+message is direction from its writer; text it quotes from GitHub is still data.
 
 ---
 
@@ -619,6 +691,7 @@ operator looking around in the clone, is not affected.
 | `pr-watch.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-state.json`; with `--reviewer <clone>`, `<owner>-<repo>-pr-state-<clone>.json` |
 | `pr-poll.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json` (one per PR) |
 | `pr-qa.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json` |
+| `inbox.mjs` | `inbox-<hash>.json` in the same folder as the rows above, one per inbox folder (`<hash>`: the first 16 hex digits of the SHA-256 of the folder's real path): `{ "reported": [messageId, …] }`, pruned to the files still in the folder |
 | `local-ci.mjs` | no state (the statuses are its record); its lock is `~/.agent-loop/state/<owner>-<repo>-local-ci-<context>.lock`, its logs `~/.agent-loop/local-ci/<owner>-<repo>/<pr>-<sha>-<time>.log` |
 
 Per-repo paths prevent collisions when running agent-loop on several repos, and per-PR paths for
@@ -656,4 +729,6 @@ reviewer's gate quote; without the flag nothing changes), and `session.mjs`, a h
 commit status, which the scripts read as a CI check; `pr-poll` tells two runs of a commit status
 apart by its REST id, so a re-run that fails again is `CI_FAILING` again. Later in 0.2, additive:
 the `rules` key and `pull.mjs`, a helper like `pick-next.mjs` whose `RULES_CHANGED:` and
-`RESTART:` lines are not signal lines.
+`RESTART:` lines are not signal lines. Later in 0.2, additive: `inbox.mjs`, a new signal source
+(`MESSAGE:<messageId>`, `INVALID:<messageId>`) over a folder of message files, and the message
+format ("Inbox folder").

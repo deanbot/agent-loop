@@ -2,7 +2,7 @@
 // Contract tests for the signal scripts, run against a fake `gh` (fake-gh.mjs).
 //   node scripts/test/run.mjs
 // No dependencies. Each case gets a fresh HOME (so state files start empty) and a fixture.
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync } from 'fs'
+import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { execFileSync, spawn, spawnSync } from 'child_process'
@@ -1191,6 +1191,176 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   }
   check('local-ci --wait: a stop stops the running gate and releases the lock; the head stays pending',
     started && !gateAlive && states(s14) === 'pending' && !existsSync(lockFile), `${started} ${gateAlive} ${states(s14)}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
+// ---------------------------------------------------------------- inbox.mjs (#77)
+// Needs no gh. Each case gets a fresh HOME (the record) and a folder; `cwd` is a clone stand-in.
+function inbox(ctx, args, cwd = ctx.home) {
+  const r = spawnSync('node', [path.join(scripts, 'inbox.mjs'), ...args], { env: ctx.env, cwd, encoding: 'utf8' })
+  return { out: r.stdout, err: r.stderr, code: r.status }
+}
+const message = (id, extra = {}) => ({
+  messageId: id,
+  role: 'user',
+  contextId: 'acme/widgets#7',
+  parts: [{ kind: 'text', text: 'rebase on main' }],
+  from: 'operator',
+  to: 'executor',
+  sentAt: '2026-01-01T10:00:00Z',
+  ...extra,
+})
+const putMessage = (dir, id, extra) => {
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(message(id, extra)))
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  const read = () => inbox(ctx, ['--dir', dir])
+  const missing = read()
+  check('inbox: no such folder → NONE, exit 0', signals(missing.out).join() === 'NONE' && missing.code === 0, JSON.stringify(missing))
+  putMessage(dir, 'm1')
+  const first = read()
+  check('inbox: a new message file → one line, MESSAGE:<messageId>', first.out === 'MESSAGE:m1\n' && first.code === 0, JSON.stringify(first))
+  const again = read()
+  check('inbox: … a reported message is not reported again → NONE', signals(again.out).join() === 'NONE', again.out)
+  putMessage(dir, 'a-late', { sentAt: '2026-01-02T10:00:00Z' })
+  putMessage(dir, 'z-early', { sentAt: '2026-01-01T11:00:00Z' })
+  const two = read()
+  check('inbox: two new messages → one line each, oldest sentAt first (not by name)', two.out === 'MESSAGE:z-early\nMESSAGE:a-late\n', two.out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  mkdirSync(dir)
+  const body = JSON.stringify(message('t1'))
+  writeFileSync(path.join(dir, '.t1.4242.tmp'), body)
+  writeFileSync(path.join(dir, 't1.json.tmp'), body)
+  writeFileSync(path.join(dir, '.t1.json'), JSON.stringify(message('.t1')))
+  writeFileSync(path.join(dir, '._t1.json'), 'AppleDouble junk')
+  writeFileSync(path.join(dir, 't1.txt'), body)
+  mkdirSync(path.join(dir, 'd1.json'))
+  writeFileSync(path.join(ctx.home, 'outside.json'), JSON.stringify(message('s1')))
+  symlinkSync(path.join(ctx.home, 'outside.json'), path.join(dir, 's1.json'))
+  const r = inbox(ctx, ['--dir', dir])
+  check('inbox: temporary names, dotfiles, other extensions, folders and symlinks are not messages → NONE', signals(r.out).join() === 'NONE' && r.code === 0, JSON.stringify(r))
+  renameSync(path.join(dir, '.t1.4242.tmp'), path.join(dir, 't1.json'))
+  const renamed = inbox(ctx, ['--dir', dir])
+  check('inbox: … the temporary file renamed to its message name → MESSAGE:t1', renamed.out === 'MESSAGE:t1\n', renamed.out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  mkdirSync(dir)
+  writeFileSync(path.join(dir, 'bad.json'), '{"messageId": "bad", ')
+  putMessage(dir, 'other', { messageId: 'not-other' })
+  putMessage(dir, 'norole', { role: 'system' })
+  putMessage(dir, 'noparts', { parts: [] })
+  putMessage(dir, 'ok')
+  const r = inbox(ctx, ['--dir', dir])
+  const lines = r.out.trim().split('\n')
+  check('inbox: a file with a message name that is not a valid message → INVALID:<name>, after the valid ones',
+    lines[0] === 'MESSAGE:ok' && lines.slice(1).sort().join() === 'INVALID:bad,INVALID:noparts,INVALID:norole,INVALID:other' && r.code === 0, r.out)
+  check('inbox: … each with its reason on stderr', /bad\.json: unreadable/.test(r.err) && /other\.json: messageId is not the file name/.test(r.err) && /norole\.json: role must be/.test(r.err) && /noparts\.json: parts/.test(r.err), r.err)
+  const again = inbox(ctx, ['--dir', dir])
+  check('inbox: … and reported once, like a message', signals(again.out).join() === 'NONE' && again.err === '', JSON.stringify(again))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  putMessage(dir, 'gone')
+  putMessage(dir, 'stays')
+  inbox(ctx, ['--dir', dir])
+  rmSync(path.join(dir, 'gone.json'))
+  inbox(ctx, ['--dir', dir])
+  const stateDir = path.join(ctx.home, '.agent-loop', 'state')
+  const record = readdirSync(stateDir).filter((f) => /^inbox-[0-9a-f]{16}\.json$/.test(f))
+  const state = record.length === 1 ? JSON.parse(readFileSync(path.join(stateDir, record[0]), 'utf8')) : null
+  check('inbox: the record is one file per folder, pruned to the files still there', state?.reported.join() === 'stays', `${record} ${JSON.stringify(state)}`)
+  const other = path.join(ctx.home, 'box2')
+  putMessage(other, 'gone')
+  const r = inbox(ctx, ['--dir', other])
+  check('inbox: … another folder keeps its own record (the same id there is new)', r.out === 'MESSAGE:gone\n', r.out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  putMessage(dir, 'seen')
+  inbox(ctx, ['--dir', dir])
+  const quiet = await start(ctx, 'inbox.mjs', ['--dir', dir, '--wait', '1', '--max', '2']).done
+  check('inbox --wait: nothing new → NONE at --max, exit 0', signals(quiet.out).join() === 'NONE' && quiet.ms >= 2000 && quiet.code === 0, `${quiet.ms}ms\n${quiet.out}${quiet.err}`)
+  const w = start(ctx, 'inbox.mjs', ['--dir', dir, '--wait', '1', '--max', '15'])
+  await pause(1500)
+  const t0 = Date.now()
+  putMessage(dir, 'new')
+  const r = await w.done
+  const after = Date.now() - t0
+  check('inbox --wait: a new file → PENDING within one poll (1 s here), exit 0', r.out === 'PENDING\n' && r.code === 0 && after < 2500, `${after}ms after the write\n${r.out}${r.err}`)
+  const next = inbox(ctx, ['--dir', dir])
+  check('inbox --wait: … the waiter recorded nothing, so the next run reports it', next.out === 'MESSAGE:new\n', next.out)
+  const missing = await start(ctx, 'inbox.mjs', ['--dir', path.join(ctx.home, 'nope'), '--wait', '1', '--max', '2']).done
+  check('inbox --wait: no such folder → keeps polling, NONE at --max', signals(missing.out).join() === 'NONE' && missing.ms >= 2000 && missing.code === 0, `${missing.ms}ms\n${missing.out}${missing.err}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'shared', 'box')
+  const sent = inbox(ctx, ['--send', '--dir', dir, '--role', 'agent', '--from', 'executor', '--to', 'operator', '--context', 'acme/widgets#7', '--task', 'recheck abc123', '--text', 'Pushed the fix.\nSecond line.'])
+  const id = /^SENT:([0-9a-f-]{36})\n$/.exec(sent.out)?.[1]
+  check('inbox --send: prints SENT:<messageId>, exit 0, creating the folder', id && sent.code === 0, JSON.stringify(sent))
+  const files = readdirSync(dir)
+  const msg = JSON.parse(readFileSync(path.join(dir, `${id}.json`), 'utf8'))
+  check('inbox --send: one file, <messageId>.json, no temporary file left', files.join() === `${id}.json`, files.join())
+  check('inbox --send: the fields, with messageId and sentAt filled in',
+    msg.messageId === id && msg.role === 'agent' && msg.contextId === 'acme/widgets#7' && msg.taskId === 'recheck abc123' &&
+    msg.from === 'executor' && msg.to === 'operator' && JSON.stringify(msg.parts) === JSON.stringify([{ kind: 'text', text: 'Pushed the fix.\nSecond line.' }]) &&
+    Math.abs(Date.parse(msg.sentAt) - Date.now()) < 60000, JSON.stringify(msg))
+  const read = inbox(ctx, ['--dir', dir])
+  check('inbox --send: … and inbox.mjs then reports it', read.out === `MESSAGE:${id}\n`, read.out)
+  const noTask = inbox(ctx, ['--send', '--dir', dir, '--role', 'user', '--from', 'o', '--to', 'e', '--context', 'acme/widgets#8', '--text', 'go'])
+  const noTaskId = /^SENT:(\S+)\n$/.exec(noTask.out)?.[1]
+  const plain = noTaskId ? JSON.parse(readFileSync(path.join(dir, `${noTaskId}.json`), 'utf8')) : {}
+  check('inbox --send: without --task there is no taskId field', noTaskId && !('taskId' in plain) && plain.role === 'user', JSON.stringify(plain))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  const ok = ['--role', 'user', '--from', 'o', '--to', 'e', '--context', 'c', '--text', 't']
+  const without = (flag) => ok.filter((_, i) => ok[i] !== flag && ok[i - 1] !== flag)
+  const cases = [
+    ['no --role', without('--role')],
+    ['--role system', ['--role', 'system', ...without('--role')]],
+    ['no --from', without('--from')],
+    ['no --to', without('--to')],
+    ['no --context', without('--context')],
+    ['no --text', without('--text')],
+    ['an empty --text', [...without('--text'), '--text', '']],
+    ['--task with no value', [...ok, '--task']],
+    ['--wait', [...ok, '--wait', '1']],
+  ]
+  for (const [name, args] of cases) {
+    const r = inbox(ctx, ['--send', '--dir', dir, ...args])
+    check(`inbox --send: ${name} → usage error, exit 1, nothing written`, r.code === 1 && /Usage: inbox\.mjs/.test(r.err) && !existsSync(dir), JSON.stringify(r))
+  }
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // The default folders are in the clone, beside .agent-loop/role.
+  const ctx = makeEnv()
+  const clone = path.join(ctx.home, 'clone')
+  mkdirSync(clone)
+  const sent = inbox(ctx, ['--send', '--role', 'agent', '--from', 'executor', '--to', 'operator', '--context', 'acme/widgets#7', '--text', 'done'], clone)
+  const id = /^SENT:(\S+)\n$/.exec(sent.out)?.[1]
+  check('inbox --send: the default folder is .agent-loop/outbox', id && existsSync(path.join(clone, '.agent-loop', 'outbox', `${id}.json`)) && !existsSync(path.join(clone, '.agent-loop', 'inbox')), JSON.stringify(sent))
+  putMessage(path.join(clone, '.agent-loop', 'inbox'), 'in1')
+  const read = inbox(ctx, [], clone)
+  check('inbox: the default folder is .agent-loop/inbox (the outbox is not read)', read.out === 'MESSAGE:in1\n', read.out)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
