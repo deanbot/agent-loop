@@ -107,8 +107,10 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
    - **`NONE`** → nothing to do.
 3. Before posting, re-fetch `gh pr view <n> --comments --repo <repo>` for operator comments that
    arrived while you evaluated.
-4. Print one line per PR you touched. An idle cycle adds one line: `💤 Idle: nothing new for
-   <count> cycles. News still wakes me within 30 s; otherwise I check hourly.`
+4. Print one line per PR you touched. Only a cycle that takes the idle wait (step 1 printed
+   `IDLE <count>` and you posted nothing, step 5) adds one line: `💤 Idle: nothing new for <count>
+   cycles. News still wakes me within 30 s; otherwise I check hourly.`, with `<count>` the number
+   from that `IDLE` line. Any other cycle prints no 💤 line; never count cycles yourself.
 5. Wait. Start the waiter with Bash `run_in_background: true`, then schedule the fallback. The
    normal wait:
 

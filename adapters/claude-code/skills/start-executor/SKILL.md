@@ -256,8 +256,10 @@ Each cycle:
    padding, so it wraps cleanly at any terminal width. The second line starts with
    `<milestone> · ` when you have one. The third line is the state the operator cares about:
    `⏳ Waiting for review`, `❓ Question for you: <one line>` while your question is unanswered,
-   or `✅ Ready — operator merges`. An idle cycle (step 5) adds a fourth line, `▌ 💤 Idle: nothing
-   new for <count> polls. News still wakes me within 30 s; otherwise I check hourly.`
+   or `✅ Ready — operator merges`. Only a cycle that takes the idle wait (step 1 printed `IDLE
+   <count>` and step 5's conditions hold) adds a fourth line, `▌ 💤 Idle: nothing new for <count>
+   polls. News still wakes me within 30 s; otherwise I check hourly.`, with `<count>` the number
+   from that `IDLE` line. Any other cycle prints no 💤 line; never count polls yourself.
 
 ```
 ▌ PR #<PR> — <issue title>

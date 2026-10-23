@@ -162,8 +162,10 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
    drop the comment and let the next cycle review the new head. The watch script counts an
    `[executor]` comment older than your newest post as read, so this re-fetch is where you see it.
 4. Print one line per PR you touched; a PR with your open question reads `PR #<n>: ❓ question
-   for you — <one line>`. An idle cycle adds one line: `💤 Idle: nothing new for <count>
-   cycles. News still wakes me within 30 s; otherwise I check hourly.`
+   for you — <one line>`. Only a cycle that takes the idle wait (step 1 printed `IDLE <count>`
+   and you posted nothing, step 5) adds one line: `💤 Idle: nothing new for <count> cycles. News
+   still wakes me within 30 s; otherwise I check hourly.`, with `<count>` the number from that
+   `IDLE` line. Any other cycle prints no 💤 line; never count cycles yourself.
 5. Wait. Start the waiter with Bash `run_in_background: true`, then schedule the fallback. The
    normal wait:
 
