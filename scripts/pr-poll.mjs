@@ -4,7 +4,7 @@
  *
  * Usage:
  *   node scripts/pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate]
- *                            [--wait [secs] [--max secs]]
+ *                            [--idle-after <n>] [--wait [secs] [--max secs]]
  *
  * Output — signal lines then content blocks, exits when done (with --wait: the first output that is
  * news, see lib/wait.mjs):
@@ -21,6 +21,8 @@
  *                               + the gate quoted on the head with --require-gate and no CI), and the PR not in
  *                               conflict; no content block
  *   MERGED                      PR is merged; executor should stop
+ *   IDLE <count>                with --idle-after <n>, last line: <count> runs in a row (n or more) brought no
+ *                               new comment, review, commit or CI change and no new signal (lib/wait.mjs)
  *
  * Content block format (after each signal line):
  *   ---
@@ -63,7 +65,7 @@ import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
-const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--wait [secs] [--max secs]]'
+const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--idle-after <n>] [--wait [secs] [--max secs]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -102,7 +104,7 @@ function readJson(file) {
   }
 }
 
-function pass({ gh, save, dry }) {
+function pass({ gh, save, dry, mark }) {
   let prState = readJson(STATE_FILE)
   if (prState === undefined) prState = readJson(SHARED_STATE_FILE)?.[prNumber]
 
@@ -156,6 +158,10 @@ function pass({ gh, save, dry }) {
   // No CI: nothing reported, or every check skipped (a workflow switched off by an `if:`). With
   // --require-gate the project's local gate stands in for it (MERGE_READY below).
   const noCi = checks !== null && checks.every((c) => c.bucket === 'skipping')
+  // The idle count's activity key (lib/wait.mjs): a new commit or a CI change is news to the count
+  // even when it changes neither the state nor the output (CI going green with no LGTM yet).
+  const ciKey = checks === null ? 'unknown' : checks.map((c) => `${c.name}=${c.bucket}`).sort().join(',')
+  mark?.(`${headSha} ${ciKey}`)
 
   // First run: seed cursors to current max IDs and emit nothing.
   // Only subsequent runs emit NEW_* signals for activity since last check.

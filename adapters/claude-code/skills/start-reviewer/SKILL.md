@@ -86,8 +86,8 @@ Rules that hold for the whole session:
 
 Each cycle runs `pr-watch.mjs` once, handles its signals, and ends by starting a **waiter**: the
 same script with `--wait`, in the background. The waiter polls GitHub every 30 seconds without
-recording anything, and exits as soon as a run would have news (or after 25 minutes); its exit
-wakes you. Any wakeup is a continuation: run the cycle.
+recording anything, and exits as soon as a run would have news (or after 25 minutes, 55 when the
+loop is idle); its exit wakes you. Any wakeup is a continuation: run the cycle.
 
 **Every wakeup starts with** `node ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --beat
 ${CLAUDE_SESSION_ID}`, before anything else (the waiter's exit-3 case included). `MINE` → go on.
@@ -100,17 +100,20 @@ not a cycle: read its output and finish the review it belongs to, then end that 
 
 A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
 is still alive (it printed `WATCHER_RUNNING`). Beat, then run nothing else and start no waiter;
-only call the `ScheduleWakeup` from step 5, with `delaySeconds: 300` instead of 1800 when this
-session's start printed `TOOK_OVER` (the live waiter is likely the old session's, which ends
-within 25 minutes). Any **other failed exit** means the waiter itself broke (a usage
+only call the `ScheduleWakeup` from step 5, with the last cycle's delay (1800, or 3600 when it was
+idle), or `delaySeconds: 300` when this session's start printed `TOOK_OVER` (the live waiter is
+likely the old session's, which ends within 55 minutes). Any **other failed exit** means the waiter itself broke (a usage
 error, a broken install): name it in the status line, run the cycle, but end it with
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
 again, so a failure that repeats costs one turn per five minutes, not one per second.
 
 1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> --needs-operator-label
-   <needs-operator-label> $ARGUMENTS`, in the foreground, once per cycle. One line,
+   <needs-operator-label> --idle-after 3 $ARGUMENTS`, in the foreground, once per cycle. One line,
    space-separated signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`, `REVIEW:<n>`,
-   `REVIEW_COMMENTS:<n>`. You never need the waiter's own output.
+   `REVIEW_COMMENTS:<n>`. A second line `IDLE <count>` means this is the third run or later in a
+   row with nothing new (a standing signal you already handled, such as a `MERGE_CONFLICT:<n>`
+   you commented on or a `REVIEW:<n>` still waiting for `[qa] PASS`, is nothing new): handle the
+   signals as usual, then take the idle wait in step 5. You never need the waiter's own output.
 2. Handle each signal. With several reviewers, a signal that leads to work and a post on a PR
    you do not hold yet goes through the claim first ("Several reviewers").
    - **`CLOSED:<n>`** (the operator merged or closed it) → nothing to post, whatever was
@@ -159,8 +162,10 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
    drop the comment and let the next cycle review the new head. The watch script counts an
    `[executor]` comment older than your newest post as read, so this re-fetch is where you see it.
 4. Print one line per PR you touched; a PR with your open question reads `PR #<n>: ❓ question
-   for you — <one line>`.
-5. Wait. Start the waiter with Bash `run_in_background: true`, then schedule the fallback:
+   for you — <one line>`. An idle cycle adds one line: `💤 Idle: nothing new for <count>
+   cycles. News still wakes me within 30 s; otherwise I check hourly.`
+5. Wait. Start the waiter with Bash `run_in_background: true`, then schedule the fallback. The
+   normal wait:
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> --needs-operator-label <needs-operator-label> $ARGUMENTS --wait 30 --max 1500
@@ -173,8 +178,16 @@ ScheduleWakeup({ delaySeconds: 1800,
                  reason: "<one line>" })
 ```
 
-The waiter gives up after 25 minutes (`--max 1500`), which wakes you for an ordinary cycle. The
-fallback (30 minutes) fires only if no waiter woke you. Each `ScheduleWakeup` replaces the pending
+The idle wait, when step 1 printed `IDLE` and you posted nothing this cycle: the same waiter with
+`--max 3300` instead of `--max 1500`, and the same `ScheduleWakeup` with `delaySeconds: 3600`. The
+first run without `IDLE` goes back to the normal wait.
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> --needs-operator-label <needs-operator-label> $ARGUMENTS --wait 30 --max 3300
+```
+
+The waiter gives up after 25 minutes (`--max 1500`; 55 when idle), which wakes you for an ordinary
+cycle. The fallback (30 minutes; 60 when idle) fires only if no waiter woke you. Each `ScheduleWakeup` replaces the pending
 one, so scheduling it every cycle never stacks wakeups. Standing signals (`REVIEW:<n>` for a PR
 you have not posted on, say, while you wait for `[qa] PASS`) do not wake you again by themselves.
 

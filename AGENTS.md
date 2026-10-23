@@ -46,7 +46,9 @@ Three layers. Boundaries are strict.
   `gh pr checks` and `pr-poll.mjs` read as CI. One runner per repo and context (pid lock).
 - `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a
   waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:
-  "Waiting for events").
+  "Waiting for events"). One-shot runs also count runs in a row with nothing new; with
+  `--idle-after <n>` the n-th and later print `IDLE <count>` as their last line (spec: "Idle
+  count"). The script names no wait: the adapter picks its longer one.
 - `scripts/test/run.mjs` — contract tests for all of them against a fake `gh`
   (`scripts/test/fake-gh.mjs`), and for the Claude Code guard hook's session check. Run `node
   scripts/test/run.mjs` before any script change lands.
@@ -100,7 +102,8 @@ implemented.
 
 **Scheduling is adapter-specific.** Claude Code: every cycle runs the role's script once and ends by
 starting a `--wait` waiter under Bash `run_in_background` (its exit re-invokes the session) plus a
-fallback `ScheduleWakeup({ delaySeconds: 1800, … })`; "stop" is `TaskStop` on the waiter and
+fallback `ScheduleWakeup({ delaySeconds: 1800, … })`, or `--max 3300` and 3600 seconds once the
+script prints `IDLE`; "stop" is `TaskStop` on the waiter and
 `ScheduleWakeup({ stop: true })`; the skill works whether started bare or under `/loop`. Generic/Kiro: external cron, `sleep`, or manual re-trigger,
 with a sentinel file under `.agent-loop/` as the stop signal.
 
@@ -133,7 +136,8 @@ guard hook) and, for adapters that need one, stop sentinels.
 (reviewer), `<slug>-pr-poll-<pr>.json` (executor, one per PR, so two executors never share a file;
 the older shared `<slug>-pr-poll-state.json` is read once per PR as a migration source; delete it
 once every executor runs per-PR files, or deleting a PR's file restores that PR's old cursors),
-`<slug>-pr-qa-state.json` (QA). Safe to delete. `local-ci.mjs` keeps no state (the commit
+`<slug>-pr-qa-state.json` (QA). Next to each, one-shot runs keep `<state>-wait.json`: the
+waiter's baseline, the idle count and (pr-poll) the head-and-CI activity key. Safe to delete. `local-ci.mjs` keeps no state (the commit
 statuses are its record): only its pid lock, `<slug>-local-ci-<context>.lock`, and its run logs
 under `~/.agent-loop/local-ci/<slug>/`.
 
