@@ -1,4 +1,5 @@
-// The inbox folder: message files, one JSON file per message (spec: "Inbox folder").
+// The inbox folder: message files, one JSON file per message (spec: "Inbox folder"). A message
+// mirrors A2A 1.0's Message (role ROLE_USER or ROLE_AGENT, parts without a kind field).
 //
 // A message file is named `<messageId>.json`. A reader takes only regular files whose name is a
 // message id plus `.json`: dotfiles, temporary names (`.<id>.<pid>.tmp`, see sendMessage),
@@ -11,7 +12,9 @@ import path from 'path'
 export const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const FILE = /^([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.json$/
 const MAX_BYTES = 1024 * 1024
-export const ROLES = ['user', 'agent']
+export const ROLES = ['ROLE_USER', 'ROLE_AGENT']
+// A2A 1.0's Part: exactly one content field, the rest optional.
+const CONTENT = ['text', 'raw', 'url', 'data']
 
 const str = (v) => typeof v === 'string' && v !== ''
 
@@ -25,8 +28,10 @@ export function problem(msg, id) {
   if (Number.isNaN(Date.parse(msg.sentAt))) return 'sentAt must be a date'
   if (!Array.isArray(msg.parts) || msg.parts.length === 0) return 'parts must be a non-empty array'
   for (const p of msg.parts) {
-    if (p === null || typeof p !== 'object' || !str(p.kind)) return 'every part needs a kind'
-    if (p.kind === 'text' && typeof p.text !== 'string') return 'a text part needs a text string'
+    if (p === null || typeof p !== 'object' || Array.isArray(p)) return 'every part must be an object'
+    if (CONTENT.filter((k) => p[k] !== undefined).length !== 1) return `every part needs exactly one of ${CONTENT.join(', ')}`
+    for (const k of ['text', 'raw', 'url', 'filename', 'mediaType']) if (p[k] !== undefined && typeof p[k] !== 'string') return `a part's ${k} must be a string`
+    if (p.metadata !== undefined && (p.metadata === null || typeof p.metadata !== 'object' || Array.isArray(p.metadata))) return "a part's metadata must be an object"
   }
   return null
 }
@@ -78,7 +83,7 @@ export function listMessages(dir) {
 // without messageId and sentAt, which this fills in.
 export function sendMessage(dir, { role, contextId, taskId, from, to, text }) {
   const messageId = randomUUID()
-  const msg = { messageId, role, contextId, ...(taskId ? { taskId } : {}), parts: [{ kind: 'text', text }], from, to, sentAt: new Date().toISOString() }
+  const msg = { messageId, role, contextId, ...(taskId ? { taskId } : {}), parts: [{ text }], from, to, sentAt: new Date().toISOString() }
   const error = problem(msg, messageId)
   if (error) throw new Error(error)
   mkdirSync(dir, { recursive: true })

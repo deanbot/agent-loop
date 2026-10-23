@@ -46,7 +46,7 @@ Three layers. Boundaries are strict.
   `gh pr checks` and `pr-poll.mjs` read as CI. One runner per repo and context (pid lock).
 - `scripts/inbox.mjs` — a folder of message files as a signal source. `[--dir <folder>]` (default
   `.agent-loop/inbox`) prints `MESSAGE:<messageId>` per message not reported before (`INVALID:<id>`
-  for a file that is not one), or `NONE`; `--send [--dir <folder>] --role user|agent --from …
+  for a file that is not one), or `NONE`; `--send [--dir <folder>] --role ROLE_USER|ROLE_AGENT --from …
   --to … --context … [--task …] --text …` writes one atomically (default `.agent-loop/outbox`) and
   prints `SENT:<messageId>`. The folder logic is `scripts/lib/inbox.mjs` (spec: "Inbox folder").
 - `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a

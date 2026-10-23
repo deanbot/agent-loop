@@ -555,10 +555,10 @@ deployment.
 ```json
 {
   "messageId": "0b9e…",
-  "role": "user",
+  "role": "ROLE_USER",
   "contextId": "owner/repo#123",
   "taskId": "recheck abc1234",
-  "parts": [{ "kind": "text", "text": "Rebase on main, then push." }],
+  "parts": [{ "text": "Rebase on main, then push." }],
   "from": "operator",
   "to": "executor",
   "sentAt": "2026-01-01T10:00:00.000Z"
@@ -567,19 +567,20 @@ deployment.
 
 - `messageId`: letters, digits, `.`, `_`, `-`, at most 128, starting with a letter or digit; the
   file name without `.json`.
-- `role`: `user` for direction, `agent` for a session's reply.
+- `role`: `ROLE_USER` for direction, `ROLE_AGENT` for a session's reply.
 - `contextId`: the work item, such as `owner/repo#123`. `taskId`, optional: one step inside it,
   such as a recheck at a sha.
-- `parts`: at least one; a text part is `{ "kind": "text", "text": "…" }`. Other kinds are passed
-  through for the agent to read.
+- `parts`: at least one. Each part has exactly one of `text` (a string), `raw` (base64), `url`
+  (a string) or `data` (any JSON value), and optionally `mediaType`, `filename` (strings) and
+  `metadata` (an object). A text part is `{ "text": "…" }`; there is no `kind` field.
 - `from`, `to`: who wrote it and for whom, as names the deployment chooses. `sentAt`: an ISO 8601
   time.
 
-Where A2A's `Message` has a field, the name is A2A's (`messageId`, `role`, `contextId`, `taskId`,
-`parts`), and the values are written as in A2A 0.3's JSON (`"user"`, `"agent"`, a part with
-`kind`). A2A 1.0 writes `ROLE_USER` and `ROLE_AGENT` and a text part as `{ "text": "…" }`, so an
-A2A adapter maps those two values; `from`, `to` and `sentAt` have no A2A field and would go in its
-`metadata`. A2A's task lifecycle is not adopted: signals and labels stay the status model.
+The format mirrors **A2A 1.0**'s `Message` in its JSON form: the field names (`messageId`,
+`role`, `contextId`, `taskId`, `parts`), the role values and the part shape are A2A 1.0's, so an
+A2A adapter carries a message over one to one. `from`, `to` and `sentAt` have no A2A field; such
+an adapter puts them in the Message's `metadata`. A2A's task lifecycle is not adopted: the status
+model is still agent-loop's own, its signals and labels.
 
 **Reading:** `inbox.mjs [--dir <folder>]` prints one line per message it has not reported before,
 oldest `sentAt` first, then exits:
@@ -600,8 +601,9 @@ every interval and prints `PENDING` as soon as a new message (or invalid file) i
 rather than relying on file-change events, which may not cross a shared folder into a VM. A folder
 that does not exist yet is polled like an empty one.
 
-**Writing:** `inbox.mjs --send [--dir <folder>] --role user|agent --from <name> --to <name>
---context <contextId> [--task <taskId>] --text <text>` fills in `messageId` (a UUID) and `sentAt`,
+**Writing:** `inbox.mjs --send [--dir <folder>] --role ROLE_USER|ROLE_AGENT --from <name> --to
+<name> --context <contextId> [--task <taskId>] --text <text>` writes the text as one part, fills in
+`messageId` (a UUID) and `sentAt`,
 creates the folder if needed, and prints `SENT:<messageId>`. It writes `.<messageId>.<pid>.tmp`
 in the same folder and renames it to `<messageId>.json`, so a reader never sees half a message.
 Any other writer must do the same: write under a dotfile name in the folder, then rename.

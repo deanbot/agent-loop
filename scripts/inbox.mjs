@@ -5,7 +5,7 @@
  *
  * Usage (paths are relative to the working directory, normally the clone's root):
  *   node scripts/inbox.mjs [--dir <folder>] [--wait [secs] [--max secs]]
- *   node scripts/inbox.mjs --send [--dir <folder>] --role user|agent --from <name> --to <name>
+ *   node scripts/inbox.mjs --send [--dir <folder>] --role ROLE_USER|ROLE_AGENT --from <name> --to <name>
  *                          --context <contextId> [--task <taskId>] --text <text>
  *
  * Reading (default folder .agent-loop/inbox) — one line per message not reported before, oldest
@@ -17,11 +17,12 @@
  * A first run reports every message already there: a message is direction, not history.
  *
  * Sending (default folder .agent-loop/outbox) writes `<messageId>.json` atomically (a temporary
- * dotfile, then a rename) and prints `SENT:<messageId>`. messageId and sentAt are filled in.
+ * dotfile, then a rename) and prints `SENT:<messageId>`. messageId and sentAt are filled in; the
+ * text becomes one part, { text }. --role takes A2A 1.0's values as written in the file.
  *
- * State persisted in the state folder the other signal scripts use, as inbox-<hash>.json, one per folder (<hash>: the first 16
- * hex digits of the SHA-256 of the folder's real path). State format: { reported: [messageId, …] },
- * pruned to the files still in the folder.
+ * State persisted in the state folder the other signal scripts use, as inbox-<hash>.json, one per
+ * folder (<hash>: the first 16 hex digits of the SHA-256 of the folder's real path). State format:
+ * { reported: [messageId, …] }, pruned to the files still in the folder.
  */
 
 import { readFileSync, mkdirSync, realpathSync } from 'fs'
@@ -32,7 +33,7 @@ import { runSignalScript, usageError } from './lib/wait.mjs'
 import { listMessages, sendMessage, ROLES } from './lib/inbox.mjs'
 
 const USAGE =
-  'inbox.mjs [--dir <folder>] [--wait [secs] [--max secs]] | inbox.mjs --send [--dir <folder>] --role user|agent --from <name> --to <name> --context <contextId> [--task <taskId>] --text <text>'
+  'inbox.mjs [--dir <folder>] [--wait [secs] [--max secs]] | inbox.mjs --send [--dir <folder>] --role ROLE_USER|ROLE_AGENT --from <name> --to <name> --context <contextId> [--task <taskId>] --text <text>'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
