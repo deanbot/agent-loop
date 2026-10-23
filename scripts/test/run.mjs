@@ -1200,19 +1200,18 @@ function inbox(ctx, args, cwd = ctx.home) {
   const r = spawnSync('node', [path.join(scripts, 'inbox.mjs'), ...args], { env: ctx.env, cwd, encoding: 'utf8' })
   return { out: r.stdout, err: r.stderr, code: r.status }
 }
-const message = (id, extra = {}) => ({
+// An A2A 1.0 Message; `meta` overrides keys in its metadata (from, to, sentAt).
+const message = (id, extra = {}, meta = {}) => ({
   messageId: id,
   role: 'ROLE_USER',
   contextId: 'acme/widgets#7',
   parts: [{ text: 'rebase on main' }],
-  from: 'operator',
-  to: 'executor',
-  sentAt: '2026-01-01T10:00:00Z',
+  metadata: { from: 'operator', to: 'executor', sentAt: '2026-01-01T10:00:00Z', ...meta },
   ...extra,
 })
-const putMessage = (dir, id, extra) => {
+const putMessage = (dir, id, extra, meta) => {
   mkdirSync(dir, { recursive: true })
-  writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(message(id, extra)))
+  writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(message(id, extra, meta)))
 }
 {
   const ctx = makeEnv()
@@ -1225,10 +1224,10 @@ const putMessage = (dir, id, extra) => {
   check('inbox: a new message file → one line, MESSAGE:<messageId>', first.out === 'MESSAGE:m1\n' && first.code === 0, JSON.stringify(first))
   const again = read()
   check('inbox: … a reported message is not reported again → NONE', signals(again.out).join() === 'NONE', again.out)
-  putMessage(dir, 'a-late', { sentAt: '2026-01-02T10:00:00Z' })
-  putMessage(dir, 'z-early', { sentAt: '2026-01-01T11:00:00Z' })
+  putMessage(dir, 'a-late', {}, { sentAt: '2026-01-02T10:00:00Z' })
+  putMessage(dir, 'z-early', {}, { sentAt: '2026-01-01T11:00:00Z' })
   const two = read()
-  check('inbox: two new messages → one line each, oldest sentAt first (not by name)', two.out === 'MESSAGE:z-early\nMESSAGE:a-late\n', two.out)
+  check('inbox: two new messages → one line each, oldest metadata.sentAt first (not by name)', two.out === 'MESSAGE:z-early\nMESSAGE:a-late\n', two.out)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
@@ -1261,15 +1260,24 @@ const putMessage = (dir, id, extra) => {
   putMessage(dir, 'noparts', { parts: [] })
   putMessage(dir, 'kindonly', { parts: [{ kind: 'text' }] })
   putMessage(dir, 'twocontent', { parts: [{ text: 'a', data: { b: 1 } }] })
+  putMessage(dir, 'toplevel', { from: 'operator' })
+  putMessage(dir, 'nometa', { metadata: undefined })
+  putMessage(dir, 'nofrom', {}, { from: '' })
+  putMessage(dir, 'baddate', {}, { sentAt: 'soon' })
   putMessage(dir, 'ok')
-  putMessage(dir, 'okparts', { sentAt: '2026-01-01T10:01:00Z', parts: [{ data: null }, { url: 'https://example.com/a.txt', mediaType: 'text/plain', filename: 'a.txt', metadata: {} }, { raw: 'aGk=' }] })
+  putMessage(dir, 'okparts', { parts: [{ data: null }, { url: 'https://example.com/a.txt', mediaType: 'text/plain', filename: 'a.txt', metadata: {} }, { raw: 'aGk=' }] },
+    { sentAt: '2026-01-01T10:01:00Z', priority: 'high' })
   const r = inbox(ctx, ['--dir', dir])
   const lines = r.out.trim().split('\n')
-  check('inbox: A2A 1.0 parts (data, a url with mediaType/filename/metadata, raw) are valid; the rest → INVALID:<name>, after the valid ones',
-    lines.slice(0, 2).join() === 'MESSAGE:ok,MESSAGE:okparts' && lines.slice(2).sort().join() === 'INVALID:bad,INVALID:kindonly,INVALID:noparts,INVALID:norole,INVALID:other,INVALID:twocontent' && r.code === 0, r.out)
+  check('inbox: A2A 1.0 parts (data, a url with mediaType/filename/metadata, raw) and other metadata keys are valid; the rest → INVALID:<name>, after the valid ones',
+    lines.slice(0, 2).join() === 'MESSAGE:ok,MESSAGE:okparts' &&
+    lines.slice(2).sort().join() === 'INVALID:bad,INVALID:baddate,INVALID:kindonly,INVALID:nofrom,INVALID:nometa,INVALID:noparts,INVALID:norole,INVALID:other,INVALID:toplevel,INVALID:twocontent' && r.code === 0, r.out)
   check('inbox: … each with its reason on stderr (an A2A 0.3 role "user", a part with only a kind, two content fields)',
     /bad\.json: unreadable/.test(r.err) && /other\.json: messageId is not the file name/.test(r.err) && /norole\.json: role must be ROLE_USER or ROLE_AGENT/.test(r.err) &&
     /noparts\.json: parts/.test(r.err) && /kindonly\.json: every part needs exactly one of/.test(r.err) && /twocontent\.json: every part needs exactly one of/.test(r.err), r.err)
+  check('inbox: … from, to and sentAt only in metadata (top-level from, no metadata, an empty metadata.from, a metadata.sentAt that is not a date)',
+    /toplevel\.json: from belongs in metadata/.test(r.err) && /nometa\.json: metadata must be an object/.test(r.err) &&
+    /nofrom\.json: metadata\.from must be/.test(r.err) && /baddate\.json: metadata\.sentAt must be a date/.test(r.err), r.err)
   const again = inbox(ctx, ['--dir', dir])
   check('inbox: … and reported once, like a message', signals(again.out).join() === 'NONE' && again.err === '', JSON.stringify(again))
   rmSync(ctx.home, { recursive: true, force: true })
@@ -1321,10 +1329,12 @@ const putMessage = (dir, id, extra) => {
   const files = readdirSync(dir)
   const msg = JSON.parse(readFileSync(path.join(dir, `${id}.json`), 'utf8'))
   check('inbox --send: one file, <messageId>.json, no temporary file left', files.join() === `${id}.json`, files.join())
-  check('inbox --send: the fields, with messageId and sentAt filled in',
+  check('inbox --send: the fields, with messageId and metadata.sentAt filled in, and only A2A 1.0 Message fields at the top level',
     msg.messageId === id && msg.role === 'ROLE_AGENT' && msg.contextId === 'acme/widgets#7' && msg.taskId === 'recheck abc123' &&
-    msg.from === 'executor' && msg.to === 'operator' && JSON.stringify(msg.parts) === JSON.stringify([{ text: 'Pushed the fix.\nSecond line.' }]) &&
-    Math.abs(Date.parse(msg.sentAt) - Date.now()) < 60000, JSON.stringify(msg))
+    JSON.stringify(Object.keys(msg.metadata).sort()) === '["from","sentAt","to"]' &&
+    msg.metadata.from === 'executor' && msg.metadata.to === 'operator' && JSON.stringify(msg.parts) === JSON.stringify([{ text: 'Pushed the fix.\nSecond line.' }]) &&
+    Math.abs(Date.parse(msg.metadata.sentAt) - Date.now()) < 60000 &&
+    Object.keys(msg).every((k) => ['messageId', 'role', 'contextId', 'taskId', 'parts', 'metadata'].includes(k)), JSON.stringify(msg))
   const read = inbox(ctx, ['--dir', dir])
   check('inbox --send: … and inbox.mjs then reports it', read.out === `MESSAGE:${id}\n`, read.out)
   const noTask = inbox(ctx, ['--send', '--dir', dir, '--role', 'ROLE_USER', '--from', 'o', '--to', 'e', '--context', 'acme/widgets#8', '--text', 'go'])

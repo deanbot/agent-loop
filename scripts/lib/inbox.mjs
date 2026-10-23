@@ -1,5 +1,6 @@
-// The inbox folder: message files, one JSON file per message (spec: "Inbox folder"). A message
-// mirrors A2A 1.0's Message (role ROLE_USER or ROLE_AGENT, parts without a kind field).
+// The inbox folder: message files, one JSON file per message (spec: "Inbox folder"). A message is
+// an A2A 1.0 Message as it stands (role ROLE_USER or ROLE_AGENT, parts without a kind field), with
+// agent-loop's own from, to and sentAt in its metadata.
 //
 // A message file is named `<messageId>.json`. A reader takes only regular files whose name is a
 // message id plus `.json`: dotfiles, temporary names (`.<id>.<pid>.tmp`, see sendMessage),
@@ -16,27 +17,35 @@ export const ROLES = ['ROLE_USER', 'ROLE_AGENT']
 // A2A 1.0's Part: exactly one content field, the rest optional.
 const CONTENT = ['text', 'raw', 'url', 'data']
 
+// agent-loop's keys in the Message's metadata.
+export const META = ['from', 'to', 'sentAt']
+
 const str = (v) => typeof v === 'string' && v !== ''
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
 // What is wrong with a parsed message named `<id>.json`, or null when nothing is.
 export function problem(msg, id) {
-  if (msg === null || typeof msg !== 'object' || Array.isArray(msg)) return 'not a JSON object'
+  if (!isObject(msg)) return 'not a JSON object'
   if (msg.messageId !== id) return `messageId is not the file name (${id})`
   if (!ROLES.includes(msg.role)) return `role must be ${ROLES.join(' or ')}`
-  for (const key of ['contextId', 'from', 'to', 'sentAt']) if (!str(msg[key])) return `${key} must be a non-empty string`
+  if (!str(msg.contextId)) return 'contextId must be a non-empty string'
   if (msg.taskId !== undefined && !str(msg.taskId)) return 'taskId must be a non-empty string when present'
-  if (Number.isNaN(Date.parse(msg.sentAt))) return 'sentAt must be a date'
+  // A2A 1.0's Message has no such fields: a file that has them is not a valid Message.
+  for (const key of META) if (key in msg) return `${key} belongs in metadata, not at the top level`
+  if (!isObject(msg.metadata)) return 'metadata must be an object'
+  for (const key of META) if (!str(msg.metadata[key])) return `metadata.${key} must be a non-empty string`
+  if (Number.isNaN(Date.parse(msg.metadata.sentAt))) return 'metadata.sentAt must be a date'
   if (!Array.isArray(msg.parts) || msg.parts.length === 0) return 'parts must be a non-empty array'
   for (const p of msg.parts) {
-    if (p === null || typeof p !== 'object' || Array.isArray(p)) return 'every part must be an object'
+    if (!isObject(p)) return 'every part must be an object'
     if (CONTENT.filter((k) => p[k] !== undefined).length !== 1) return `every part needs exactly one of ${CONTENT.join(', ')}`
     for (const k of ['text', 'raw', 'url', 'filename', 'mediaType']) if (p[k] !== undefined && typeof p[k] !== 'string') return `a part's ${k} must be a string`
-    if (p.metadata !== undefined && (p.metadata === null || typeof p.metadata !== 'object' || Array.isArray(p.metadata))) return "a part's metadata must be an object"
+    if (p.metadata !== undefined && !isObject(p.metadata)) return "a part's metadata must be an object"
   }
   return null
 }
 
-// Every message file in `dir`, oldest first (sentAt, then id; unreadable ones last, by id):
+// Every message file in `dir`, oldest first (metadata.sentAt, then id; invalid ones last, by id):
 // [{ id, error }], error null for a valid message. A missing folder has none.
 export function listMessages(dir) {
   let names
@@ -66,7 +75,7 @@ export function listMessages(dir) {
       try {
         const msg = JSON.parse(readFileSync(file, 'utf8'))
         error = problem(msg, id)
-        if (!error) at = Date.parse(msg.sentAt)
+        if (!error) at = Date.parse(msg.metadata.sentAt)
       } catch (e) {
         if (e.code === 'ENOENT') continue
         error = `unreadable: ${e.message}`
@@ -80,10 +89,17 @@ export function listMessages(dir) {
 }
 
 // Write one message into `dir` (created if missing) and return its id. Fields as in the spec,
-// without messageId and sentAt, which this fills in.
+// without messageId and sentAt, which this fills in; from, to and sentAt go in metadata.
 export function sendMessage(dir, { role, contextId, taskId, from, to, text }) {
   const messageId = randomUUID()
-  const msg = { messageId, role, contextId, ...(taskId ? { taskId } : {}), parts: [{ text }], from, to, sentAt: new Date().toISOString() }
+  const msg = {
+    messageId,
+    role,
+    contextId,
+    ...(taskId ? { taskId } : {}),
+    parts: [{ text }],
+    metadata: { from, to, sentAt: new Date().toISOString() },
+  }
   const error = problem(msg, messageId)
   if (error) throw new Error(error)
   mkdirSync(dir, { recursive: true })

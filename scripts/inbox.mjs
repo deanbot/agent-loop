@@ -9,7 +9,7 @@
  *                          --context <contextId> [--task <taskId>] --text <text>
  *
  * Reading (default folder .agent-loop/inbox) — one line per message not reported before, oldest
- * first (by sentAt), then exits (with --wait: see lib/wait.mjs):
+ * first (by metadata.sentAt), then exits (with --wait: see lib/wait.mjs):
  *   MESSAGE:<messageId>   a new message: read <folder>/<messageId>.json
  *   INVALID:<messageId>   a new file with a message name that is not a valid message (the reason
  *                         goes to stderr); reported once, like a message
@@ -18,7 +18,7 @@
  *
  * Sending (default folder .agent-loop/outbox) writes `<messageId>.json` atomically (a temporary
  * dotfile, then a rename) and prints `SENT:<messageId>`. messageId and sentAt are filled in; the
- * text becomes one part, { text }. --role takes A2A 1.0's values as written in the file.
+ * text becomes one part, { text }, and --from, --to and sentAt go in the Message's metadata. --role takes A2A 1.0's values as written in the file.
  *
  * State persisted in the state folder the other signal scripts use, as inbox-<hash>.json, one per
  * folder (<hash>: the first 16 hex digits of the SHA-256 of the folder's real path). State format:

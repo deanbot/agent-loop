@@ -559,9 +559,11 @@ deployment.
   "contextId": "owner/repo#123",
   "taskId": "recheck abc1234",
   "parts": [{ "text": "Rebase on main, then push." }],
-  "from": "operator",
-  "to": "executor",
-  "sentAt": "2026-01-01T10:00:00.000Z"
+  "metadata": {
+    "from": "operator",
+    "to": "executor",
+    "sentAt": "2026-01-01T10:00:00.000Z"
+  }
 }
 ```
 
@@ -573,17 +575,19 @@ deployment.
 - `parts`: at least one. Each part has exactly one of `text` (a string), `raw` (base64), `url`
   (a string) or `data` (any JSON value), and optionally `mediaType`, `filename` (strings) and
   `metadata` (an object). A text part is `{ "text": "…" }`; there is no `kind` field.
-- `from`, `to`: who wrote it and for whom, as names the deployment chooses. `sentAt`: an ISO 8601
-  time.
+- `metadata`: an object holding agent-loop's three keys, which `inbox.mjs` reads from there:
+  `from` and `to` (who wrote it and for whom, as names the deployment chooses) and `sentAt` (an
+  ISO 8601 time). Other keys are allowed and ignored. `from`, `to` and `sentAt` at the top level
+  make the file invalid.
 
-The format mirrors **A2A 1.0**'s `Message` in its JSON form: the field names (`messageId`,
-`role`, `contextId`, `taskId`, `parts`), the role values and the part shape are A2A 1.0's, so an
-A2A adapter carries a message over one to one. `from`, `to` and `sentAt` have no A2A field; such
-an adapter puts them in the Message's `metadata`. A2A's task lifecycle is not adopted: the status
-model is still agent-loop's own, its signals and labels.
+A message file is an **A2A 1.0** `Message` as it stands, in its JSON form: the fields
+(`messageId`, `role`, `contextId`, `taskId`, `parts`, `metadata`), the role values and the part
+shape are A2A 1.0's, and agent-loop's own keys live in `metadata`, so an A2A adapter carries a
+message over one to one. A2A's task lifecycle is not adopted: the status model is still
+agent-loop's own, its signals and labels.
 
 **Reading:** `inbox.mjs [--dir <folder>]` prints one line per message it has not reported before,
-oldest `sentAt` first, then exits:
+oldest `metadata.sentAt` first, then exits:
 
 | Line | Meaning |
 |---|---|
@@ -602,9 +606,9 @@ rather than relying on file-change events, which may not cross a shared folder i
 that does not exist yet is polled like an empty one.
 
 **Writing:** `inbox.mjs --send [--dir <folder>] --role ROLE_USER|ROLE_AGENT --from <name> --to
-<name> --context <contextId> [--task <taskId>] --text <text>` writes the text as one part, fills in
-`messageId` (a UUID) and `sentAt`,
-creates the folder if needed, and prints `SENT:<messageId>`. It writes `.<messageId>.<pid>.tmp`
+<name> --context <contextId> [--task <taskId>] --text <text>` writes the text as one part and
+`--from`, `--to` into `metadata`, fills in `messageId` (a UUID) and `metadata.sentAt`, creates the
+folder if needed, and prints `SENT:<messageId>`. It writes `.<messageId>.<pid>.tmp`
 in the same folder and renames it to `<messageId>.json`, so a reader never sees half a message.
 Any other writer must do the same: write under a dotfile name in the folder, then rename.
 
