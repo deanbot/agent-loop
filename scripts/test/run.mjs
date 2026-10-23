@@ -1489,6 +1489,55 @@ const putMessage = (dir, id, extra, meta) => {
   check('inbox: the default folder is .agent-loop/inbox (the outbox is not read)', read.out === 'MESSAGE:in1\n', read.out)
   rmSync(ctx.home, { recursive: true, force: true })
 }
+{
+  // One waiter for both: a signal script's waiter given --inbox also ends on a new message (#77).
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  setFixture(ctx, watchReviewed)
+  const missing = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir, '--wait', '1', '--max', '2')).done
+  check('wait --inbox: no such folder and nothing on GitHub → NONE at --max', signals(missing.out).join() === 'NONE' && missing.ms >= 2000 && missing.code === 0, `${missing.ms}ms\n${missing.out}${missing.err}`)
+  putMessage(dir, 'old')
+  inbox(ctx, ['--dir', dir])
+  const record = readdirSync(path.join(ctx.home, '.agent-loop', 'state')).filter((f) => f.startsWith('inbox-'))
+  const before = readFileSync(path.join(ctx.home, '.agent-loop', 'state', record[0]), 'utf8')
+  const seen = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir, '--wait', '1', '--max', '2')).done
+  check('wait --inbox: a message inbox.mjs already reported is not news → NONE at --max', signals(seen.out).join() === 'NONE' && seen.ms >= 2000, `${seen.ms}ms\n${seen.out}${seen.err}`)
+  const w = start(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir, '--wait', '1', '--max', '15'))
+  await pause(1500)
+  const t0 = Date.now()
+  putMessage(dir, 'new')
+  const r = await w.done
+  const after = Date.now() - t0
+  check('wait --inbox: a new message mid-wait ends the GitHub waiter → PENDING within one poll', r.out === 'PENDING\n' && r.code === 0 && after < 2500, `${after}ms after the write\n${r.out}${r.err}`)
+  check('wait --inbox: … the waiter wrote nothing to the inbox record', readFileSync(path.join(ctx.home, '.agent-loop', 'state', record[0]), 'utf8') === before, before)
+  const next = inbox(ctx, ['--dir', dir])
+  check('wait --inbox: … so inbox.mjs then reports the message', next.out === 'MESSAGE:new\n', next.out)
+  const gh = run(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir), watchReviewed)
+  check('wait --inbox: a one-shot run takes the flag and prints as before', signals(gh).join() === 'NONE', gh)
+  setFixture(ctx, { ...watchReviewed, fail: true })
+  putMessage(dir, 'during-outage')
+  const outage = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir, '--wait', '1', '--max', '10')).done
+  check('wait --inbox: a message ends the wait even while every gh call fails', outage.out === 'PENDING\n' && outage.ms < 4000, `${outage.ms}ms\n${outage.out}${outage.err}`)
+  const bad = run(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--inbox'), watchReviewed)
+  check('wait --inbox: --inbox with no folder → usage error, exit 1', bad.startsWith('EXIT 1') && bad.includes('--inbox'), bad)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  const lgtm = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+  poll(ctx, BASE)
+  poll(ctx, lgtm)
+  setFixture(ctx, lgtm)
+  const w = start(ctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--inbox', dir, '--wait', '1', '--max', '15'])
+  await pause(1500)
+  putMessage(dir, 'exec1')
+  const r = await w.done
+  check('wait --inbox (poll): a standing MERGE_READY stays quiet, and a new message ends the executor\'s waiter → PENDING', r.out === 'PENDING\n' && r.ms >= 1500 && r.ms < 5000, `${r.ms}ms\n${r.out}${r.err}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
 
 // ---------------------------------------------------------------- pull.mjs
 {

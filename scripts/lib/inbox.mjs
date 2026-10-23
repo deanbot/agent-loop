@@ -6,8 +6,9 @@
 // message id plus `.json`: dotfiles, temporary names (`.<id>.<pid>.tmp`, see sendMessage),
 // directories and symlinks are never messages. sendMessage writes the temporary name first and
 // renames it, so a reader never sees half a message.
-import { readdirSync, lstatSync, readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from 'fs'
-import { randomUUID } from 'crypto'
+import { readdirSync, lstatSync, readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync, realpathSync } from 'fs'
+import { randomUUID, createHash } from 'crypto'
+import { homedir } from 'os'
 import path from 'path'
 
 export const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
@@ -86,6 +87,36 @@ export function listMessages(dir) {
   // Two unreadable ones give Infinity - Infinity, NaN, which falls through to the id like a tie.
   found.sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   return found.map(({ id, error }) => ({ id, error }))
+}
+
+// The record of what inbox.mjs has reported for `dir`: one file per folder, in the state folder the
+// signal scripts share, named by the SHA-256 of the folder's real path (its resolved path while it
+// does not exist yet: nothing is recorded for it then).
+export function recordFile(dir) {
+  let real = path.resolve(dir)
+  try {
+    real = realpathSync(real)
+  } catch {
+    // no folder yet
+  }
+  return path.join(homedir(), '.agent-loop', 'state', `inbox-${createHash('sha256').update(real).digest('hex').slice(0, 16)}.json`)
+}
+
+// The ids the record holds; a missing or unreadable record holds none.
+export function readReported(file) {
+  try {
+    const state = JSON.parse(readFileSync(file, 'utf8'))
+    return new Set(Array.isArray(state.reported) ? state.reported : [])
+  } catch {
+    return new Set()
+  }
+}
+
+// The message files in `dir` that inbox.mjs has not reported yet (what its next run would print),
+// read without writing anything: a waiter's check.
+export function unreported(dir) {
+  const reported = readReported(recordFile(dir))
+  return listMessages(dir).filter((m) => !reported.has(m.id))
 }
 
 // Write one message into `dir` (created if missing) and return its id. Fields as in the spec,

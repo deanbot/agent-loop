@@ -25,12 +25,10 @@
  * { reported: [messageId, …] }, pruned to the files still in the folder.
  */
 
-import { readFileSync, mkdirSync, realpathSync } from 'fs'
-import { createHash } from 'crypto'
-import { homedir } from 'os'
+import { mkdirSync } from 'fs'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
-import { listMessages, sendMessage, ROLES } from './lib/inbox.mjs'
+import { listMessages, sendMessage, recordFile, readReported, ROLES } from './lib/inbox.mjs'
 
 const USAGE =
   'inbox.mjs [--dir <folder>] [--wait [secs] [--max secs]] | inbox.mjs --send [--dir <folder>] --role ROLE_USER|ROLE_AGENT --from <name> --to <name> --context <contextId> [--task <taskId>] --text <text>'
@@ -58,26 +56,12 @@ if (send) {
   process.exit(0)
 }
 
-let real = dir
-try {
-  real = realpathSync(dir)
-} catch {
-  // no folder yet: nothing to report, and nothing recorded under its real path
-}
-const STATE_DIR = path.join(homedir(), '.agent-loop', 'state')
-const STATE_FILE = path.join(STATE_DIR, `inbox-${createHash('sha256').update(real).digest('hex').slice(0, 16)}.json`)
+const STATE_FILE = recordFile(dir)
 
-mkdirSync(STATE_DIR, { recursive: true })
+mkdirSync(path.dirname(STATE_FILE), { recursive: true })
 
 function pass({ save, dry }) {
-  let reported = new Set()
-  try {
-    const state = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
-    if (Array.isArray(state.reported)) reported = new Set(state.reported)
-  } catch {
-    // no prior state
-  }
-
+  const reported = readReported(STATE_FILE)
   const messages = listMessages(dir)
   const fresh = messages.filter((m) => !reported.has(m.id))
   if (!dry) for (const m of fresh) if (m.error) process.stderr.write(`inbox: ${m.id}.json: ${m.error}\n`)
