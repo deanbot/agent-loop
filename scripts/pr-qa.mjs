@@ -15,7 +15,7 @@
  * produce SHA changes; reviewer findings are irrelevant to A.C. evaluation).
  *
  * Usage:
- *   node scripts/pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--wait [secs] [--max secs]]
+ *   node scripts/pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--idle-after <n>] [--wait [secs] [--max secs]]
  *
  * Output — one line, then exits (with --wait: the first line that is news, see lib/wait.mjs):
  *   NONE <timestamp>         no PRs changed since last run
@@ -23,7 +23,8 @@
  *   MERGE_CONFLICT:<n>       PR has new commits but branch conflicts with base
  *   CLOSED:<n>               PR the script was tracking is no longer open (merged or closed); emitted once
  *
- * Multiple signals space-separated on one line.
+ * Multiple signals space-separated on one line. With --idle-after <n>, a run that is the n-th or later
+ * in a row to bring nothing new adds a second line, IDLE <count> (lib/wait.mjs).
  *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json
  * State format: { [prNumber]: { sha: string, lastComment: number | null } }
@@ -35,7 +36,7 @@ import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
-const USAGE = 'pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--wait [secs] [--max secs]]'
+const USAGE = 'pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--idle-after <n>] [--wait [secs] [--max secs]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)

@@ -70,6 +70,12 @@ waiter polls GitHub every 30 seconds without recording anything and exits as soo
 run would have news (spec: "Waiting for events"). Claude Code re-invokes the session when a
 background command exits, and that wake runs an ordinary cycle, so a handoff waits about 30
 seconds and an idle role takes one model turn per 25 minutes instead of one every minute or two.
+After 3 cycles in a row with nothing new (the one-shot run prints `IDLE <count>`, from
+`--idle-after 3`), the reviewer, QA and the executor's PR wait move to the idle wait, `--max 3300`
+and a 3600-second fallback (the most `ScheduleWakeup` accepts), so an empty cycle comes about once
+an hour; news still wakes the session within 30 seconds, and the first cycle with something new
+goes back to the normal wait. The executor keeps its `--max 600` wait while its own question is
+open.
 The skill never reads the waiter's output (the notification carries only an output-file path,
 outside the project), and a session that dies before handling a wake loses nothing: the state was
 never written. A waiter that finds another alive exits with code 3, which the notification shows
@@ -98,7 +104,7 @@ NotebookEdit call with a reason that tells it to stop; its next wake also prints
 stops without unclaiming or posting, since the claims belong to the clone. The hook's
 `session_id` and the skill's `${CLAUDE_SESSION_ID}` were checked to be the same string, subagents
 included. One leftover: the old session's background waiter may still hold the PR's waiter lock,
-so the new session's waiters exit 3 until it ends (at most 25 minutes); after a takeover that
+so the new session's waiters exit 3 until it ends (at most 25 minutes, 55 if it was idle); after a takeover that
 wake re-schedules in 300 seconds instead of 1800.
 
 ## Permissions
