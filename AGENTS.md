@@ -28,9 +28,10 @@ Three layers. Boundaries are strict.
   `gate`): on a PR with no CI, `MERGE_READY` needs the LGTM's `Gate on <sha>:` line on the head.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
 - `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
-  [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n]`. Prints `ISSUE:<n>`,
-  `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE`, exits. No state and no `--wait`: it
-  lists fresh every call, so an issue filed while the executor waited is seen.
+  [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n] [--clone <clone>]`. Prints
+  `RESUME:<n> PR:<p>` (with `--clone`: a PR this clone parked, unblocked since, before anything
+  else), `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE`, exits. No state
+  and no `--wait`: it lists fresh every call, so an issue filed while the executor waited is seen.
 - `scripts/session.mjs` — one loop session per clone. `--start <id>` (`NEW`, `MINE`, `TOOK_OVER
   <id> <secs>`), `--beat <id>` (`MINE`, `SUPERSEDED <id|none>`), `--release <id>`. The newest
   start wins; the old session is recorded as superseded in `.agent-loop/session` and stops (the
