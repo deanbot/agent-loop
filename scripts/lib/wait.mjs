@@ -21,6 +21,14 @@
 //     on every run, so without the baseline a waiter would return at once, every time.
 // No baseline yet (no one-shot run since this version) → any non-NONE output is news.
 //
+// Idle count (#75): the sidecar also counts one-shot runs in a row that brought nothing new: the
+// state unchanged, the output equal to the previous baseline (a standing signal the agent already
+// handled is not new), and the pass's activity key, if it marks one, unchanged (pr-poll marks the
+// head sha and the CI state, which its state does not hold). Any other run resets it to 0. With
+// --idle-after <n>, a one-shot run whose count has reached n prints `IDLE <count>` as its last
+// line, after the baseline is taken, so the waiter never compares against it. The agent picks
+// its longer wait from that; the script names no wait. Waiters accept the flag and ignore it.
+//
 // One waiter per state file: a pid lock (`<state>-wait.lock`). A second waiter
 // while the first is alive prints `WATCHER_RUNNING <pid>` and exits 3, so a harness that reports
 // only exit codes can tell it apart. A failed pass (network, rate limit, auth) is reported on
@@ -33,7 +41,8 @@ export function usageError(usage, message) {
   process.exit(1)
 }
 
-// --wait takes an optional value; --max requires one. Returns { wait: secs | null, max: secs }.
+// --wait takes an optional value; --max and --idle-after require one.
+// Returns { wait: secs | null, max: secs, idleAfter: n | null }.
 export function waitArgs(argv, usage) {
   const num = (v) => (v !== undefined && /^\d+(\.\d+)?$/.test(v) ? Number(v) : null)
   let wait = null
@@ -52,7 +61,14 @@ export function waitArgs(argv, usage) {
     else usageError(usage, `--max: expected seconds, got "${v ?? ''}"`)
     if (wait === null) usageError(usage, '--max needs --wait')
   }
-  return { wait, max }
+  let idleAfter = null
+  const ii = argv.indexOf('--idle-after')
+  if (ii !== -1) {
+    const v = argv[ii + 1]
+    if (/^[1-9]\d*$/.test(v ?? '')) idleAfter = Number(v)
+    else usageError(usage, `--idle-after: expected a count of runs, got "${v ?? ''}"`)
+  }
+  return { wait, max, idleAfter }
 }
 
 function readOr(file, fallback) {
@@ -131,26 +147,31 @@ function acquireLock(lockFile, max) {
 }
 
 export async function runSignalScript({ argv, usage, stateFile, pass }) {
-  const { wait, max } = waitArgs(argv, usage)
+  const { wait, max, idleAfter } = waitArgs(argv, usage)
   const base = stateFile.replace(/\.json$/, '')
   const waitFile = `${base}-wait.json`
   const lockFile = `${base}-wait.lock`
-  const loadBaseline = () => {
+  const loadSidecar = () => {
     try {
-      return JSON.parse(readOr(waitFile, '{}')).baseline ?? null
+      return JSON.parse(readOr(waitFile, '{}')) ?? {}
     } catch {
-      return null
+      return {}
     }
   }
+  const loadBaseline = () => loadSidecar().baseline ?? null
 
   if (wait === null) {
     const gh = memoGh()
+    const prev = loadSidecar()
     const before = readOr(stateFile, null)
-    const out = pass({ gh, save: (text) => writeAtomic(stateFile, text), dry: false })
+    let activity = null
+    const out = pass({ gh, save: (text) => writeAtomic(stateFile, text), dry: false, mark: (key) => (activity = key) })
     const changed = readOr(stateFile, null) !== before
     const baseline = changed ? fingerprint(dryPass(pass, gh).out) : fingerprint(out)
-    writeAtomic(waitFile, JSON.stringify({ baseline }))
-    process.stdout.write(out)
+    const quiet = !changed && prev.baseline != null && fingerprint(out) === prev.baseline && activity === (prev.activity ?? null)
+    const idle = quiet ? (Number.isInteger(prev.idle) ? prev.idle : 0) + 1 : 0
+    writeAtomic(waitFile, JSON.stringify({ baseline, activity, idle }))
+    process.stdout.write(idleAfter !== null && idle >= idleAfter ? `${out}IDLE ${idle}\n` : out)
     return
   }
 

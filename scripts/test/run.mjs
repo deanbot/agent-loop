@@ -772,6 +772,116 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- idle count, --idle-after (#75)
+const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
+{
+  const ctx = makeEnv()
+  const watch = (fx) => run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '3'), fx)
+  const seen = [watch(watchReviewed), watch(watchReviewed), watch(watchReviewed)]
+  check('idle (watch): the first run (REVIEW:7) and the next two empty ones print no IDLE', seen[0] === 'REVIEW:7\n' && seen.every((o) => idleOf(o) === null), seen.join(''))
+  const third = watch(watchReviewed)
+  check('idle (watch): the third empty run in a row → NONE, then IDLE 3 on its own last line', /^NONE \S+\nIDLE 3\n$/.test(third), third)
+  const later = { ...watchReviewed, comments: [...watchReviewed.comments, comment('one more thing', T('2026-01-01T12:30:00Z'))] }
+  const news = watch(later)
+  check('idle (watch): the next signal resets the count → REVIEW_COMMENTS:7, no IDLE', news === 'REVIEW_COMMENTS:7\n', news)
+  const after = watch(later)
+  check('idle (watch): … and the empty run after it does not idle (count 1)', idleOf(after) === null && signals(after).join() === 'NONE', after)
+  check('idle (watch): the sidecar holds the count', JSON.parse(stateText(ctx, 'acme-widgets-pr-state-wait.json')).idle === 1, stateText(ctx, 'acme-widgets-pr-state-wait.json'))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const watch = (fx) => run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '3'), fx)
+  const outs = [watch(watchFx), watch(watchFx), watch(watchFx), watch(watchFx)]
+  check('idle (watch): a standing REVIEW:7 (waiting for [qa] PASS) counts as nothing new → REVIEW:7 then IDLE 3 on the fourth run',
+    outs.every((o) => o.startsWith('REVIEW:7\n')) && outs.slice(0, 3).every((o) => idleOf(o) === null) && idleOf(outs[3]) === '3', outs.join('|'))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const lgtm = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))], prView: { reviewDecision: '' }, prs: [{ number: 7, headRefOid: 'abc123', mergeable: 'MERGEABLE', labels: [{ name: 'needs-operator' }] }] }
+  const conflicting = { ...lgtm, prs: [{ ...lgtm.prs[0], mergeable: 'CONFLICTING' }] }
+  const watch = (fx) => run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '3'), fx)
+  watch(lgtm)
+  watch(lgtm)
+  const outs = [watch(conflicting), watch(conflicting), watch(conflicting), watch(conflicting)]
+  check('idle (watch): a standing MERGE_CONFLICT the reviewer already handled counts as nothing new → IDLE 3 on its third repeat',
+    outs.every((o) => o.startsWith('MERGE_CONFLICT:7\n')) && outs.slice(0, 3).every((o) => idleOf(o) === null) && idleOf(outs[3]) === '3', outs.join('|'))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const outs = [1, 2, 3, 4, 5].map(() => run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed))
+  check('idle (watch): without --idle-after the output never carries IDLE', outs.every((o) => idleOf(o) === null) && outs.slice(1).every((o) => signals(o).join() === 'NONE'), outs.join(''))
+  const withFlag = run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '3'), watchReviewed)
+  check('idle (watch): … the count still ran, so adding the flag later idles at once', idleOf(withFlag) === '5', withFlag)
+  for (const bad of ['0', 'x', '1.5', '-2']) {
+    const r = run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', bad), watchReviewed)
+    check(`idle: --idle-after ${bad} → usage error, exit 1`, r.startsWith('EXIT 1') && r.includes('--idle-after'), r)
+  }
+  const missing = run(ctx, 'pr-watch.mjs', watchArgs('--idle-after'), watchReviewed)
+  check('idle: --idle-after with no value → usage error, exit 1', missing.startsWith('EXIT 1'), missing)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // The IDLE line is printed only: the baseline it records must still match the waiter's dry pass.
+  const ctx = makeEnv()
+  for (let i = 0; i < 4; i++) run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '3'), watchReviewed)
+  const sidecar = stateText(ctx, 'acme-widgets-pr-state-wait.json')
+  setFixture(ctx, watchReviewed)
+  const r = await start(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '3', '--wait', '1', '--max', '2')).done
+  check('idle (wait): after an IDLE run the waiter is not woken by it → NONE at --max (and takes --idle-after silently)', r.out.startsWith('NONE ') && idleOf(r.out) === null && r.ms >= 2000 && r.code === 0, `${r.ms}ms code ${r.code}\n${r.out}${r.err}`)
+  check('idle (wait): the waiter leaves the count alone', stateText(ctx, 'acme-widgets-pr-state-wait.json') === sidecar, `${sidecar}\n${stateText(ctx, 'acme-widgets-pr-state-wait.json')}`)
+  const next = run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '3'), watchReviewed)
+  check('idle (wait): … so the one-shot run after it counts on from 3 → IDLE 4', idleOf(next) === '4', next)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // A standing signal is compared by the waiter (NONE never is): an IDLE line in the baseline would wake it at once.
+  const ctx = makeEnv()
+  for (let i = 0; i < 4; i++) run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '3'), watchFx)
+  setFixture(ctx, watchFx)
+  const r = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
+  check('idle (wait): after REVIEW:7 + IDLE 3, a waiter on the standing REVIEW:7 is not woken → NONE at --max', r.out.startsWith('NONE ') && r.ms >= 2000, `${r.ms}ms\n${r.out}${r.err}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const fx = { ...BASE, prs: [{ number: 7, headRefOid: 'abc123', mergeable: 'MERGEABLE' }] }
+  const qa = (f) => run(ctx, 'pr-qa.mjs', ['--repo', REPO, '--idle-after', '3'], f)
+  const outs = [qa(fx), qa(fx), qa(fx), qa(fx)]
+  check('idle (qa): QA_READY, then three empty runs → IDLE 3 on the third', outs[0] === 'QA_READY:7\n' && idleOf(outs[2]) === null && /^NONE \S+\nIDLE 3\n$/.test(outs[3]), outs.join('|'))
+  const op = qa({ ...fx, comments: [comment('verified by hand', T('2026-01-01T12:00:00Z'))] })
+  check('idle (qa): an operator comment resets it → QA_READY:7, no IDLE', op === 'QA_READY:7\n', op)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const pollIdle = (fx) => poll(ctx, fx, ['--idle-after', '3'])
+  const pending = { ...BASE, checks: [{ name: 'check', state: 'IN_PROGRESS', bucket: 'pending' }] }
+  const outs = [pollIdle(pending), pollIdle(pending), pollIdle(pending), pollIdle(pending)]
+  check('idle (poll): three empty polls → IDLE 3 on the third', idleOf(outs[2]) === null && /^NONE \S+\nIDLE 3\n$/.test(outs[3]), outs.join('|'))
+  const green = pollIdle(BASE)
+  check('idle (poll): CI changing (pending → pass, no LGTM, output still NONE) resets the count', signals(green).join() === 'NONE' && idleOf(green) === null, green)
+  pollIdle(BASE)
+  pollIdle(BASE)
+  const third = pollIdle(BASE)
+  check('idle (poll): … and three empty polls on the new CI state idle again', idleOf(third) === '3', third)
+  const own = { ...BASE, comments: [comment('[executor] Pushed fix: x', T('2026-01-01T11:00:00Z'))] }
+  const ownOut = pollIdle(own)
+  check('idle (poll): a new comment that changes the state but not the output (own [executor] post → NONE) resets the count', signals(ownOut).join() === 'NONE' && idleOf(ownOut) === null, ownOut)
+  const pushed = { ...BASE, pr: { merged: false, head: { sha: 'def456' } } }
+  const push = pollIdle(pushed)
+  check('idle (poll): a new head commit (output still NONE) resets the count', signals(push).join() === 'NONE' && idleOf(push) === null, push)
+  const lgtm = { ...pushed, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+  const ready = [pollIdle(lgtm), pollIdle(lgtm), pollIdle(lgtm), pollIdle(lgtm)]
+  check('idle (poll): a standing MERGE_READY counts as nothing new → MERGE_READY then IDLE 3 on its third repeat',
+    ready.every((o) => signals(o).includes('MERGE_READY')) && ready.slice(0, 3).every((o) => idleOf(o) === null) && idleOf(ready[3]) === '3', ready.join('|'))
+  const unreadable = pollIdle({ ...lgtm, checks: 'error' })
+  check('idle (poll): CI that cannot be read is a CI change, not quiet', idleOf(unreadable) === null, unreadable)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- pr-poll: one state file per PR (#29)
 // Two executors on one repo: a run for PR 7 reads its state, a run for PR 8 reads and saves, then
 // the PR 7 run saves. Neither may put back the other's older entry.

@@ -14,7 +14,7 @@
  *
  * Usage:
  *   node scripts/pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>]]
- *                             [--needs-operator-label <name>] [--wait [secs] [--max secs]]
+ *                             [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs]]
  *   node scripts/pr-watch.mjs --repo owner/repo --reviewer <clone> --check-claim <n> [--stale-after <secs>]
  *
  * Several reviewers (--reviewer <clone>): each reviewer claims a PR with a "[reviewer] Reviewing
@@ -38,7 +38,9 @@
  *   REVIEW_COMMENTS:<n>           PR has new operator (unprefixed) comments or inline review comments
  *   CLOSED:<n>                    PR the script was tracking is no longer open (merged or closed); emitted once
  *
- * Multiple signals are space-separated on one line.
+ * Multiple signals are space-separated on one line. With --idle-after <n>, a run that is the n-th or
+ * later in a row to bring nothing new (no state change, the same signals as the run before) adds a
+ * second line, IDLE <count> (lib/wait.mjs).
  * REVIEW:<n> takes precedence over REVIEW_COMMENTS:<n> for the same PR.
  *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-state.json across sessions.
@@ -59,7 +61,7 @@ import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
 const USAGE =
-  'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--wait [secs] [--max secs]]'
+  'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
