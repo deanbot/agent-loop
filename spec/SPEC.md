@@ -491,6 +491,21 @@ one-shot runs, or chain the two:
 node pr-watch.mjs --repo R --wait && node pr-watch.mjs --repo R
 ```
 
+### Idle count (`--idle-after <n>`)
+
+Each one-shot run also counts how many runs in a row brought nothing new, in the same file as the
+baseline. A run brings nothing new when it changes no state, its output equals the previous run's
+baseline (so a standing signal the agent already handled, such as a `MERGE_CONFLICT:<n>` the
+reviewer commented on or a `REVIEW:<n>` waiting for `[qa] PASS`, is not new), and, for `pr-poll`,
+the head commit and the CI checks' states are unchanged. Any other run resets the count to 0.
+Waiters never touch it.
+
+With `--idle-after <n>` (a whole number from 1), a one-shot run whose count has reached `n` prints
+`IDLE <count>` as its last line, after the signals and any content blocks. Without the flag the
+output is unchanged; waiters accept the flag and ignore it. The line is not a signal and never
+enters the baseline. An agent that sees it may wait longer before its next cycle; the first run
+without it means something happened. The script names no wait: the adapter picks it.
+
 ---
 
 ## Local CI runner (`local-ci.mjs`)

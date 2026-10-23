@@ -188,8 +188,8 @@ carries `<blocked-label>` or `<needs-operator-label>` from a park, remove them: 
 
 Each cycle runs `pr-poll.mjs` once, handles its signals, and ends by starting a **waiter**: the
 same script with `--wait`, in the background. The waiter polls GitHub every 30 seconds without
-recording anything, and exits as soon as a run would have news (or when `--max` passes); its exit
-wakes you. A wakeup is a continuation, not a fresh start: skip detection and orientation and run
+recording anything, and exits as soon as a run would have news (or when `--max` passes: 25
+minutes, 55 when the PR is idle); its exit wakes you. A wakeup is a continuation, not a fresh start: skip detection and orientation and run
 the cycle.
 
 **Every wakeup starts with** `node ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --beat
@@ -202,9 +202,9 @@ output and continue the work it belongs to.
 
 A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
 is still alive (it printed `WATCHER_RUNNING`). Beat, then run nothing else and start no waiter;
-only call the `ScheduleWakeup` from step 5, with `delaySeconds: 300` instead of 1800 when this
-session's start printed `TOOK_OVER` (the live waiter is likely the old session's, which ends
-within 25 minutes). Any **other failed exit** means the waiter itself broke (a usage error, a
+only call the `ScheduleWakeup` from step 5, with the last cycle's delay (1800, or 3600 when it was
+idle), or `delaySeconds: 300` when this session's start printed `TOOK_OVER` (the live waiter is
+likely the old session's, which ends within 55 minutes). Any **other failed exit** means the waiter itself broke (a usage error, a
 broken install): name it in the status line, run the cycle, but end it with
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
 again, so a failure that repeats costs one turn per five minutes, not one per second.
@@ -214,7 +214,10 @@ Below, `<poll>` is `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo>
 
 Each cycle:
 
-1. Run `<poll>` in the foreground, once per cycle. You never need the waiter's own output.
+1. Run `<poll> --idle-after 3` in the foreground, once per cycle. You never need the waiter's own
+   output. A last line `IDLE <count>` means this is the third poll or later in a row with no new
+   comment, review, commit or CI change and no new signal (a standing `MERGE_READY` is nothing
+   new): handle the signals as usual, then take the idle wait in step 5.
 2. Handle every signal it printed, in this order: `MERGED`, `CI_FAILING`, `MERGE_CONFLICT`,
    `NEW_INLINE_COMMENT`, `NEW_REVIEW_SUBMISSION`, `NEW_COMMENT`, `MERGE_READY`, `NONE`. Signal
    handling is in [reference/signals.md](reference/signals.md); read it the first time a non-`NONE` signal
@@ -253,7 +256,10 @@ Each cycle:
    padding, so it wraps cleanly at any terminal width. The second line starts with
    `<milestone> · ` when you have one. The third line is the state the operator cares about:
    `⏳ Waiting for review`, `❓ Question for you: <one line>` while your question is unanswered,
-   or `✅ Ready — operator merges`.
+   or `✅ Ready — operator merges`. Only a cycle that takes the idle wait (step 1 printed `IDLE
+   <count>` and step 5's conditions hold) adds a fourth line, `▌ 💤 Idle: nothing new for <count>
+   polls. News still wakes me within 30 s; otherwise I check hourly.`, with `<count>` the number
+   from that `IDLE` line. Any other cycle prints no 💤 line; never count polls yourself.
 
 ```
 ▌ PR #<PR> — <issue title>
@@ -275,8 +281,17 @@ ScheduleWakeup({ delaySeconds: 1800, noop: <true when the cycle was NONE>,
                  reason: "<one line: what you are waiting for>" })
 ```
 
+The idle wait, when step 1 printed `IDLE`, you posted and pushed nothing this cycle, and no
+question of yours is open: the same waiter with `--max 3300` instead of `--max 1500`, and the same
+`ScheduleWakeup` with `delaySeconds: 3600`. While your own question is open the `--max 600` wait
+stays, idle or not. The first poll without `IDLE` goes back to the normal wait.
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> [--require-qa] [--require-gate] --wait 30 --max 3300
+```
+
 The waiter gives up when `--max` passes, which wakes you for an ordinary cycle. The fallback (30
-minutes) fires only if no waiter woke you. Each `ScheduleWakeup` replaces the pending one, so
+minutes; 60 when idle) fires only if no waiter woke you. Each `ScheduleWakeup` replaces the pending one, so
 scheduling it every cycle never stacks wakeups. A standing `MERGE_READY` does not wake you again
 by itself: the waiter returns when it appears, or with new activity.
 
