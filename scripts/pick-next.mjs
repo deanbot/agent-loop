@@ -4,9 +4,15 @@
  *
  * Usage:
  *   node scripts/pick-next.mjs --repo owner/repo [--milestone <title>] [--in-progress-label <l>]
- *                              [--blocked-label <l>] [--skip <n,n,...>]
+ *                              [--blocked-label <l>] [--skip <n,n,...>] [--clone <clone>]
  *
  * Output — one line, then exits:
+ *   RESUME:<n> PR:<p>            with --clone only, before anything else: an open PR <p> whose body
+ *                                says "Closes #<n>", where #<n> is open, carries neither the
+ *                                in-progress nor the blocked label, is not skipped, and its newest
+ *                                "[executor] Claimed by" comment names <clone>: an issue this
+ *                                executor parked with a PR open and the operator has unblocked.
+ *                                Lowest <n> first, whatever the milestone; never a fork's PR
  *   ISSUE:<n>                    the lowest-numbered open issue (in the milestone, when given) without
  *                                the in-progress or blocked label, not skipped, whose dependencies are
  *                                all closed
@@ -36,7 +42,7 @@
 import { execFileSync } from 'child_process'
 
 const USAGE =
-  'pick-next.mjs --repo owner/repo [--milestone <title>] [--in-progress-label <l>] [--blocked-label <l>] [--skip <n,n,...>]'
+  'pick-next.mjs --repo owner/repo [--milestone <title>] [--in-progress-label <l>] [--blocked-label <l>] [--skip <n,n,...>] [--clone <clone>]'
 
 function usageError(message) {
   process.stderr.write(`${message ? `${message}\n` : ''}Usage: ${USAGE}\n`)
@@ -60,6 +66,8 @@ const blocked = arg('--blocked-label') ?? 'is-blocked'
 const skipArg = (arg('--skip') ?? '').replace(/^none$/i, '')
 if (skipArg && !/^\d+(,\d+)*$/.test(skipArg)) usageError(`--skip: expected n,n,…, got "${skipArg}"`)
 const skip = new Set(skipArg.split(',').filter(Boolean).map(Number))
+const clone = arg('--clone')
+if (clone !== null && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(clone)) usageError(`--clone: expected a clone name, got "${clone}"`)
 
 const gh = (...args) => JSON.parse(execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || 'null')
 
@@ -81,16 +89,54 @@ function dependencies(body) {
   return deps
 }
 
-const stateCache = new Map()
+const issueCache = new Map()
+const fetchIssue = (n) => {
+  if (!issueCache.has(n)) issueCache.set(n, gh('api', `repos/${repo}/issues/${n}`))
+  return issueCache.get(n)
+}
 function isOpen(n, openNumbers) {
   if (openNumbers.has(n)) return true
-  if (!stateCache.has(n)) stateCache.set(n, gh('api', `repos/${repo}/issues/${n}`).state)
-  return stateCache.get(n) !== 'closed'
+  return fetchIssue(n).state !== 'closed'
 }
 
 const hasLabel = (issue, name) => (issue.labels ?? []).some((l) => l.name === name)
 
+let prCache = null
+const openPrs = () => (prCache ??= gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,body,isCrossRepository'))
+
+// An issue this clone parked while its PR was open, unblocked since: its PR comes back to it, so
+// the review findings on it keep an owner. The claim comment is the record of whose it was. A
+// fork's PR is never offered: anyone can write "Closes #<n>" in one.
+function resumable() {
+  const closing = []
+  for (const p of openPrs().filter((p) => p.isCrossRepository !== true)) {
+    for (const m of (p.body ?? '').matchAll(/Closes #(\d+)(?![0-9])/gi)) closing.push({ n: Number(m[1]), pr: p.number })
+  }
+  closing.sort((a, b) => a.n - b.n || a.pr - b.pr)
+  for (const { n, pr } of closing) {
+    if (skip.has(n)) continue
+    let issue
+    try {
+      issue = fetchIssue(n)
+    } catch (e) {
+      // "Closes #<n>" naming no issue (a typo, a deleted one) is not this pick's failure.
+      if (/HTTP 404|Not Found/.test(String(e?.stderr ?? ''))) continue
+      throw e
+    }
+    if (issue.state !== 'open' || hasLabel(issue, inProgress) || hasLabel(issue, blocked)) continue
+    const pages = gh('api', '--paginate', '--slurp', `repos/${repo}/issues/${n}/comments`)
+    const claims = pages.flat().filter((c) => (c.body ?? '').startsWith('[executor] Claimed by '))
+    const newest = claims.sort((a, b) => a.id - b.id).at(-1)
+    if (newest && newest.body.trim() === `[executor] Claimed by ${clone}`) return `RESUME:${n} PR:${pr}`
+  }
+  return null
+}
+
 function pick(title) {
+  if (clone !== null) {
+    const back = resumable()
+    if (back) return back
+  }
   const listed = listOpen(title)
   const open = listed.filter((i) => !skip.has(i.number))
   const openNumbers = new Set(open.map((i) => i.number))
@@ -121,9 +167,8 @@ function pick(title) {
 }
 
 function waitOn(blocker) {
-  const prs = gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,body')
   const closes = new RegExp(`Closes #${blocker}([^0-9]|$)`, 'i')
-  const pr = prs.find((p) => closes.test(p.body ?? ''))
+  const pr = openPrs().find((p) => closes.test(p.body ?? ''))
   return `WAIT:${blocker} PR:${pr ? pr.number : 'none'}`
 }
 

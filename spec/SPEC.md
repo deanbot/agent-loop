@@ -358,6 +358,16 @@ no claim to protect.
 **Claiming** uses a claim comment, so two executors that pick at the same moment cannot both win
 (see "Claim comments" below). The winner then adds `in-progress-label`; the loser picks next.
 
+**A parked PR comes back to its executor.** Parking an issue whose PR is open drops the claim
+(the label), so the review findings on that PR would have no owner once the operator unblocks it.
+The pick therefore looks first for such a PR: an open PR, from a branch of the repository itself,
+whose body says `Closes #<n>`, where #<n> is open, carries neither label, and its newest
+`[executor] Claimed by` comment names this executor's clone. That PR is its next work, before any
+new issue and whatever the milestone. It claims #<n> again the usual way (the old claim is not
+live, so only a race with another executor picking #<n> right now can lose it) and resumes the
+PR. Any executor that picks an issue with an open PR and no `in-progress-label` claims it the same
+way before orienting on the PR, so one parked PR never gets two executors.
+
 **Milestone track.** An executor started with a milestone (`--milestone "<title>"` in the adapters
 that take arguments) picks only open issues in that milestone. Several executors can run separate
 tracks this way; a shared `## Agent loop` key could not, since every clone reads the same
@@ -371,8 +381,10 @@ move to the next open milestone by milestone number, after the current one. With
 picking is as above.
 
 **`pick-next.mjs`** makes the pick deterministic: `--repo owner/repo [--milestone <title>]
-[--in-progress-label <l>] [--blocked-label <l>] [--skip n,n]` lists the open issues fresh, applies
-the rules above and prints one line: `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>` (milestone only:
+[--in-progress-label <l>] [--blocked-label <l>] [--skip n,n] [--clone <clone>]` lists the open issues
+fresh, applies the rules above and prints one line: `RESUME:<n> PR:<p>` (with `--clone` only: the
+parked PR above; lowest `<n>` first; a `Closes #<n>` naming no issue is passed over),
+`ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>` (milestone only:
 none startable; the PR is the open one whose body says `Closes #<blocker>`), `MOVE_ON <title>`
 (milestone only: no open issues; the rest of the line is the next open milestone) or `NONE`
 (nothing to pick). `--skip` names issues the executor turned down this session (author check,
@@ -456,8 +468,11 @@ Every block parks the issue: remove `in-progress-label`, add `blocked-label`, po
 BLOCKED: <reason>. To resume: remove the label and re-run on <PR or issue>.`, pick next. A question
 in the poll loop with no unprefixed reply for about 10 minutes parks the same way (ten one-minute
 polls, or a cycle with no news after a `--wait --max 600` waiter).
-Resume: the operator removes `blocked-label` and re-runs the executor on the PR or issue; the
-executor removes any lingering `blocked-label` on resume.
+Resume: the operator removes `blocked-label`. When the issue has an open PR, the executor that
+parked it takes it back at its next pick ("A parked PR comes back to its executor"), and any
+other executor that picks the issue first claims it and resumes the PR. The operator can also
+re-run the executor on the PR or issue. The executor removes any lingering `blocked-label` on
+resume.
 
 ---
 
