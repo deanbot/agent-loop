@@ -365,9 +365,10 @@ whose body says `Closes #<n>`, where #<n> is open, carries neither label, and it
 `[executor] Claimed by` comment posted by the PR's author names this executor's clone. That PR is
 its next work, before any new issue and whatever the milestone. It runs the author check and
 claims #<n> again the usual way (the old claim is not live, so only a race with another executor
-picking #<n> right now can lose it), then resumes the PR. In an adapter that implements this, any
-executor that picks an issue with an open PR and no `in-progress-label` checks and claims it the
-same way before orienting on the PR, so one parked PR never gets two executors. The Claude Code
+picking #<n> right now can lose it), then resumes the PR on its branch. In an adapter that
+implements this, every path that puts an executor on an open PR (a pick, or the operator re-running
+it on the PR or the issue) checks and claims the linked issue the same way when it carries no
+`in-progress-label`, so one parked PR never gets two executors. The Claude Code
 adapter does; the generic and Kiro adapters don't yet (they pass no `--clone`, and the operator
 re-runs the executor on the PR as before).
 
@@ -468,7 +469,8 @@ exists → PR comment; no PR yet → issue comment. Never an interactive prompt.
 shape and the label of "Operator attention" above.
 
 Every block parks the issue: remove `in-progress-label`, add `blocked-label`, post `[executor]
-BLOCKED: <reason>. To resume: remove the label and re-run on <PR or issue>.`, pick next. A question
+BLOCKED: <reason>. To resume: remove the label.` (with no PR yet, adding `Then re-run on issue
+#<N>.`), pick next. A question
 in the poll loop with no unprefixed reply for about 10 minutes parks the same way (ten one-minute
 polls, or a cycle with no news after a `--wait --max 600` waiter).
 Resume: the operator removes `blocked-label`. When the issue has an open PR, the executor that

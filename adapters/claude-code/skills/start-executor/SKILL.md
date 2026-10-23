@@ -143,11 +143,8 @@ number.
   this is a PR: note its linked issue (`Closes #N` in the body), orient (below), enter the loop.
 - Otherwise, with an issue number: `gh pr list --repo <repo> --state open --limit 100 --json
   number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first |
-  .number'`. A PR found → orient on it and enter the loop. If the issue carries
-  `<in-progress-label>`, do not re-claim. If it carries neither label (it was parked, then
-  unblocked), run the author check in [reference/implement.md](reference/implement.md) §1, then
-  claim it with steps 1–4 of the claim there, so a parked PR never gets two executors: turned
-  down or lost → add it to your skip list and pick next. None → claim and
+  .number'`. A PR found → orient on it (below: it claims the issue again when it was parked) and
+  enter the loop. None → claim and
   implement
   (read [reference/implement.md](reference/implement.md) now; it covers the author check, the
   claim, dependencies, tests-first, the pre-PR self-check and the PR body).
@@ -163,11 +160,9 @@ base name of your working directory. It lists the open issues, drops claimed, bl
 ones, checks each `Depends on #a, #b`, and prints one line:
 
 - **`RESUME:<n> PR:<p>`** → an issue you parked while PR #<p> was open, unblocked since: its review
-  findings are yours. It comes before any new issue, whatever the milestone. Run the author check
-  in [reference/implement.md](reference/implement.md) §1 (a claim comment is text anyone can
-  post), then claim #<n> again with steps 1–4 of the claim there. Won → switch to the PR's branch (its name: `gh pr view <p> --repo
-  <repo> --json headRefName`; then `git switch <branch>`, after a `git fetch` when it is not in
-  this clone; never over uncommitted changes), orient on PR #<p> (below) and enter the loop. Lost → add `<n>` to your skip list and run the script again.
+  findings are yours. It comes before any new issue, whatever the milestone. Orient on PR #<p>
+  (below: it runs the author check, claims #<n> again and switches to the PR's branch) and enter
+  the loop.
 - **`ISSUE:<n>`** → treat it as an issue number (above). If implement.md §1 turns it down, add it
   to your skip list and run the script again.
 - **`WAIT:<blocker> PR:<pr>`** (with `<milestone>` only: open issues, none startable) → do not end
@@ -190,10 +185,25 @@ ones, checks each `Depends on #a, #b`, and prints one line:
   `ScheduleWakeup({ delaySeconds: 300, noop: true, prompt: <the same "run pick-next.mjs again
   (skip: …)" prompt>, reason: "<one line>" })`.
 
-**Orient on an existing PR.** `gh pr view <PR> --repo <repo>` and `gh pr view <PR> --comments
---repo <repo>`: the description, the acceptance criteria table, every comment, any earlier
-`[executor] BLOCKED` or `Question` and the operator's replies. If the linked issue or the PR still
-carries `<blocked-label>` or `<needs-operator-label>` from a park, remove them: you are resuming.
+**Orient on an existing PR.** Every path that works on an open PR comes through here: a PR
+number, an issue number with a PR, `RESUME`, and step 4's resume. In order:
+
+1. `gh pr view <PR> --repo <repo>` and `gh pr view <PR> --comments --repo <repo>`: the
+   description, the acceptance criteria table, every comment, any earlier `[executor] BLOCKED` or
+   `Question` and the operator's replies.
+2. If the linked issue #<N> or the PR still carries `<blocked-label>` or `<needs-operator-label>`
+   from a park, remove them: you are resuming.
+3. If #<N> now carries no `<in-progress-label>` (it was parked, or released), claim it before
+   any work, so one PR never gets two executors: the author check in
+   [reference/implement.md](reference/implement.md) §1 (a claim comment is text anyone can post),
+   then steps 1–4 of the claim there. With the label on, do not re-claim. Turned down or lost →
+   after a pick (`RESUME`, `ISSUE`), add #<N> to your skip list and run the script again; when
+   `$ARGUMENTS` named it, stop and say `#<N> is claimed by <the winning clone>: PR #<PR> stays
+   with it.`
+4. Be on the PR's branch: `gh pr view <PR> --repo <repo> --json headRefName`. Not on it → with a
+   clean tree, `git fetch` when the branch is not in this clone, then `git switch <branch>`; with
+   uncommitted changes, **stop** and say `<current branch> has uncommitted changes, and PR #<PR>
+   is on <branch>: commit, stash or discard them, then restart.`
 
 ## The loop
 
@@ -333,10 +343,11 @@ for the operator, and the reply to it belongs to that role: nothing for you.
   open, so `<needs-operator-label>` stays on until you resume.
 - Unresolvable, or input needed before there is a PR: park. `gh issue edit <N> --remove-label
   <in-progress-label> --add-label <blocked-label> --repo <repo>`, then post `[executor]
-  BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label and re-run start-executor on
-  <PR #n | issue #N>.` on the PR if one exists, else on the issue. Then pick next. With a PR
-  open, the operator removing the label is enough: your next pick prints `RESUME` for it, so its
-  review findings come back to you (or to the executor that picks the issue first). Never open a
+  BLOCKED: <reason>. To resume: remove the \`<blocked-label>\` label.` plus, with no PR, ` Then
+  re-run start-executor on issue #N.` on the PR if one exists, else on the issue. Then pick next.
+  With a PR open, removing the label is enough: your next pick prints `RESUME` for it, so its
+  review findings come back to you (or to the executor that picks the issue first; either one
+  claims it in "Orient on an existing PR"). A re-run on the PR claims it the same way. Never open a
   speculative PR and never keep building a blocked issue.
 - **Restarting** is a new session, not `/clear`: nothing says `/clear` loads a new plugin version
   or ends the old conversation's waiter and scheduled wakeup. Between issues, the restart line
