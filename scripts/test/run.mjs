@@ -306,7 +306,7 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   poll(ctx, legacy) // seen once as an ordinary new comment, like any thread activity
   const outL = poll(ctx, legacy)
   check('poll: retired [reviewer] Verified kind is tolerated (not re-surfaced, not an LGTM)', !outL.includes('Verified abc123') && !signals(outL).includes('MERGE_READY'), outL)
-  const answered = { ...legacy, comments: [...legacy.comments, comment('keep', T('2026-01-01T13:00:00Z')), comment('[reviewer] LGTM — abc123 against #4. Before you merge: run ./example-app check on the Mac.', T('2026-01-01T13:05:00Z'))] }
+  const answered = { ...legacy, comments: [...legacy.comments, comment('keep', T('2026-01-01T13:00:00Z')), comment('[reviewer] LGTM — abc123 against #4. Before you merge: run ./example-app check on a device.', T('2026-01-01T13:05:00Z'))] }
   const out2 = poll(ctx, answered)
   check('poll: Question → operator answers → LGTM with a before-merge note → MERGE_READY', signals(out2).includes('MERGE_READY'), out2)
   rmSync(ctx.home, { recursive: true, force: true })
