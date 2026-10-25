@@ -1579,6 +1579,11 @@ const putMessage = (dir, id, extra, meta) => {
   putMessage(path.join(ctx.home, '.agent-loop', 'quoted'), 'q1')
   const tilde = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', homeRel('quoted'), '--wait', '1', '--max', '10')).done
   check('wait --inbox: a quoted home-relative folder is under the home folder', tilde.out === 'PENDING\n' && tilde.ms < 4000, `${tilde.ms}ms\n${tilde.out}${tilde.err}`)
+  // The skills pass the block's form to both: the record must be the same file, or every waiter
+  // would return at once on a message already handled, and the loop would spin.
+  inbox(ctx, ['--dir', homeRel('quoted')], ctx.home)
+  const handled = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', homeRel('quoted'), '--wait', '1', '--max', '2')).done
+  check('wait --inbox: … once inbox.mjs reported it under the same home-relative name, not news → NONE at --max', signals(handled.out).join() === 'NONE' && handled.ms >= 2000, `${handled.ms}ms\n${handled.out}${handled.err}`)
   const bad = run(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--inbox'), watchReviewed)
   check('wait --inbox: --inbox with no folder → usage error, exit 1', bad.startsWith('EXIT 1') && bad.includes('--inbox'), bad)
   rmSync(ctx.home, { recursive: true, force: true })
