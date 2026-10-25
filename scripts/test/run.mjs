@@ -1519,8 +1519,8 @@ const putMessage = (dir, id, extra, meta) => {
   const ctx = makeEnv()
   const inb = path.join(ctx.home, 'in')
   const out = path.join(ctx.home, 'out')
-  putMessage(inb, 'm1', { taskId: 'recheck abc1234', contextId: 'owner/repo#123' }, { from: 'ops (host); $(touch x)' })
-  const r = inbox(ctx, ['--send', '--dir', out, '--reply-to', 'm1', '--inbox', inb, '--from', 'loom-review', '--text', 'Rechecked.'])
+  putMessage(inb, 'm1', { taskId: 'recheck abc1234', contextId: 'owner/repo#123' }, { from: 'operator (host); $(touch x)' })
+  const r = inbox(ctx, ['--send', '--dir', out, '--reply-to', 'm1', '--inbox', inb, '--from', 'review-clone', '--text', 'Rechecked.'])
   const id = /^SENT:(\S+)\n$/.exec(r.out)?.[1]
   let reply = null
   try {
@@ -1529,7 +1529,7 @@ const putMessage = (dir, id, extra, meta) => {
     // checked below
   }
   check('inbox --send --reply-to: the reply carries the message\'s taskId, contextId and from as to, exactly, as ROLE_AGENT',
-    r.code === 0 && reply?.taskId === 'recheck abc1234' && reply?.contextId === 'owner/repo#123' && reply?.metadata.to === 'ops (host); $(touch x)' && reply?.metadata.from === 'loom-review' && reply?.role === 'ROLE_AGENT' && reply?.parts[0].text === 'Rechecked.',
+    r.code === 0 && reply?.taskId === 'recheck abc1234' && reply?.contextId === 'owner/repo#123' && reply?.metadata.to === 'operator (host); $(touch x)' && reply?.metadata.from === 'review-clone' && reply?.role === 'ROLE_AGENT' && reply?.parts[0].text === 'Rechecked.',
     JSON.stringify({ r, reply }))
   putMessage(inb, 'bad', { role: 'user' })
   const refusals = [
@@ -1555,7 +1555,7 @@ const putMessage = (dir, id, extra, meta) => {
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
-  // No default folder: the deployment names it, outside the clone (#77, ops's call).
+  // No default folder: the deployment names it, outside the clone (#77: the trust rule in SPEC "Inbox folder").
   const ctx = makeEnv()
   const clone = path.join(ctx.home, 'clone')
   mkdirSync(clone)
