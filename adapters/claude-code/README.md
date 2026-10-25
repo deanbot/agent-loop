@@ -87,7 +87,8 @@ instead of a waiter, so a persistent failure cannot spin the session.
 pair (`inbox.mjs --check`: both outside the clone, neither inside the other) and warns and runs
 without one otherwise. Each cycle of the reviewer, QA and the executor's PR loop then runs
 `inbox.mjs --dir <inbox>` before its signal script, reads each new message with `--show`, acts
-on it within the role's rules and replies once into the outbox (`--send`); the waiter takes
+on it within the role's rules and replies once into the outbox (`--send --reply-to`, which copies the addressing from the message,
+so none of its values reaches the shell); the waiter takes
 `--inbox <inbox>`, so a message ends the same wait within 30 seconds, and a cycle that handled
 one is never idle. The executor reads messages only in its PR loop, not while it implements or
 waits on a pick. The folders' mounts and any sandbox write access to the outbox are the

@@ -48,7 +48,8 @@ Three layers. Boundaries are strict.
   the block's `inbox` key names it, outside the clone) prints `MESSAGE:<messageId>` per message not
   reported before (`INVALID:<id>` for a file that is not one), or `NONE`; `--show <id>` prints one
   message (or `INVALID: <reason>`) and records nothing; `--send --dir <folder>
-  --role ROLE_USER|ROLE_AGENT --from … --to … --context … [--task …] --text …` writes one
+  --role ROLE_USER|ROLE_AGENT --from … --to … --context … [--task …] --text …` (or `--reply-to
+  <id> --inbox <inbox> --from … --text …`, which copies the rest from the message) writes one
   atomically and prints `SENT:<messageId>`; `--check --dir <inbox> --outbox <outbox>` prints
   `MAILBOX_OK` or `MAILBOX_REFUSED: <reason>` (a folder relative, in the clone, or inside the
   other). The folder logic is `scripts/lib/inbox.mjs` (spec: "Inbox folder").

@@ -1480,6 +1480,47 @@ const putMessage = (dir, id, extra, meta) => {
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
+  // A reply copies to, contextId and taskId from the message (#80 review): nothing the writer
+  // chose passes through the shell, and a value split by the shell fails loudly.
+  const ctx = makeEnv()
+  const inb = path.join(ctx.home, 'in')
+  const out = path.join(ctx.home, 'out')
+  putMessage(inb, 'm1', { taskId: 'recheck abc1234', contextId: 'owner/repo#123' }, { from: 'ops (host); $(touch x)' })
+  const r = inbox(ctx, ['--send', '--dir', out, '--reply-to', 'm1', '--inbox', inb, '--from', 'loom-review', '--text', 'Rechecked.'])
+  const id = /^SENT:(\S+)\n$/.exec(r.out)?.[1]
+  let reply = null
+  try {
+    reply = JSON.parse(readFileSync(path.join(out, `${id}.json`), 'utf8'))
+  } catch {
+    // checked below
+  }
+  check('inbox --send --reply-to: the reply carries the message\'s taskId, contextId and from as to, exactly, as ROLE_AGENT',
+    r.code === 0 && reply?.taskId === 'recheck abc1234' && reply?.contextId === 'owner/repo#123' && reply?.metadata.to === 'ops (host); $(touch x)' && reply?.metadata.from === 'loom-review' && reply?.role === 'ROLE_AGENT' && reply?.parts[0].text === 'Rechecked.',
+    JSON.stringify({ r, reply }))
+  putMessage(inb, 'bad', { role: 'user' })
+  const refusals = [
+    ['an invalid message', ['--reply-to', 'bad', '--inbox', inb]],
+    ['a missing message', ['--reply-to', 'gone', '--inbox', inb]],
+    ['a traversal id', ['--reply-to', '../in/m1', '--inbox', path.join(ctx.home, 'x')]],
+    ['no --inbox', ['--reply-to', 'm1']],
+    ['a --task beside it', ['--reply-to', 'm1', '--inbox', inb, '--task', 't']],
+    ['a --to beside it', ['--reply-to', 'm1', '--inbox', inb, '--to', 'someone']],
+  ]
+  const outbox2 = path.join(ctx.home, 'out2')
+  for (const [name, args] of refusals) {
+    const x = inbox(ctx, ['--send', '--dir', outbox2, ...args, '--from', 'e', '--text', 't'])
+    check(`inbox --send --reply-to: ${name} → usage error, exit 1, nothing written`, x.code === 1 && /Usage: inbox\.mjs/.test(x.err) && !existsSync(outbox2), JSON.stringify(x))
+  }
+  const split = inbox(ctx, ['--send', '--dir', outbox2, '--role', 'ROLE_AGENT', '--from', 'e', '--to', 'o', '--context', 'c', '--task', 'recheck', 'abc1234', '--text', 't'])
+  check('inbox --send: --task recheck abc1234 (a value the shell split) → usage error naming the stray word, exit 1, nothing written',
+    split.code === 1 && /unexpected argument "abc1234"/.test(split.err) && !existsSync(outbox2), JSON.stringify(split))
+  const stray = inbox(ctx, ['--dir', inb, 'extra'])
+  check('inbox: any argument that is no flag or value → usage error, exit 1', stray.code === 1 && /unexpected argument "extra"/.test(stray.err) && stray.out === '', JSON.stringify(stray))
+  const readInbox = inbox(ctx, ['--dir', inb, '--inbox', inb])
+  check('inbox: --inbox outside --send → usage error, exit 1', readInbox.code === 1 && /--inbox goes with --send/.test(readInbox.err), JSON.stringify(readInbox))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
   // No default folder: the deployment names it, outside the clone (#77, ops's call).
   const ctx = makeEnv()
   const clone = path.join(ctx.home, 'clone')
@@ -1533,10 +1574,13 @@ const putMessage = (dir, id, extra, meta) => {
     ['no such message', 'gone', 'INVALID: no such message'],
     ['a symlink', 'linked', 'INVALID: not a regular file'],
     ['a path for an id', '../secret', 'INVALID: not a message id'],
+    ['an absolute path for an id', path.join(mail, 'secret'), 'INVALID: not a message id'],
+    ['an id with a slash', 'in/../../secret', 'INVALID: not a message id'],
+    ['"..", the parent folder', '..', 'INVALID: not a message id'],
   ]
   for (const [name, id, want] of shows) {
     const r = inbox(ctx, ['--dir', homeRel('mail', 'in'), '--show', id], clone)
-    check(`inbox --show: ${name} → ${want.split(':')[0]}, nothing of the file`, r.code === 0 && r.out.startsWith(want) && !r.out.includes('rebase'), JSON.stringify(r))
+    check(`inbox --show: ${name} → ${want.split(':')[0]}, one line and nothing of the file`, r.code === 0 && r.out.startsWith(want) && r.out.split('\n').length === 2 && !r.out.includes('rebase') && r.err === '', JSON.stringify(r))
   }
   const record = inbox(ctx, ['--dir', homeRel('mail', 'in')], clone)
   check('inbox --show: … records nothing (the next run still reports every file)', record.out === 'MESSAGE:shown\nINVALID:badrole\n', JSON.stringify(record))

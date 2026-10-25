@@ -7,8 +7,14 @@
  *   node scripts/inbox.mjs --dir <folder> [--wait [secs] [--max secs]]
  *   node scripts/inbox.mjs --send --dir <folder> --role ROLE_USER|ROLE_AGENT --from <name> --to <name>
  *                          --context <contextId> [--task <taskId>] --text <text>
+ *   node scripts/inbox.mjs --send --dir <outbox> --reply-to <messageId> --inbox <inbox> --from <name> --text <text>
  *   node scripts/inbox.mjs --dir <folder> --show <messageId>
  *   node scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>
+ *
+ * --send --reply-to <messageId> --inbox <inbox> answers a message in <inbox>: the reply's role is
+ * ROLE_AGENT and its to (the message's metadata.from), contextId and taskId are the message's, so
+ * none of them passes through the shell. Any argument that is not a known flag or its value is a
+ * usage error.
  *
  * --show prints one message as JSON, or `INVALID: <reason>` (exit 0 either way), and writes
  * nothing: an agent reads a message through the command it is already allowed to run.
@@ -43,7 +49,7 @@ import { runSignalScript, usageError } from './lib/wait.mjs'
 import { listMessages, sendMessage, recordFile, readReported, readMessage, expandHome, mailboxProblem, ROLES } from './lib/inbox.mjs'
 
 const USAGE =
-  'inbox.mjs --dir <folder> [--wait [secs] [--max secs]] | inbox.mjs --dir <folder> --show <messageId> | inbox.mjs --send --dir <folder> --role ROLE_USER|ROLE_AGENT --from <name> --to <name> --context <contextId> [--task <taskId>] --text <text> | inbox.mjs --check --dir <inbox> --outbox <outbox>'
+  'inbox.mjs --dir <folder> [--wait [secs] [--max secs]] | inbox.mjs --dir <folder> --show <messageId> | inbox.mjs --send --dir <folder> --role ROLE_USER|ROLE_AGENT --from <name> --to <name> --context <contextId> [--task <taskId>] --text <text> | inbox.mjs --send --dir <outbox> --reply-to <messageId> --inbox <inbox> --from <name> --text <text> | inbox.mjs --check --dir <inbox> --outbox <outbox>'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -53,9 +59,21 @@ function arg(name) {
   return v
 }
 
+// Every argument is a known flag or its value: a value split by the shell (an unquoted taskId
+// with a space) fails loudly instead of being cut short.
+const VALUED = new Set(['--dir', '--show', '--outbox', '--role', '--from', '--to', '--context', '--task', '--text', '--reply-to', '--inbox', '--max'])
+for (let i = 2; i < process.argv.length; i++) {
+  const a = process.argv[i]
+  if (VALUED.has(a)) i++
+  else if (a === '--wait') {
+    if (process.argv[i + 1] !== undefined && !process.argv[i + 1].startsWith('--')) i++
+  } else if (a !== '--send' && a !== '--check') usageError(USAGE, `unexpected argument "${a}"`)
+}
+
 const send = process.argv.includes('--send')
 const checking = process.argv.includes('--check')
 if (send && checking) usageError(USAGE, '--send and --check do not go together')
+if (!send && process.argv.includes('--inbox')) usageError(USAGE, '--inbox goes with --send --reply-to')
 const given = arg('--dir')
 if (given === null) usageError(USAGE, '--dir is required')
 
@@ -84,6 +102,21 @@ if (show !== null) {
 
 if (send) {
   if (process.argv.includes('--wait') || process.argv.includes('--max')) usageError(USAGE, '--send takes no --wait or --max')
+  const replyTo = arg('--reply-to')
+  if (replyTo !== null) {
+    // A reply: to, contextId and taskId come from the message itself, so nothing the message's
+    // writer chose ever passes through the shell.
+    for (const flag of ['--to', '--context', '--task', '--role']) if (process.argv.includes(flag)) usageError(USAGE, `--reply-to takes no ${flag}: the reply copies it from the message`)
+    const inboxDir = arg('--inbox')
+    if (inboxDir === null) usageError(USAGE, '--reply-to needs --inbox <the folder the message is in>')
+    const { msg, error } = readMessage(path.resolve(expandHome(inboxDir)), replyTo)
+    if (error) usageError(USAGE, `--reply-to ${replyTo}: ${error}`)
+    const fields = { role: 'ROLE_AGENT', from: arg('--from'), to: msg.metadata.from, contextId: msg.contextId, taskId: msg.taskId, text: arg('--text') }
+    for (const [key, flag] of [['from', '--from'], ['text', '--text']]) if (fields[key] === null) usageError(USAGE, `${flag} is required`)
+    process.stdout.write(`SENT:${sendMessage(dir, fields)}\n`)
+    process.exit(0)
+  }
+  if (process.argv.includes('--inbox')) usageError(USAGE, '--inbox goes with --reply-to')
   const role = arg('--role')
   if (!ROLES.includes(role)) usageError(USAGE, `--role: expected ${ROLES.join(' or ')}, got "${role ?? ''}"`)
   const fields = { role, from: arg('--from'), to: arg('--to'), contextId: arg('--context'), taskId: arg('--task') ?? undefined, text: arg('--text') }

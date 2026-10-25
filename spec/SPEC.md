@@ -652,6 +652,11 @@ script.
 folder if needed, and prints `SENT:<messageId>`. It writes `.<messageId>.<pid>.tmp`
 in the same folder and renames it to `<messageId>.json`, so a reader never sees half a message.
 Any other writer must do the same: write under a dotfile name in the folder, then rename.
+`inbox.mjs --send --dir <outbox> --reply-to <messageId> --inbox <inbox> --from <name> --text
+<text>` answers a valid message in `<inbox>`: the reply is `ROLE_AGENT`, its `metadata.to` is the
+message's `metadata.from`, and its `contextId` and `taskId` are the message's, so no value a
+message's writer chose reaches a shell command. `inbox.mjs` refuses any argument that is not one
+of its flags or a flag's value, so a value the shell split fails instead of being cut short.
 
 **Trust.** A message counts as direction only because of who can write to the folder. The inbox
 must not be writable by anything a PR's content can influence (a gate, a test, a build step, an
