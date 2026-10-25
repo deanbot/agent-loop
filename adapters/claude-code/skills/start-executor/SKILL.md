@@ -64,8 +64,10 @@ bare start that ran before the intended command) is then seen at once.
    `$ARGUMENTS` names is resumed later, from reference/implement.md §1). Otherwise (another branch, or
    uncommitted changes anywhere) you may have stopped mid-implementation, for example for a plugin
    update. Take `<N>` from the branch name (`issue-<N>-…`, or the project's issue-branch
-   convention), else from the number in `$ARGUMENTS`, and decide (`<clone>` is the base name of
-   your working directory):
+   convention), else from the PR or issue number in `$ARGUMENTS`: the bare number, never a digit
+   inside a flag's value (`--milestone`, `--inbox` and `--outbox` values are folder paths and
+   titles, and may hold digits). Then decide (`<clone>` is the base name of your working
+   directory):
    - **You hold #<N>**: it is open, carries `<in-progress-label>`, and the newest `[executor]
      Claimed by` comment on it names `<clone>` exactly (list them with the command in
      [reference/implement.md](reference/implement.md) §1; a losing claim is deleted, so the newest

@@ -143,6 +143,7 @@ second `⚠` line says so when they differ from that role's entry here (a role w
 gets no `⚠` line). It never stops a loop. `gate: <command>` is optional too, for a project that
 can turn CI off: on a PR with no CI, the executor runs it before each push and the reviewer on the
 head before an LGTM (spec: `gate`).
+
 **Local CI.** With a `gate`, you can run it once per head instead, outside the agents. Give it a
 clone of its own (no setup, no role) and leave this running in a terminal or as a login item:
 
