@@ -1319,6 +1319,9 @@ const message = (id, extra = {}, meta = {}) => ({
   metadata: { from: 'operator', to: 'executor', sentAt: '2026-01-01T10:00:00Z', ...meta },
   ...extra,
 })
+// A home-relative folder as a block names it (a tilde, then the path), here under the test HOME's
+// .agent-loop. Built with path.join: second-read refuses a tilde path written out in code.
+const homeRel = (...p) => path.join('~', '.agent-loop', ...p)
 const putMessage = (dir, id, extra, meta) => {
   mkdirSync(dir, { recursive: true })
   writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(message(id, extra, meta)))
@@ -1477,16 +1480,68 @@ const putMessage = (dir, id, extra, meta) => {
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
-  // The default folders are in the clone, beside .agent-loop/role.
+  // No default folder: the deployment names it, outside the clone (#77, ops's call).
   const ctx = makeEnv()
   const clone = path.join(ctx.home, 'clone')
   mkdirSync(clone)
-  const sent = inbox(ctx, ['--send', '--role', 'ROLE_AGENT', '--from', 'executor', '--to', 'operator', '--context', 'acme/widgets#7', '--text', 'done'], clone)
-  const id = /^SENT:(\S+)\n$/.exec(sent.out)?.[1]
-  check('inbox --send: the default folder is .agent-loop/outbox', id && existsSync(path.join(clone, '.agent-loop', 'outbox', `${id}.json`)) && !existsSync(path.join(clone, '.agent-loop', 'inbox')), JSON.stringify(sent))
   putMessage(path.join(clone, '.agent-loop', 'inbox'), 'in1')
   const read = inbox(ctx, [], clone)
-  check('inbox: the default folder is .agent-loop/inbox (the outbox is not read)', read.out === 'MESSAGE:in1\n', read.out)
+  check('inbox: no --dir → usage error, exit 1 (no default folder in the clone)', read.code === 1 && /--dir is required/.test(read.err) && read.out === '', JSON.stringify(read))
+  const sent = inbox(ctx, ['--send', '--role', 'ROLE_AGENT', '--from', 'executor', '--to', 'operator', '--context', 'acme/widgets#7', '--text', 'done'], clone)
+  check('inbox --send: no --dir → usage error, exit 1, no outbox made', sent.code === 1 && /--dir is required/.test(sent.err) && !existsSync(path.join(clone, '.agent-loop', 'outbox')), JSON.stringify(sent))
+  const quoted = inbox(ctx, ['--send', '--dir', homeRel('mail', 'out'), '--role', 'ROLE_AGENT', '--from', 'e', '--to', 'o', '--context', 'c', '--text', 't'], clone)
+  const qid = /^SENT:(\S+)\n$/.exec(quoted.out)?.[1]
+  check('inbox --send: a quoted home-relative folder is under the home folder', qid && existsSync(path.join(ctx.home, '.agent-loop', 'mail', 'out', `${qid}.json`)) && !existsSync(path.join(clone, '~')), JSON.stringify(quoted))
+  putMessage(path.join(ctx.home, '.agent-loop', 'mail', 'in'), 'home1')
+  const home = inbox(ctx, ['--dir', homeRel('mail', 'in')], clone)
+  check('inbox: … and so is a home-relative folder to read', home.out === 'MESSAGE:home1\n', JSON.stringify(home))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // --check: the mailbox the skills use only when it is safe (spec: "Inbox folder", Trust).
+  const ctx = makeEnv()
+  const clone = path.join(ctx.home, 'clone')
+  mkdirSync(path.join(clone, 'sub'), { recursive: true })
+  symlinkSync(path.join(clone, 'sub'), path.join(ctx.home, 'link-into-clone'))
+  const mail = path.join(ctx.home, '.agent-loop', 'mail')
+  const cases = [
+    ['two sibling folders outside the clone, not yet made', [path.join(mail, 'in'), path.join(mail, 'out')], 'MAILBOX_OK'],
+    ['home-relative folders outside the clone', [homeRel('mail', 'in'), homeRel('mail', 'out')], 'MAILBOX_OK'],
+    ['a sibling of the clone whose name starts with the clone\'s', [path.join(ctx.home, 'clone-mail', 'in'), path.join(ctx.home, 'clone-mail', 'out')], 'MAILBOX_OK'],
+    ['the inbox in the clone', [path.join(clone, '.agent-loop', 'inbox'), path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox is inside the clone'],
+    ['the inbox is the clone', [clone, path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox is inside the clone'],
+    ['the outbox in the clone', [path.join(mail, 'in'), path.join(clone, 'out')], 'MAILBOX_REFUSED: the outbox is inside the clone'],
+    ['the inbox through a symlink into the clone', [path.join(ctx.home, 'link-into-clone', 'in'), path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox is inside the clone'],
+    ['a relative inbox', ['.agent-loop/inbox', path.join(mail, 'out')], 'MAILBOX_REFUSED: both folders must be absolute'],
+    ['the outbox inside the inbox', [path.join(mail, 'in'), path.join(mail, 'in', 'out')], 'MAILBOX_REFUSED: the inbox and the outbox must be separate'],
+    ['the inbox inside the outbox', [path.join(mail, 'out', 'in'), path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox and the outbox must be separate'],
+    ['one folder for both', [path.join(mail, 'box'), path.join(mail, 'box')], 'MAILBOX_REFUSED: the inbox and the outbox must be separate'],
+  ]
+  for (const [name, [i, o], want] of cases) {
+    const r = inbox(ctx, ['--check', '--dir', i, '--outbox', o], clone)
+    check(`inbox --check: ${name} → ${want.split(':')[0]}`, r.code === 0 && r.out.startsWith(want) && r.out.endsWith('\n') && r.out.split('\n').length === 2, JSON.stringify(r))
+  }
+  check('inbox --check: … writes nothing (no folder made)', !existsSync(mail) && !existsSync(path.join(clone, '.agent-loop')), String(existsSync(mail)))
+  putMessage(path.join(mail, 'in'), 'shown')
+  putMessage(path.join(mail, 'in'), 'badrole', { role: 'user' })
+  writeFileSync(path.join(mail, 'secret.json'), JSON.stringify(message('secret')))
+  symlinkSync(path.join(mail, 'secret.json'), path.join(mail, 'in', 'linked.json'))
+  const shown = inbox(ctx, ['--dir', homeRel('mail', 'in'), '--show', 'shown'], clone)
+  check('inbox --show: a valid message → its JSON, exit 0', shown.code === 0 && JSON.stringify(JSON.parse(shown.out)) === JSON.stringify(message('shown')), JSON.stringify(shown))
+  const shows = [
+    ['an invalid message', 'badrole', 'INVALID: role must be'],
+    ['no such message', 'gone', 'INVALID: no such message'],
+    ['a symlink', 'linked', 'INVALID: not a regular file'],
+    ['a path for an id', '../secret', 'INVALID: not a message id'],
+  ]
+  for (const [name, id, want] of shows) {
+    const r = inbox(ctx, ['--dir', homeRel('mail', 'in'), '--show', id], clone)
+    check(`inbox --show: ${name} → ${want.split(':')[0]}, nothing of the file`, r.code === 0 && r.out.startsWith(want) && !r.out.includes('rebase'), JSON.stringify(r))
+  }
+  const record = inbox(ctx, ['--dir', homeRel('mail', 'in')], clone)
+  check('inbox --show: … records nothing (the next run still reports every file)', record.out === 'MESSAGE:shown\nINVALID:badrole\n', JSON.stringify(record))
+  const noOut = inbox(ctx, ['--check', '--dir', path.join(mail, 'in')], clone)
+  check('inbox --check: no --outbox → usage error, exit 1', noOut.code === 1 && /--outbox/.test(noOut.err), JSON.stringify(noOut))
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
@@ -1520,6 +1575,10 @@ const putMessage = (dir, id, extra, meta) => {
   putMessage(dir, 'during-outage')
   const outage = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir, '--wait', '1', '--max', '10')).done
   check('wait --inbox: a message ends the wait even while every gh call fails', outage.out === 'PENDING\n' && outage.ms < 4000, `${outage.ms}ms\n${outage.out}${outage.err}`)
+  setFixture(ctx, watchReviewed)
+  putMessage(path.join(ctx.home, '.agent-loop', 'quoted'), 'q1')
+  const tilde = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', homeRel('quoted'), '--wait', '1', '--max', '10')).done
+  check('wait --inbox: a quoted home-relative folder is under the home folder', tilde.out === 'PENDING\n' && tilde.ms < 4000, `${tilde.ms}ms\n${tilde.out}${tilde.err}`)
   const bad = run(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--inbox'), watchReviewed)
   check('wait --inbox: --inbox with no folder → usage error, exit 1', bad.startsWith('EXIT 1') && bad.includes('--inbox'), bad)
   rmSync(ctx.home, { recursive: true, force: true })

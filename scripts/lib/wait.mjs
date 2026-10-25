@@ -40,7 +40,7 @@
 // stderr and retried on the next interval; a one-shot run still fails as before.
 import { execSync } from 'child_process'
 import { readFileSync, writeFileSync, openSync, closeSync, unlinkSync, renameSync } from 'fs'
-import { unreported } from './inbox.mjs'
+import { unreported, expandHome } from './inbox.mjs'
 
 export function usageError(usage, message) {
   process.stderr.write(`${message ? `${message}\n` : ''}Usage: ${usage}\n`)
@@ -79,7 +79,7 @@ export function waitArgs(argv, usage) {
   if (bi !== -1) {
     const v = argv[bi + 1]
     if (v === undefined || v === '' || v.startsWith('--')) usageError(usage, '--inbox: expected a folder')
-    inbox = v
+    inbox = expandHome(v)
   }
   return { wait, max, idleAfter, inbox }
 }

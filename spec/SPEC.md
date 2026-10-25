@@ -51,6 +51,7 @@ is the project's conventions, which the agents follow.
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
 | `rules` | no | — | further files the agents follow as the project's rules, comma-separated paths (a path ending in `/` covers a directory); like `AGENTS.md`, a pull that changes one shows a running loop the diff ("Rules that change while a loop runs") |
 | `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
+| `inbox`, `outbox` | no | — | a mailbox, both or neither: the folder a role reads direction from and the one it writes replies to, each absolute or starting with `~` and a slash, outside the clone, neither inside the other; `<clone>` stands for the clone's folder name ("Inbox folder") |
 
 Every start of a loop, including one that resumes held work, prints its role, model and effort
 (`Reviewer · Opus 5.5 · high`) before anything else, where the tool exposes them, so a loop that
@@ -482,6 +483,11 @@ the waiter's exit and its next run.
   prints `WATCHER_RUNNING <pid>` and exits 3. A stopped waiter prints nothing.
 - A failed poll (network, rate limit, auth) is reported on stderr and retried on the next
   interval.
+- **`--inbox <folder>`** (waiters of the three signal scripts): the waiter also prints `PENDING`
+  as soon as the folder holds a message file `inbox.mjs` has not reported ("Inbox folder"),
+  checked before GitHub each interval, so a message ends the wait while GitHub is failing. It
+  reads `inbox.mjs`'s record and never writes it; a missing folder is never news. One-shot runs
+  accept the flag and ignore it.
 
 Adapters whose harness wakes the agent when a background process exits start a waiter at the end
 of each cycle and keep a timer only as a fallback. Adapters driven by cron or by hand keep
@@ -560,10 +566,25 @@ structurally where the tool allows, like a merge.
 
 A folder of message files is a signal source that needs nothing but a shared folder: it reaches a
 session in a container or VM, or one whose tool has no messaging between sessions. Direction goes
-into a clone's **inbox**, `.agent-loop/inbox/`; a session writes its replies to its **outbox**,
-`.agent-loop/outbox/`. Both sit beside `.agent-loop/role`, so they are kept out of git with the
-rest of `.agent-loop/`. `--dir <folder>` names another folder. Who reads an outbox is up to the
+into a clone's **inbox**; a session writes its replies to its **outbox**. There are no default
+folders: the deployment names both (`--dir <folder>`; an adapter takes them from the block's
+`inbox` and `outbox` keys, below), outside the clone ("Trust"). Who reads an outbox is up to the
 deployment.
+
+**Configuration.** A role uses a mailbox only when the `## Agent loop` block names both:
+
+```
+inbox: /srv/agent-mail/<clone>/inbox
+outbox: /srv/agent-mail/<clone>/outbox
+```
+
+Each is an absolute path or starts with `~` and a slash (the home folder); `<clone>` stands for the clone's folder name, so
+one block gives every clone its own pair. Each is its own folder, neither inside the other, so a
+mount carries exactly one direction. `inbox.mjs --check --dir <inbox> --outbox <outbox>`, run in
+the clone's root, prints `MAILBOX_OK`, or `MAILBOX_REFUSED: <reason>` when a folder is relative,
+inside the clone (after following symlinks) or inside the other. No keys → no mailbox, and
+nothing changes. One key without the other, or a refused pair → the adapter warns once and runs
+without a mailbox.
 
 **A message** is one JSON file, `<messageId>.json`:
 
@@ -601,12 +622,12 @@ shape are A2A 1.0's, and agent-loop's own keys live in `metadata`, so an A2A ada
 message over one to one. A2A's task lifecycle is not adopted: the status model is still
 agent-loop's own, its signals and labels.
 
-**Reading:** `inbox.mjs [--dir <folder>]` prints one line per message it has not reported before,
+**Reading:** `inbox.mjs --dir <folder>` prints one line per message it has not reported before,
 oldest `metadata.sentAt` first, then exits:
 
 | Line | Meaning |
 |---|---|
-| `MESSAGE:<messageId>` | a new message; the agent reads `<folder>/<messageId>.json` |
+| `MESSAGE:<messageId>` | a new message; the agent reads it with `inbox.mjs --dir <folder> --show <messageId>` (the message's JSON, or `INVALID: <reason>`; it records nothing), or reads `<folder>/<messageId>.json` |
 | `INVALID:<messageId>` | a new file with a message's name that is not a valid message (unparseable, a field missing or wrong, `messageId` not the file name, over 1 MiB); the reason goes to stderr |
 | `NONE <timestamp>` | nothing new, or no such folder |
 
@@ -620,7 +641,12 @@ every interval and prints `PENDING` as soon as a new message (or invalid file) i
 rather than relying on file-change events, which may not cross a shared folder into a VM. A folder
 that does not exist yet is polled like an empty one.
 
-**Writing:** `inbox.mjs --send [--dir <folder>] --role ROLE_USER|ROLE_AGENT --from <name> --to
+**One waiter for both.** A loop needs no second waiter for its inbox: the signal scripts' waiters
+take `--inbox <folder>` ("Waiting for events") and also end on a message there that `inbox.mjs`
+has not reported. The agent then runs `inbox.mjs --dir <folder>` one-shot, as well as its signal
+script.
+
+**Writing:** `inbox.mjs --send --dir <folder> --role ROLE_USER|ROLE_AGENT --from <name> --to
 <name> --context <contextId> [--task <taskId>] --text <text>` writes the text as one part and
 `--from`, `--to` into `metadata`, fills in `messageId` (a UUID) and `metadata.sentAt`, creates the
 folder if needed, and prints `SENT:<messageId>`. It writes `.<messageId>.<pid>.tmp`
@@ -629,8 +655,12 @@ Any other writer must do the same: write under a dotfile name in the folder, the
 
 **Trust.** A message counts as direction only because of who can write to the folder. The inbox
 must not be writable by anything a PR's content can influence (a gate, a test, a build step, an
-agent acting on PR text), and it is never inside the repository's tracked files. Text inside a
-message is direction from its writer; text it quotes from GitHub is still data.
+agent acting on PR text). The clone is where PR code runs, and a sandbox lets it write there and
+little else, so neither folder is ever inside the clone: an inbox there would let a PR write
+direction to its own reviewer. Text inside a message is direction from its writer, within the
+role's fixed rules (a message never makes an agent merge, push to `main` or skip a review); text
+it quotes from GitHub is still data. `from` and `to` are labels the writer chose, not proof of
+who wrote it.
 
 ---
 
@@ -751,5 +781,5 @@ commit status, which the scripts read as a CI check; `pr-poll` tells two runs of
 apart by its REST id, so a re-run that fails again is `CI_FAILING` again. Later in 0.2, additive:
 the `rules` key and `pull.mjs`, a helper like `pick-next.mjs` whose `RULES_CHANGED:` and
 `RESTART:` lines are not signal lines. Later in 0.2, additive: `inbox.mjs`, a new signal source
-(`MESSAGE:<messageId>`, `INVALID:<messageId>`) over a folder of message files, and the message
-format ("Inbox folder").
+(`MESSAGE:<messageId>`, `INVALID:<messageId>`) over a folder of message files, the message
+format, the `inbox` and `outbox` keys ("Inbox folder"), and the waiters' `--inbox <folder>`.

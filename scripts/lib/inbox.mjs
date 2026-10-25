@@ -89,6 +89,45 @@ export function listMessages(dir) {
   return found.map(({ id, error }) => ({ id, error }))
 }
 
+// A folder given as `~`, or starting with `~` and a slash (quoted, so the shell left it alone), is
+// the home folder or under it.
+export function expandHome(p) {
+  return p === '~' ? homedir() : p.startsWith('~/') ? path.join(homedir(), p.slice(2)) : p
+}
+
+// The real path of `p`, which need not exist yet: its nearest existing ancestor resolved, plus the rest.
+function realish(p) {
+  let head = path.resolve(p)
+  const rest = []
+  for (;;) {
+    try {
+      return path.join(realpathSync(head), ...rest)
+    } catch {
+      const up = path.dirname(head)
+      if (up === head) return path.resolve(p)
+      rest.unshift(path.basename(head))
+      head = up
+    }
+  }
+}
+
+const within = (p, folder) => {
+  const rel = path.relative(folder, p)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+}
+
+// What is wrong with a mailbox (an inbox read as direction, an outbox for replies) for the clone at
+// `clone`, or null when nothing is (spec: "Inbox folder", Trust). PR code runs in the clone, so
+// neither folder may be in it; and each is its own folder, so a mount carries one direction.
+export function mailboxProblem(inbox, outbox, clone) {
+  if (!path.isAbsolute(inbox) || !path.isAbsolute(outbox)) return 'both folders must be absolute or start with ~'
+  const [i, o, c] = [realish(inbox), realish(outbox), realish(clone)]
+  if (within(i, c)) return 'the inbox is inside the clone, where PR code runs'
+  if (within(o, c)) return 'the outbox is inside the clone, where PR code runs'
+  if (within(i, o) || within(o, i)) return 'the inbox and the outbox must be separate folders, neither inside the other'
+  return null
+}
+
 // The record of what inbox.mjs has reported for `dir`: one file per folder, in the state folder the
 // signal scripts share, named by the SHA-256 of the folder's real path (its resolved path while it
 // does not exist yet: nothing is recorded for it then).
@@ -117,6 +156,23 @@ export function readReported(file) {
 export function unreported(dir) {
   const reported = readReported(recordFile(dir))
   return listMessages(dir).filter((m) => !reported.has(m.id))
+}
+
+// One message file in `dir`, parsed: { msg } for a valid message, { error } otherwise (a file
+// that is missing, not a regular file, too large or not a valid message).
+export function readMessage(dir, id) {
+  if (!ID.test(id)) return { error: 'not a message id' }
+  const file = path.join(dir, `${id}.json`)
+  try {
+    const st = lstatSync(file)
+    if (!st.isFile()) return { error: 'not a regular file' }
+    if (st.size > MAX_BYTES) return { error: `larger than ${MAX_BYTES} bytes` }
+    const msg = JSON.parse(readFileSync(file, 'utf8'))
+    const error = problem(msg, id)
+    return error ? { error } : { msg }
+  } catch (e) {
+    return { error: e.code === 'ENOENT' ? 'no such message' : `unreadable: ${e.message}` }
+  }
 }
 
 // Write one message into `dir` (created if missing) and return its id. Fields as in the spec,

@@ -14,7 +14,7 @@
  *
  * Usage:
  *   node scripts/pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>]]
- *                             [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs]]
+ *                             [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]
  *   node scripts/pr-watch.mjs --repo owner/repo --reviewer <clone> --check-claim <n> [--stale-after <secs>]
  *
  * Several reviewers (--reviewer <clone>): each reviewer claims a PR with a "[reviewer] Reviewing
@@ -61,7 +61,7 @@ import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
 const USAGE =
-  'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs]]'
+  'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
