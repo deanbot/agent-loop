@@ -64,10 +64,12 @@ bare start that ran before the intended command) is then seen at once.
    `$ARGUMENTS` names is resumed later, from reference/implement.md §1). Otherwise (another branch, or
    uncommitted changes anywhere) you may have stopped mid-implementation, for example for a plugin
    update. Take `<N>` from the branch name (`issue-<N>-…`, or the project's issue-branch
-   convention), else from the PR or issue number in `$ARGUMENTS`: the bare number, never a digit
-   inside a flag's value (`--milestone`, `--inbox` and `--outbox` values are folder paths and
-   titles, and may hold digits). Then decide (`<clone>` is the base name of your working
-   directory):
+   convention), else from the PR or issue number in `$ARGUMENTS`: an argument of its own that is
+   a bare number or `#N`, never digits inside a flag's value (`--milestone`, `--inbox` and
+   `--outbox` take titles and folder paths, which may hold digits). For example, `42 --inbox
+   /srv/mail/app-exec2/inbox --outbox /srv/mail/app-exec2/outbox` names #42, `--milestone "M3"
+   --inbox /srv/mail/app-exec2/inbox --outbox /srv/mail/app-exec2/outbox` names none (not 3, not
+   2). Then decide (`<clone>` is the base name of your working directory):
    - **You hold #<N>**: it is open, carries `<in-progress-label>`, and the newest `[executor]
      Claimed by` comment on it names `<clone>` exactly (list them with the command in
      [reference/implement.md](reference/implement.md) §1; a losing claim is deleted, so the newest
@@ -146,7 +148,8 @@ every comment), then see what is done: `git log --oneline main..HEAD`, `git stat
 
 `$ARGUMENTS` may hold `--milestone "<title>"`: take it out first and keep it as `<milestone>`
 for the whole session (it decides every later pick). Take out `--inbox <folder>` and `--outbox
-<folder>` too (step 5). What remains, `<arg>`, is a PR number, an issue number, or empty. Never
+<folder>` too (step 5), each with its value. What remains, `<arg>`, is a PR number, an issue
+number (bare or `#N`; drop the `#`), or empty. Never
 pass `--milestone`, `--inbox` or `--outbox` to a `gh pr` or `gh issue` command that expects a
 number.
 
