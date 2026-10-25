@@ -49,6 +49,8 @@ To restart for a plugin update: with a PR open, stop the loop and re-run on the 
 
 Then proceed with $ARGUMENTS.
 
+**One plain command per shell call**, in the loop and while you implement, read source or run checks: read files with Kiro's file-read and search tools, not `cat`, `head` or `sed`; no `;`, `&&`, pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. A project allows commands one by one, and anything else waits for an approval nobody is there to give: the loop stops.
+
 **No interactive terminal prompts — ever** (no menus, no structured choices). Questions go to GitHub, channel by phase: **PR exists** → `gh pr comment <PR> --body "[executor] Question: <question>"`; **no PR yet** (implement phase) → `gh issue comment <N> --body "[executor] Question: <question>"`. A posted question is a **stop**: if a safe default exists, take the default and note the assumption instead of asking; only post a question when you genuinely cannot proceed correctly — and then stop, never ask and keep building in the same step (see implement-phase park-and-stop below and the loop's question handling).
 
 ## Detect input type

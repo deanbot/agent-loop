@@ -109,8 +109,9 @@ Rules that hold for the whole session:
   printed → no rule changed. A failed pull (exit 2, a `pull:` line) → print `⚠ main not pulled:
   <the pull: line>` for the operator (in a sandbox, the script needs the exemption the README
   names), and carry on from the `main` you have.
-- **One plain command per Bash call** in the loop (`gh …`, `node …`): no `$(…)`, no `;`, no
-  pipes. Compound forms defeat the permission allowlist and prompt on every cycle.
+- **One plain command per Bash call**, in the loop (`gh …`, `node …`) and while you build, read
+  source or run checks (reference/implement.md §3): no `$(…)`, no `;`, no pipes. Compound forms
+  defeat the permission allowlist and prompt, and an unattended loop stops at the prompt.
 - **`gh` and `git push|fetch|pull` run on their own**, from the clone's root: `gh … --repo
   <repo>`, never `cd <dir> && gh …`. A sandbox exempts these commands by name (in Claude Code,
   `sandbox.excludedCommands`), and a chained command doesn't match, so it runs sandboxed, fails

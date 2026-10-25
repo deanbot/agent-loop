@@ -662,8 +662,10 @@ file yet takes its entry from the shared `<owner>-<repo>-pr-poll-state.json` tha
 before per-PR files kept; that file is only read, never written. Once every executor runs a
 version with per-PR files, delete the shared file: while it exists, deleting a PR's file restores
 that PR's old cursors instead of re-seeding. Next to each state file,
-`<state>-wait.json` holds the baseline a one-shot run records for waiters and `<state>-wait.lock`
-the running waiter's pid. `.agent-loop/session` in the clone (`session.mjs`, "Two sessions in one
+`<state>-wait.json` holds what one-shot runs record and waiters read, `{ "baseline", "idle",
+"activity" }`: the baseline ("Waiting for events"), the count of runs in a row with nothing new
+("Idle count") and, for `pr-poll`, the activity key (the head commit and the CI checks' states;
+`null` for the other scripts). `<state>-wait.lock` holds the running waiter's pid. `.agent-loop/session` in the clone (`session.mjs`, "Two sessions in one
 clone") is the one piece of script state kept in the clone rather than under `~/.agent-loop/`. State is safe to delete: the next run
 re-seeds cursors and treats current activity as baseline (live verdicts and unanswered inline
 threads are still surfaced).
