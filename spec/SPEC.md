@@ -51,7 +51,6 @@ is the project's conventions, which the agents follow.
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
 | `rules` | no | — | further files the agents follow as the project's rules, comma-separated paths (a path ending in `/` covers a directory); like `AGENTS.md`, a pull that changes one shows a running loop the diff ("Rules that change while a loop runs") |
 | `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
-| `inbox`, `outbox` | no | — | a mailbox, both or neither: the folder a role reads direction from and the one it writes replies to, each absolute or starting with `~` and a slash, outside the clone, neither inside the other; `<clone>` stands for the clone's folder name ("Inbox folder") |
 
 Every start of a loop, including one that resumes held work, prints its role, model and effort
 (`Reviewer · Opus 5.5 · high`) before anything else, where the tool exposes them, so a loop that
@@ -587,24 +586,31 @@ structurally where the tool allows, like a merge.
 A folder of message files is a signal source that needs nothing but a shared folder: it reaches a
 session in a container or VM, or one whose tool has no messaging between sessions. Direction goes
 into a clone's **inbox**; a session writes its replies to its **outbox**. There are no default
-folders: the deployment names both (`--dir <folder>`; an adapter takes them from the block's
-`inbox` and `outbox` keys, below), outside the clone ("Trust"). Who reads an outbox is up to the
+folders: whoever launches a loop names both (`--dir <folder>`; an adapter takes them from the
+loop's start arguments, below), outside the clone ("Trust"). Who reads an outbox is up to the
 deployment.
 
-**Configuration.** A role uses a mailbox only when the `## Agent loop` block names both:
+**Configuration.** A role uses a mailbox only when its start names both, as arguments beside the
+role's others:
 
 ```
-inbox: /srv/agent-mail/<clone>/inbox
-outbox: /srv/agent-mail/<clone>/outbox
+start-reviewer --inbox /srv/agent-mail/<clone>/inbox --outbox /srv/agent-mail/<clone>/outbox
 ```
 
-Each is an absolute path or starts with `~` and a slash (the home folder); `<clone>` stands for the clone's folder name, so
-one block gives every clone its own pair. Each is its own folder, neither inside the other, so a
-mount carries exactly one direction. `inbox.mjs --check --dir <inbox> --outbox <outbox>`, run in
-the clone's root, prints `MAILBOX_OK`, or `MAILBOX_REFUSED: <reason>` when a folder is relative,
-inside the clone (after following symlinks) or inside the other. No keys → no mailbox, and
-nothing changes. One key without the other, or a refused pair → the adapter warns once and runs
-without a mailbox.
+Each is an absolute path or starts with `~` and a slash (the home folder); `<clone>` stands for
+the clone's folder name, so one launch line serves every clone. Each is its own folder, neither
+inside the other, so a mount carries exactly one direction. `inbox.mjs --check --dir <inbox>
+--outbox <outbox>`, run in the clone's root, prints `MAILBOX_OK`, or `MAILBOX_REFUSED: <reason>`
+when a folder is relative, inside the clone (after following symlinks) or inside the other.
+Neither argument → no mailbox, and nothing changes. One without the other, or a refused pair → the
+adapter warns once and runs without a mailbox.
+
+The folders are never configuration a project checks in (the `## Agent loop` block, a checked-in
+settings file, environment variables such settings can set). A loop reads the block from the
+working tree at its start, and a reviewer that restarts while its clone sits on a PR's head would
+read that PR's block. The PR would then choose the inbox: any folder outside the clone its own
+code can write, which `--check` cannot tell apart. Start arguments come from whoever launches the
+session, never from a PR. The folders are also one installation's layout, not the project's.
 
 **A message** is one JSON file, `<messageId>.json`:
 
@@ -807,4 +813,5 @@ apart by its REST id, so a re-run that fails again is `CI_FAILING` again. Later 
 the `rules` key and `pull.mjs`, a helper like `pick-next.mjs` whose `RULES_CHANGED:` and
 `RESTART:` lines are not signal lines. Later in 0.2, additive: `inbox.mjs`, a new signal source
 (`MESSAGE:<messageId>`, `INVALID:<messageId>`) over a folder of message files, the message
-format, the `inbox` and `outbox` keys ("Inbox folder"), and the waiters' `--inbox <folder>`.
+format, the loops' `--inbox`/`--outbox` start arguments ("Inbox folder"), and the waiters'
+`--inbox <folder>`.

@@ -142,10 +142,7 @@ models: executor=opus, reviewer=opus/high
 second `⚠` line says so when they differ from that role's entry here (a role without an entry
 gets no `⚠` line). It never stops a loop. `gate: <command>` is optional too, for a project that
 can turn CI off: on a PR with no CI, the executor runs it before each push and the reviewer on the
-head before an LGTM (spec: `gate`). `inbox: <folder>` with `outbox: <folder>`, both outside the
-clone, give each loop a mailbox: direction arrives as message files, replies go out the same way
-(spec: "Inbox folder").
-
+head before an LGTM (spec: `gate`).
 **Local CI.** With a `gate`, you can run it once per head instead, outside the agents. Give it a
 clone of its own (no setup, no role) and leave this running in a terminal or as a login item:
 
@@ -173,7 +170,9 @@ Run, one session per clone: `/agent-loop:start-executor [issue-or-PR]`,
 loop. Your inbox is one label: `gh pr list --label needs-operator` shows every PR waiting on you,
 either a question (a standalone comment ending in "Reply with:") or a PR reviewed and green.
 Anything you check by hand is listed in the LGTM under "Before you merge"; you confirm by a
-comment or by merging.
+comment or by merging. Add `--inbox <folder> --outbox <folder>` to a start (both outside the
+clone) to give that loop a mailbox: direction arrives as message files, and replies go out the
+same way (spec: "Inbox folder").
 Details: [`adapters/claude-code/README.md`](adapters/claude-code/README.md).
 
 > **Updating:** `claude plugin update agent-loop@agent-loop`, then restart loop sessions. A

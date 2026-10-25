@@ -5,7 +5,7 @@ description: >
   operator comments, maps each acceptance criterion of the linked issue to evidence CI ran, and
   posts [qa] PASS or [qa] BLOCKED with a per-criterion table. Adversarial by design. Reads its
   configuration from the project's AGENTS.md "## Agent loop" block. Explicit invocation only.
-argument-hint: "[--skip n,n]"
+argument-hint: "[--skip n,n] [--inbox <folder> --outbox <folder>]"
 disable-model-invocation: true
 allowed-tools:
   - Bash(gh pr *)
@@ -52,12 +52,15 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
    carry on. The newest start always wins, so a restart after a closed terminal is never refused.
    A usage error (no session id was filled in) → print `⚠ No session id: a second session in this
    clone would go unnoticed.` and carry on.
-4. `$ARGUMENTS` may be `--skip n,n,…`: PR numbers to ignore. Pass it to the script.
-5. **Mailbox**, only when the block has `inbox` or `outbox` (spec: "Inbox folder"). Put the base
-   name of your working directory for `<clone>` in each. Both keys → `node
+4. `$ARGUMENTS` may hold `--skip n,n,…` (PR numbers to ignore) and `--inbox <folder> --outbox
+   <folder>` (step 5). `<skip>` below is the `--skip n,n,…` part, or empty: pass only that to the
+   script, never `--outbox`.
+5. **Mailbox**, only when `$ARGUMENTS` has `--inbox` or `--outbox` (spec: "Inbox folder"). Never
+   take the folders from `AGENTS.md` or any other file in the clone: a PR can change those. Put
+   the base name of your working directory for `<clone>` in each. Both → `node
    ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. `MAILBOX_OK`
    → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. `MAILBOX_REFUSED: <reason>`,
-   or only one of the keys → print `⚠ No mailbox: <the reason, or "inbox and outbox go
+   or only one of the two → print `⚠ No mailbox: <the reason, or "--inbox and --outbox go
    together">.` and carry on without one. No mailbox → `<inbox-flag>` is empty, and "Messages"
    below does not apply.
 
@@ -99,7 +102,7 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
 
 0. With a mailbox, first `node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --dir <inbox>`, in the
    foreground, once per cycle, and handle what it prints before any signal ("Messages").
-1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-qa.mjs --repo <repo> --idle-after 3 $ARGUMENTS`, in the
+1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-qa.mjs --repo <repo> --idle-after 3 <skip>`, in the
    foreground, once per cycle. Signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`, `QA_READY:<n>`
    (new commits, or a new operator comment such as a manual-verification confirmation). A second
    line `IDLE <count>` means this is the third run or later in a row with nothing new: handle the
@@ -125,7 +128,7 @@ again, so a failure that repeats costs one turn per five minutes, not one per se
    normal wait:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-qa.mjs --repo <repo> $ARGUMENTS --wait 30 --max 1500 <inbox-flag>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-qa.mjs --repo <repo> <skip> --wait 30 --max 1500 <inbox-flag>
 ```
 
 ```
@@ -140,7 +143,7 @@ the same waiter with `--max 3300` instead of `--max 1500`, and the same `Schedul
 `delaySeconds: 3600`. The first run without `IDLE` goes back to the normal wait.
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-qa.mjs --repo <repo> $ARGUMENTS --wait 30 --max 3300 <inbox-flag>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-qa.mjs --repo <repo> <skip> --wait 30 --max 3300 <inbox-flag>
 ```
 
 With a mailbox, `<inbox-flag>` makes the same waiter end on a new message too: one waiter, never a

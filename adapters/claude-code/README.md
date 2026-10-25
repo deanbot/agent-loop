@@ -83,8 +83,9 @@ never written. A waiter that finds another alive exits with code 3, which the no
 (a usage error, a broken install) makes the next cycle end with a 300-second `ScheduleWakeup`
 instead of a waiter, so a persistent failure cannot spin the session.
 
-**Mailbox.** With `inbox` and `outbox` in the block (spec: "Inbox folder"), each start checks the
-pair (`inbox.mjs --check`: both outside the clone, neither inside the other) and warns and runs
+**Mailbox.** Started with `--inbox <folder> --outbox <folder>` (`/agent-loop:start-reviewer
+--inbox … --outbox …`, and the same for start-qa and start-executor; spec: "Inbox folder"), a loop
+checks the pair (`inbox.mjs --check`: both outside the clone, neither inside the other) and warns and runs
 without one otherwise. Each cycle of the reviewer, QA and the executor's PR loop then runs
 `inbox.mjs --dir <inbox>` before its signal script, reads each new message with `--show`, acts
 on it within the role's rules and replies once into the outbox (`--send --reply-to`, which copies the addressing from the message,
@@ -92,7 +93,9 @@ so none of its values reaches the shell); the waiter takes
 `--inbox <inbox>`, so a message ends the same wait within 30 seconds, and a cycle that handled
 one is never idle. The executor reads messages only in its PR loop, not while it implements or
 waits on a pick. The folders' mounts and any sandbox write access to the outbox are the
-deployment's to set up; setup writes nothing for them. Without the keys nothing changes.
+deployment's to set up; setup writes nothing for them. Without the arguments nothing changes. The folders never come
+from the `## Agent loop` block or other checked-in config: a loop that restarts on a PR's head
+would read that PR's copy.
 
 The fallback fires only if no waiter woke the session; a new `ScheduleWakeup` replaces the
 pending one, so it never stacks. "stop" ends the waiter with `TaskStop` (which wakes nothing) and

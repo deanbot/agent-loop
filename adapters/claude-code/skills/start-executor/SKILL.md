@@ -5,7 +5,7 @@ description: >
   addressing reviewer findings, CI failures and operator comments; then picks the next issue.
   Reads its configuration from the project's AGENTS.md "## Agent loop" block. Explicit
   invocation only; runs headless in its own clone.
-argument-hint: "[issue-or-PR-number] [--milestone \"<title>\"]"
+argument-hint: "[issue-or-PR-number] [--milestone \"<title>\"] [--inbox <folder> --outbox <folder>]"
 disable-model-invocation: true
 allowed-tools:
   - Bash(gh issue *)
@@ -91,11 +91,12 @@ bare start that ran before the intended command) is then seen at once.
    <in-progress-label>`, one call per issue. You remove the label on `MERGED`, but a loop stopped
    after `MERGE_READY` never sees the merge. A closed issue has no claim to protect, so this is
    safe while other executors run.
-5. **Mailbox**, only when the block has `inbox` or `outbox` (spec: "Inbox folder"). Put `<clone>`
-   (the base name of your working directory) in each. Both keys → `node
+5. **Mailbox**, only when `$ARGUMENTS` has `--inbox <folder>` or `--outbox <folder>` (spec:
+   "Inbox folder"). Never take the folders from `AGENTS.md` or any other file in the clone: a PR
+   can change those. Put `<clone>` (the base name of your working directory) in each. Both → `node
    ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. `MAILBOX_OK`
    → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. `MAILBOX_REFUSED: <reason>`,
-   or only one of the keys → print `⚠ No mailbox: <the reason, or "inbox and outbox go
+   or only one of the two → print `⚠ No mailbox: <the reason, or "--inbox and --outbox go
    together">.` and carry on without one. No mailbox → `<inbox-flag>` is empty, and "Messages"
    below does not apply. Messages are read in the PR loop only: one that arrives while you
    implement or wait on a pick waits for the first poll cycle.
@@ -142,8 +143,9 @@ every comment), then see what is done: `git log --oneline main..HEAD`, `git stat
 <branch>` in the line after the model and Track lines (and the `⚠` lines, when there are any).
 
 `$ARGUMENTS` may hold `--milestone "<title>"`: take it out first and keep it as `<milestone>`
-for the whole session (it decides every later pick). What remains, `<arg>`, is a PR number, an
-issue number, or empty. Never pass `--milestone` to a `gh pr` or `gh issue` command that expects a
+for the whole session (it decides every later pick). Take out `--inbox <folder>` and `--outbox
+<folder>` too (step 5). What remains, `<arg>`, is a PR number, an issue number, or empty. Never
+pass `--milestone`, `--inbox` or `--outbox` to a `gh pr` or `gh issue` command that expects a
 number.
 
 - `<arg>` empty → pick the next issue (below), then treat it as an issue number.
@@ -256,7 +258,9 @@ Each cycle:
    - `MERGED` → in this order, every step, `RULES_CHANGED` or not (no wakeup for this PR):
      1. Remove `<in-progress-label>` from the issue, then `git checkout main`.
      2. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pull.mjs --start "/agent-loop:start-executor"`, plus
-        `--milestone "<milestone>"` when you have one.
+        `--milestone "<milestone>"` when you have one. With a mailbox, the `--start` value is
+        `"/agent-loop:start-executor --inbox <inbox> --outbox <outbox>"`, the two folders as this
+        session's start gave them, so the restart keeps the mailbox.
      3. On `RULES_CHANGED:`, run the `git diff …` command under it and follow what changed.
      4. Write, as your own text, a one-line note to the operator and the `RESTART: …` line
         verbatim on its own line (the Bash output alone isn't enough). The line is for the

@@ -46,7 +46,7 @@ Three layers. Boundaries are strict.
   same-repository PR head, one at a time, and posts the result as a commit status, which
   `gh pr checks` and `pr-poll.mjs` read as CI. One runner per repo and context (pid lock).
 - `scripts/inbox.mjs` — a folder of message files as a signal source. `--dir <folder>` (no default:
-  the block's `inbox` key names it, outside the clone) prints `MESSAGE:<messageId>` per message not
+  the loop's `--inbox` start argument names it, outside the clone) prints `MESSAGE:<messageId>` per message not
   reported before (`INVALID:<id>` for a file that is not one), or `NONE`; `--show <id>` prints one
   message (or `INVALID: <reason>`) and records nothing; `--send --dir <folder>
   --role ROLE_USER|ROLE_AGENT --from … --to … --context … [--task …] --text …` (or `--reply-to
@@ -114,7 +114,7 @@ implemented.
 **Scheduling is adapter-specific.** Claude Code: every cycle runs the role's script once and ends by
 starting a `--wait` waiter under Bash `run_in_background` (its exit re-invokes the session) plus a
 fallback `ScheduleWakeup({ delaySeconds: 1800, … })`, or `--max 3300` and 3600 seconds once the
-script prints `IDLE`; with the block's `inbox` and `outbox`, each cycle also runs `inbox.mjs`
+script prints `IDLE`; with `--inbox` and `--outbox` in the start arguments, each cycle also runs `inbox.mjs`
 and the waiter takes `--inbox <folder>`, so a message ends the same wait; "stop" is `TaskStop` on the waiter and
 `ScheduleWakeup({ stop: true })`; the skill works whether started bare or under `/loop`. Generic/Kiro: external cron, `sleep`, or manual re-trigger,
 with a sentinel file under `.agent-loop/` as the stop signal.
@@ -143,7 +143,7 @@ Narrowed by the re-read-before-posting rule; no structural fix without real-time
 RESTART-line hook and the skills' wrong-clone check), `session` (which loop session holds the
 clone and which ones it superseded; written by `scripts/session.mjs`, read by the Claude Code
 guard hook) and, for adapters that need one, stop sentinels. Never an inbox or outbox: PR code
-runs in the clone, so the block's `inbox` and `outbox` name folders outside it (`inbox.mjs`'s
+runs in the clone, so a loop's `--inbox` and `--outbox` start arguments name folders outside it (`inbox.mjs`'s
 record of what it reported is `inbox-<hash>.json` with the script state below).
 
 **Script state** persists to `~/.agent-loop/state/` with per-repo paths: `<slug>-pr-state.json`

@@ -1759,6 +1759,11 @@ const putMessage = (dir, id, extra, meta) => {
     restart.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor --milestone "M3 \\"core\\" loop"\n' &&
     bare.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor\n',
     `${restart.stdout}${bare.stdout}`)
+  // A mailbox comes from the start arguments only (#77), so the restart line must carry them.
+  const mailed = pull('--start', '/agent-loop:start-executor --inbox /srv/agent-mail/<clone>/inbox --outbox /srv/agent-mail/<clone>/outbox', '--milestone', 'M3')
+  check('pull --start: a start with --inbox and --outbox → the restart line keeps both, exactly, before --milestone',
+    mailed.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor --inbox /srv/agent-mail/<clone>/inbox --outbox /srv/agent-mail/<clone>/outbox --milestone "M3"\n',
+    mailed.stdout)
 
   writeFileSync(path.join(loop, 'local.txt'), 'x\n')
   g(loop, 'add', 'local.txt')
