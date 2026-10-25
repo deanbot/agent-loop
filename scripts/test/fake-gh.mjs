@@ -4,7 +4,8 @@
 //
 // Fixture shape (all keys optional):
 //   pr        → gh api repos/o/r/pulls/N                    (object: { merged, head: { sha }, mergeable, mergeable_state })
-//   comments  → gh api repos/o/r/issues/N/comments           (array)
+//   comments  → gh api repos/o/r/issues/N/comments           (array; issueComments: { N: array } serves
+//               one issue's own list, for scripts that read several issues)
 //   reviews   → gh api repos/o/r/pulls/N/reviews             (array)
 //   inline    → gh api repos/o/r/pulls/N/comments            (array)
 //   commits   → gh api repos/o/r/pulls/N/commits             (array)
@@ -12,7 +13,7 @@
 //   prs       → gh pr list ... --json                        (array)
 //   prView    → gh pr view N ... --json                      (object)
 //   issues    → gh issue list (open ones, --milestone filters on .milestone.title) and
-//               gh api repos/o/r/issues/N → { state: 'open' | 'closed' } (array: { number, body, labels,
+//               gh api repos/o/r/issues/N → { state: 'open' | 'closed', labels } (array: { number, body, labels,
 //               state?: 'OPEN' | 'CLOSED' | 'MERGED', milestone? }; a MERGED entry is a PR)
 //   milestones → gh api repos/o/r/milestones?…                 (array: { number, title, state })
 //   repo      → gh api repos/o/r                              (object; default { default_branch: 'main' })
@@ -71,7 +72,11 @@ if (args[0] === 'api') {
     renameSync(`${process.env.FAKE_GH_FIXTURE}.tmp`, process.env.FAKE_GH_FIXTURE)
     out(status)
   }
-  if (/\/issues\/\d+\/comments$/.test(target)) outList('comments')
+  if (/\/issues\/\d+\/comments$/.test(target)) {
+    const own = fixture.issueComments?.[target.split('/').at(-2)]
+    if (own) out(args.includes('--slurp') ? [own] : own)
+    outList('comments')
+  }
   if (/\/pulls\/\d+\/reviews$/.test(target)) outList('reviews')
   if (/\/pulls\/\d+\/comments$/.test(target)) outList('inline')
   if (/\/pulls\/\d+\/commits$/.test(target)) outList('commits')
@@ -84,7 +89,7 @@ if (args[0] === 'api') {
       process.stderr.write('gh: Not Found (HTTP 404)\n')
       process.exit(1)
     }
-    out({ number: issue.number, state: (issue.state ?? 'OPEN') === 'OPEN' ? 'open' : 'closed' })
+    out({ number: issue.number, state: (issue.state ?? 'OPEN') === 'OPEN' ? 'open' : 'closed', labels: issue.labels ?? [] })
   }
   process.stderr.write(`fake-gh: unhandled api target ${target}\n`)
   process.exit(2)
