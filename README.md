@@ -86,8 +86,9 @@ pr-watch.mjs  (reviewer)  →  REVIEW:<n>, REVIEW_COMMENTS:<n>, MERGE_CONFLICT:<
 pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NONE
 ```
 
-A fourth, `pick-next.mjs`, chooses the executor's next issue (`ISSUE:<n>`, `WAIT:<blocker>
-PR:<n|none>`, `MOVE_ON <milestone>`, `NONE`), so a pick always starts from a fresh listing. A
+A fourth, `pick-next.mjs`, chooses the executor's next issue (`RESUME:<n> PR:<p>` for a PR it
+parked and the operator unblocked, `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>`, `MOVE_ON
+<milestone>`, `NONE`), so a pick always starts from a fresh listing. A
 fifth, `session.mjs`, keeps one loop session per clone: the newest start wins, and an old session
 left running stops. `pull.mjs` is every pull of `main` in a loop: it names the rules files the
 pull changed, so a running loop reads their diff. `local-ci.mjs` is no agent's: a local CI
