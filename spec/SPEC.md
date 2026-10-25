@@ -433,7 +433,7 @@ A role that must own an item alone (an executor and its issue) claims it with a 
 label alone: two agents can both read "no label" and both add it.
 
 1. Post the claim comment, `[<role>] <claim text naming the clone>`, and note its id. The clone is
-   the working directory's base name (`loom-exec`, `loom-exec2`).
+   the working directory's base name (`example-app-exec`, `example-app-exec2`).
 2. List the item's claim comments and keep the **live** ones (a per-role rule, below).
 3. The live claim with the lowest comment id wins. Comment ids only grow, so every agent agrees.
 4. The winner sets the role's durable marker, if any. A loser deletes its own claim comment and

@@ -297,7 +297,7 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
 {
   const ctx = makeEnv()
   poll(ctx, BASE) // seed the cursors first, so the question arrives as new activity
-  const asked = { ...BASE, comments: [comment('[reviewer] Question: keep the launcher on --no-sync, or follow the plan literally?\n\nThe plan says bare `uv run loom`; the PR uses --no-sync so starting never reaches the network.\n\nReply with: "keep", or "follow the plan".', T('2026-01-01T12:00:00Z'))] }
+  const asked = { ...BASE, comments: [comment('[reviewer] Question: keep the launcher on --no-sync, or follow the plan literally?\n\nThe plan says bare `uv run example-app`; the PR uses --no-sync so starting never reaches the network.\n\nReply with: "keep", or "follow the plan".', T('2026-01-01T12:00:00Z'))] }
   const first = poll(ctx, asked)
   check('poll: a new [reviewer] Question surfaces once as new activity, not as MERGE_READY', signals(first).includes('NEW_COMMENT') && first.includes('launcher') && !signals(first).includes('MERGE_READY'), first)
   const out = poll(ctx, asked)
@@ -306,7 +306,7 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   poll(ctx, legacy) // seen once as an ordinary new comment, like any thread activity
   const outL = poll(ctx, legacy)
   check('poll: retired [reviewer] Verified kind is tolerated (not re-surfaced, not an LGTM)', !outL.includes('Verified abc123') && !signals(outL).includes('MERGE_READY'), outL)
-  const answered = { ...legacy, comments: [...legacy.comments, comment('keep', T('2026-01-01T13:00:00Z')), comment('[reviewer] LGTM — abc123 against #4. Before you merge: run ./loom check on the Mac.', T('2026-01-01T13:05:00Z'))] }
+  const answered = { ...legacy, comments: [...legacy.comments, comment('keep', T('2026-01-01T13:00:00Z')), comment('[reviewer] LGTM — abc123 against #4. Before you merge: run ./example-app check on the Mac.', T('2026-01-01T13:05:00Z'))] }
   const out2 = poll(ctx, answered)
   check('poll: Question → operator answers → LGTM with a before-merge note → MERGE_READY', signals(out2).includes('MERGE_READY'), out2)
   rmSync(ctx.home, { recursive: true, force: true })
@@ -337,7 +337,7 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
 }
 
 // ---------------------------------------------------------------- negative verdicts survive non-fix commits (#41)
-// deanbot/loom#91: the reviewer posts a finding on a draft before the executor's first poll; a
+// #41: the reviewer posts a finding on a draft before the executor's first poll; a
 // baselines-only commit follows; the first poll must still deliver the finding.
 {
   const ctx = makeEnv()
@@ -534,7 +534,7 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   check('pick: first open issue waits on a dependency (another milestone) → WAIT on that dependency',
     pick(depFirst, ms) === 'WAIT:7 PR:none')
 
-  // The loom #118 case: an issue filed while the executor waited is picked at the next call.
+  // A consumer's case: an issue filed while the executor waited is picked at the next call.
   const before = { ...claimedFirst, prs: [] }
   check('pick: before the new issue → WAIT', pick(before, ms) === 'WAIT:28 PR:none')
   const filed = { ...before, issues: [...before.issues, issue(118, { body: 'Depends on #20' }), issue(20, { state: 'CLOSED' })] }
@@ -964,7 +964,7 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
 }
 
 // ---------------------------------------------------------------- already read before the role's own post (#28)
-// loom#72: the executor pushes, the reviewer's one-shot run prints REVIEW, the executor's comment
+// A consumer's case: the executor pushes, the reviewer's one-shot run prints REVIEW, the executor's comment
 // lands after that run, and the reviewer re-reads the thread and posts LGTM. The executor comment
 // is older than the LGTM: already read, so neither a waiter nor the next run reports it.
 {
