@@ -1575,11 +1575,15 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   const asksView = prompts.filter(([, t]) => /gh issue view[^`]*authorAssociation/.test(t)).map(([f]) => f)
   check('author check: no adapter asks gh issue view for authorAssociation', asksView.length === 0, asksView.join('\n'))
   const executors = ['claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
-  const refetch = (t) => /`gh api repos\/<repo>\/issues\/<N> --jq '[^`]*\.user\.login[^`]*\.author_association[^`]*'`/.test(t.replace(/\n/g, ' '))
+  // An array with the login and association first, never a {a, b} object: Claude Code's safety
+  // check prompts on a jq object with a comma even where `Bash(gh *)` matches.
+  const refetch = (t) => /`gh api repos\/<repo>\/issues\/<N> --jq '\[\.user\.login, \.author_association, \[\.labels\[\]\.name\][^`{}]*\]'`/.test(t.replace(/\n\s*/g, ' '))
   const missing = executors.filter((f) => !refetch(readFileSync(path.join(adapters, f), 'utf8')))
-  check('author check: every executor re-fetches the issue as one gh api command with user.login and author_association', missing.length === 0, missing.join('\n'))
-  const noClaim = executors.filter((f) => !/is no author check: never claim on it/.test(readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')))
-  check('author check: every executor says a failed or empty re-fetch is no author check', noClaim.length === 0, noClaim.join('\n'))
+  check('author check: every executor re-fetches the issue as one gh api command, an array starting with user.login and author_association', missing.length === 0, missing.join('\n'))
+  const noClaim = executors.filter((f) => !/whose first or second element is null or empty, is no author check: never claim on it/.test(readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')))
+  check('author check: every executor says a failed re-fetch, or a null or empty login or association, is no author check', noClaim.length === 0, noClaim.join('\n'))
+  const objects = prompts.flatMap(([f, t]) => [...t.replace(/\n\s*/g, ' ').matchAll(/--jq '([^']*)'/g)].filter((m) => /\{[^}]*,[^}]*\}/.test(m[1])).map((m) => `${f}: ${m[1]}`))
+  check('no adapter\'s --jq holds an object with a comma (a permission prompt in Claude Code)', objects.length === 0, objects.join('\n'))
 }
 
 // ---------------------------------------------------------------- .github/workflows/ci.yml

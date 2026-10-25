@@ -101,10 +101,11 @@ rest of the line is the next one: say so and run the script again.
 
 ## Implement
 
-Re-fetch the issue immediately before claiming: `gh api repos/<repo>/issues/<N> --jq '{labels:
-[.labels[].name], login: .user.login, association: .author_association}'` (`gh issue view
---json` has no association field). A failed re-fetch, or one with no `login` or `association`,
-is no author check: never claim on it. `in-progress-label` present → another executor has it (the
+Re-fetch the issue immediately before claiming: `gh api repos/<repo>/issues/<N> --jq '[.user.login,
+.author_association, [.labels[].name]]'`: one JSON array of the author's login, their
+association and the labels (`gh issue view --json` has no association field; an array, since some
+tools' permission checks refuse a jq object with a comma). A failed re-fetch, or one whose first or
+second element is null or empty, is no author check: never claim on it. `in-progress-label` present → another executor has it (the
 label is authoritative; no PR is not evidence it is stale) → pick next, unless the newest
 `[executor] Claimed by` comment names your clone exactly: then it is yours, so resume (above). `blocked-label` → pick
 next. Author not in `trusted-authors` (or association not allowed) → post `[executor] Skipped:

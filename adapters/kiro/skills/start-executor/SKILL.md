@@ -61,7 +61,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first (skip it when $ARGUMENTS is empt
   - **Empty $ARGUMENTS:** run pick-next query (step 8), use result as issue number.
   - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
-    - Not found: immediately before claiming, re-fetch: `gh api repos/<repo>/issues/<N> --jq '{labels: [.labels[].name], login: .user.login, assoc: .author_association}'` (the REST issue carries the association; `gh issue view --json` has no such field). A failed re-fetch, or one with no `login` or `assoc`, is no author check: never claim on it
+    - Not found: immediately before claiming, re-fetch: `gh api repos/<repo>/issues/<N> --jq '[.user.login, .author_association, [.labels[].name]]'`, one JSON array: `login`, `assoc`, the labels (the REST issue carries the association; `gh issue view --json` has no such field; an array, not a jq object with commas, which some permission checks refuse). A failed re-fetch, or one whose first or second element is null or empty, is no author check: never claim on it
       - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8 — unless the newest `[executor] Claimed by` comment names `<clone>` exactly: then it is yours, so resume (above). **Do not infer staleness — absence of an open PR is not evidence the claim is stale. The label is authoritative.**
       - If `<blocked-label>` now present in labels: issue is blocked; go to step 8 silently.
       - **Author check — apply in order:**
