@@ -173,7 +173,8 @@ either a question (a standalone comment ending in "Reply with:") or a PR reviewe
 Anything you check by hand is listed in the LGTM under "Before you merge"; you confirm by a
 comment or by merging. Add `--inbox <folder> --outbox <folder>` to a start (both outside the
 clone) to give that loop a mailbox: direction arrives as message files, and replies go out the
-same way (spec: "Inbox folder").
+same way (spec: "Inbox folder"). The clone's own settings must name both folders, the inbox
+read-only, or every mailbox command prompts (Claude Code README, "Mailbox").
 Details: [`adapters/claude-code/README.md`](adapters/claude-code/README.md).
 
 > **Updating:** `claude plugin update agent-loop@agent-loop`, then restart loop sessions. A

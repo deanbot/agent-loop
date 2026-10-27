@@ -97,6 +97,34 @@ deployment's to set up; setup writes nothing for them. Without the arguments not
 from the `## Agent loop` block or other checked-in config: a loop that restarts on a PR's head
 would read that PR's copy.
 
+Required setup: every command naming a mailbox folder (`--check`, `--dir`, `--show`,
+`--send --reply-to … --inbox`, the waiter's `--inbox`) reaches outside the working directories,
+and Claude Code asks before each one. Each loop clone's `.claude/settings.local.json` (never the
+checked-in `.claude/settings.json`, which a PR can change) makes the outbox a working directory,
+writable by design since it is the session's own outgoing folder, and the inbox readable but not
+writable, with three lines naming the same absolute folder as `--inbox` (a home-relative start
+argument written out in full):
+
+```json
+{
+  "permissions": {
+    "additionalDirectories": ["/srv/agent-mail/<clone>/outbox", "/srv/agent-mail/<clone>/inbox"],
+    "deny": ["Edit(//srv/agent-mail/<clone>/inbox/**)"]
+  },
+  "sandbox": {
+    "filesystem": { "denyWrite": ["/srv/agent-mail/<clone>/inbox"] }
+  }
+}
+```
+
+A working directory clears the check, but on its own it would make the inbox writable, and an
+inbox the session's environment can't write is what keeps PR code from writing direction to its
+own reviewer. The sandbox's `denyWrite` takes that back for every process the session starts (the
+gate, probes, PR code), enforced by the OS; the `Edit` deny takes it back for Claude's own file
+tools. A `Read(…)` allow rule does not clear the check for a path passed to a script. Commands
+that name no folder (the start recording the pair, later calls taking no path) were not chosen:
+they pass only because the check can't see the path, and the start still prompts.
+
 The fallback fires only if no waiter woke the session; a new `ScheduleWakeup` replaces the
 pending one, so it never stacks. "stop" ends the waiter with `TaskStop` (which wakes nothing) and
 the loop with `ScheduleWakeup({ stop: true })`. Verified in smoke sessions, bare and under
@@ -161,3 +189,6 @@ doesn't depend on the model.
   `trusted-authors` set (see the root README's Security section).
 - Reviewer's "has this been answered" judgement is model-dependent; the thread is always re-read
   before posting, which narrows but does not close the race with a concurrent executor push.
+- Mailbox: without the outbox and the three inbox lines in the clone's settings (see "Mailbox"
+  above), every mailbox command prompts, and every cycle of a loop started with `--inbox` stalls
+  until someone approves it.
