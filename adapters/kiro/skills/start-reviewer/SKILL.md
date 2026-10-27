@@ -31,7 +31,7 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 
 Never merge, never push. You post `[reviewer]` comments, and add or remove `<needs-operator-label>` for your own questions; add it when your LGTM leaves the PR ready to merge and remove it when your findings revoke that (below); nothing else.
 
-**One plain command per shell call**, in the loop and while you read source, probe or run checks: read files with Kiro's file-read and search tools, not `cat`, `head` or `sed`; no `;`, `&&`, pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. A project allows commands one by one, and anything else waits for an approval nobody is there to give: the loop stops.
+**One plain command per shell call**, in the loop and while you read source, probe or run checks: read files with Kiro's file-read and search tools, not `cat`, `head` or `sed`; if a search tool is missing, search with `git grep -n '<pattern>' -- '<pathspec>'` and list with `git ls-files '<pathspec>'`, globs quoted, never `grep` or `find`; no `;`, `&&`, pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. A project allows commands one by one, and anything else waits for an approval nobody is there to give: the loop stops.
 
 Immediately before every post, re-fetch the thread (`gh pr view <n> --comments --repo <repo>`) and the inline threads (`gh api repos/<repo>/pulls/<n>/comments`) and fold in anything new: `pr-watch.mjs` treats an `[executor]` comment older than your newest `[reviewer]` post as already read.
 

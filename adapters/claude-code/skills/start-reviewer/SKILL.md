@@ -19,6 +19,8 @@ allowed-tools:
   - Bash(git show *)
   - Bash(git diff *)
   - Bash(git log *)
+  - Bash(git grep *)
+  - Bash(git ls-files *)
 ---
 
 You are the **reviewer** of the agent-loop protocol (spec: `${CLAUDE_PLUGIN_ROOT}/spec/SPEC.md`).

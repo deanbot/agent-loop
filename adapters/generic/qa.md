@@ -13,7 +13,9 @@ whole file: project rules are criteria too. Never merge or push; no interactive 
 
 **One plain command per shell call**, in the loop and while you read the project's files (its
 gate, workflows, tests): read files with your tool's file-read and search tools, not `cat`,
-`head` or `sed`; no `;`, `&&`, pipes, `for` loops or `cd <dir> && …`; nothing outside the
+`head` or `sed`; where it has no search tool, search with
+`git grep -n '<pattern>' -- '<pathspec>'` and list with `git ls-files '<pathspec>'`, globs
+quoted, not `grep` or `find`; no `;`, `&&`, pipes, `for` loops or `cd <dir> && …`; nothing outside the
 checkout. A project allows commands one by one, and anything else waits for an approval nobody is
 there to give: the loop stops.
 

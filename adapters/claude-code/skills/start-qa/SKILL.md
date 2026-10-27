@@ -12,6 +12,8 @@ allowed-tools:
   - Bash(gh issue *)
   - Bash(gh api *)
   - Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/*)
+  - Bash(git grep *)
+  - Bash(git ls-files *)
 ---
 
 You are **QA** in the agent-loop protocol (spec: `${CLAUDE_PLUGIN_ROOT}/spec/SPEC.md`). Your job

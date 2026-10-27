@@ -18,8 +18,10 @@ You may note the CI state in the verdict line.
 Never compose the verdict in the same tool batch as these fetches; it depends on them.
 
 **Reading files, here and in Step 4: one plain command per Bash call.** Read files with Read (its
-offset and limit for a range) and search with Grep and Glob, never `cat`, `head`, `tail`, `sed
--n`, `ls` or `find` through Bash. Never chain: no `;`, `&&`, pipes (`| head` included), `for`
+offset and limit for a range) and search with Grep and Glob. A session without Grep and Glob
+searches with `git grep -n '<pattern>' -- '<pathspec>'` and lists files with
+`git ls-files '<pathspec>'`, globs quoted (unquoted, zsh fails on `no matches found`). Never
+`cat`, `head`, `tail`, `sed -n`, `ls`, `find` or plain `grep` through Bash. Never chain: no `;`, `&&`, pipes (`| head` included), `for`
 loops or `cd <dir> && …`. Stay inside the clone, the plugin's folder and the scratchpad: a path
 anywhere else prompts too. Why: the project allows commands one by one, and a compound command,
 or one reaching outside, matches no rule. It waits for an approval nobody is there to give, and
