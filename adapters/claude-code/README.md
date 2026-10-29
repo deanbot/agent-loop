@@ -159,7 +159,7 @@ or a program set in `.git/config` (`core.fsmonitor`, say). If PR code can write 
 `git pull`, `git push` or `pull.mjs` later runs what it planted outside the sandbox, and that can
 write into the inbox. Whether a sandboxed process can write `<clone>/.git/hooks` and
 `<clone>/.git/config` was not part of the run above, so treat the inbox as writable by PR code
-until it has been shown otherwise.
+until it has been shown otherwise (#101).
 
 The fallback fires only if no waiter woke the session; a new `ScheduleWakeup` replaces the
 pending one, so it never stacks. "stop" ends the waiter with `TaskStop` (which wakes nothing) and
@@ -232,5 +232,5 @@ doesn't depend on the model.
   until someone approves it. The inbox is read-only only with the sandbox on; with it off, any
   command, PR code included, can write into it. Sandboxed, `scripts/inbox.mjs` must be exempt by
   name, or its record write fails. Hooks or config that PR code plants in the clone's `.git` may
-  run under an exempt git command, outside the sandbox: untested. Seen on macOS only; the Linux sandbox is a different
+  run under an exempt git command, outside the sandbox: untested (#101). Seen on macOS only; the Linux sandbox is a different
   implementation and has not been run.

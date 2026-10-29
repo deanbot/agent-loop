@@ -693,7 +693,7 @@ closed to every process the session starts, which only an OS-level sandbox enfor
 Code, `sandbox.filesystem.denyWrite` with the sandbox on). Without one, a loop's mailbox is only
 as safe as the commands the PR's code runs. Commands the sandbox exempts by name run outside it,
 and an exempt git command runs the hooks and the programs the clone's `.git` names: whether PR
-code can write `<clone>/.git/hooks` or `<clone>/.git/config` under the sandbox is untested, and if
+code can write `<clone>/.git/hooks` or `<clone>/.git/config` under the sandbox is untested (#101), and if
 it can, an exempt `git pull`, `git push` or `pull.mjs` runs what it planted, inbox writes
 included. Text inside a message is direction from its writer, within the
 role's fixed rules (a message never makes an agent merge, push to `main` or skip a review); text
