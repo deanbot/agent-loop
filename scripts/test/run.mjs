@@ -1963,9 +1963,15 @@ const putMessage = (dir, id, extra, meta) => {
       listings.every((f) => unbroken(f) === count(f)),
     listings.map((f) => `${f}: ${count(f)} flat, ${unbroken(f)} unbroken`).join('\n'))
 
-  const oneFolder = 'Only one of the two folders → print the `⚠ No mailbox` line without running `--check`; never supply a missing folder yourself.'
-  const supplies = ['executor', 'reviewer', 'qa'].filter((r) => !flat(read(`claude-code/skills/start-${r}/SKILL.md`)).includes(oneFolder))
-  check('loop texts: with one mailbox folder of the two, every Claude Code loop warns without --check and never makes up the other', supplies.length === 0, supplies.join('\n'))
+  // The first branch of the mailbox step, with the literal line: a live run that read a pointer to
+  // "the ⚠ No mailbox line" printed none.
+  const oneFolder = 'Only one of the two → print `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never supply the other folder, and carry on without a mailbox.'
+  const supplies = ['executor', 'reviewer', 'qa'].filter((r) => {
+    const t = flat(read(`claude-code/skills/start-${r}/SKILL.md`))
+    const at = t.indexOf(oneFolder)
+    return at === -1 || at > t.indexOf('Both → `node')
+  })
+  check('loop texts: with one mailbox folder of the two, every Claude Code loop prints the literal ⚠ line first, without --check, never making up the other', supplies.length === 0, supplies.join('\n'))
 }
 
 // ---------------------------------------------------------------- the executor's author check (#81)
