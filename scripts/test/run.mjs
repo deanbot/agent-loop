@@ -1808,7 +1808,26 @@ const putMessage = (dir, id, extra, meta) => {
   const spacedAck = ack()
   check('rules-ack: a path with a space or a quote is one shell word in the RULES_DIFF line',
     spacedAck.stdout.includes(`-- 'docs/my rules.md' 'docs/it'\\''s.md'\n`) && !existsSync(record), spacedAck.stdout)
-  const long = Array.from({ length: 300 }, (_, i) => `line ${i}`).join('\n')
+
+  // The clone's .git/config is writable by PR code, and a sandbox may exempt rules-ack.mjs: an
+  // external diff or a textconv driver configured there must never run under it.
+  const marker = path.join(home, 'driver-ran')
+  const driver = path.join(home, 'driver.sh')
+  writeFileSync(driver, `#!/bin/sh\ntouch '${marker}'\ncat "$1" 2>/dev/null\n`)
+  chmodSync(driver, 0o755)
+  g(loop, 'config', 'diff.external', driver)
+  g(loop, 'config', 'diff.planted.textconv', driver)
+  writeFileSync(path.join(loop, '.git', 'info', 'attributes'), '* diff=planted\n')
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nplanted drivers\n` })
+  pull()
+  const drivers = ack()
+  check('rules-ack: a diff.external or textconv driver set in the clone\'s config never runs; the plain diff is printed',
+    drivers.status === 0 && !existsSync(marker) && drivers.stdout.includes('+planted drivers') && !existsSync(record), `${drivers.status} ${existsSync(marker)} ${drivers.stdout}${drivers.stderr}`)
+  g(loop, 'config', '--unset', 'diff.external')
+  g(loop, 'config', '--unset', 'diff.planted.textconv')
+  rmSync(path.join(loop, '.git', 'info', 'attributes'))
+
+  const long =Array.from({ length: 300 }, (_, i) => `line ${i}`).join('\n')
   const bigFrom = g(loop, 'rev-parse', 'HEAD')
   const bigTo = land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\n${long}\n` })
   pull()

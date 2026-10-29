@@ -66,7 +66,8 @@ if (pending === null) {
     const lost = pending.filter((r) => !hasCommit(r.from) || !hasCommit(r.to))
     if (lost.length > 0) lines.push(unreadable(`this clone lacks the commits of ${lost.map((r) => `${r.from.slice(0, 12)}..${r.to.slice(0, 12)}`).join(', ')}`))
     for (const r of pending.filter((r) => !lost.includes(r))) {
-      const diff = git('diff', `${r.from}..${r.to}`, '--', ...r.files)
+      // No external diff or textconv driver: the clone's config is PR-writable, and a sandbox may exempt this script.
+      const diff = git('diff', '--no-ext-diff', '--no-textconv', `${r.from}..${r.to}`, '--', ...r.files)
       blocks.push({ r, lines: [`RULES_DIFF: ${diffCommand(r)}`, ...diff.split('\n').filter((l, i, all) => l !== '' || i < all.length - 1)] })
     }
   } catch (e) {
