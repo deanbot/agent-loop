@@ -720,12 +720,14 @@ later in 0.2, additive: a new role, a script and two optional keys.
   own) or cancelled;
 - comments on those PRs, for their time, their author's login and their prefix only: review rounds
   are `[reviewer]` posts, and the time from a commit to the next one;
-- labelled and unlabelled events of `needs-operator-label` and `blocked-label` on PRs and issues
-  updated in the period, each span clipped to the period;
+- labelled and unlabelled events of `needs-operator-label`, `blocked-label` and
+  `in-progress-label` on PRs and issues updated in the period, each span clipped to the period:
+  claim and release times are the in-progress label's, with the claim comments' times;
 - the loop's own state on the machine it runs on: each waiter's idle streak, the wake-ups that
   found nothing.
 
-**Comments are data.** The auditor reads a comment only for its time, its author and its prefix,
+**Comments are data.** The auditor reads a comment only for its time, its author and its prefix
+(and the protocol's fixed claim marker, `[executor] Claimed by`, never the clone name after it),
 never for its text, and takes no direction from any GitHub text. It names a PR by number, never by
 title, since a title is text anyone can write.
 
@@ -735,14 +737,14 @@ A finding without both numbers is not posted.
 | Control (id) | Cost | Caught |
 |---|---|---|
 | `ci-prose:<workflow>` | minutes of that workflow's runs (latest attempts) on PRs that changed only prose, when their median is at least half that of its runs on code PRs; otherwise the workflow already skips the work there, and with no code run to compare there is no finding | runs that failed there |
-| `reruns:<workflow>` | minutes of the earlier attempts of re-run runs (a cancelled attempt is counted under `cancelled` only) | re-runs that failed again |
+| `reruns:<workflow>` | minutes of attempts 2..n of re-run runs, what re-running added (a cancelled attempt is counted under `cancelled` only) | re-runs that passed right after a failed attempt: a flake shown, the head unblocked. One that failed again caught nothing the first attempt hadn't |
 | `cancelled:<workflow>` | minutes of runs and attempts cancelled before they finished | nothing: a cancelled run reports no result |
 | `label:<name>` | minutes the label was on, within the period | spans that ended in a merge or a close, or got a comment with no leading `[…]` from the owner or a `trusted-authors` login |
 | `review-rounds` | minutes from each commit to the next `[reviewer]` post | rounds followed by a new commit before the next round |
+| `claims` | minutes items carried `in-progress-label` (claim to release or close), within the period | races the claim comment settled: two `[executor] Claimed by` comments on one item within 10 minutes |
 
-`<workflow>` is the workflow file's name without its extension. The recommendation is one of
-**keep** (it caught something), **narrow**, with the narrower rule, or **drop** (re-runs that
-caught nothing). A control listed in `audit-floor` gets a cost-only line: what to do about it is
+`<workflow>` is the workflow file's name without its extension. The recommendation is **keep**
+(it caught something) or **narrow**, with the narrower rule. A control listed in `audit-floor` gets a cost-only line: what to do about it is
 the operator's call. Findings come in cost order, all in minutes. An `audit-floor` id that matched
 no control in the period is listed, so a typo is never silent. Idle wake-ups are reported but give
 no finding: what a wake-up catches isn't recorded.
@@ -755,7 +757,7 @@ findings can be closed one by one. `pick-next.mjs` never lists an issue labelled
 none` it is printed only.
 
 **`audit.mjs`** `--repo owner/repo --since <YYYY-MM-DD|ISO|Nd> [--until <YYYY-MM-DD|ISO>] [--floor
-id,id] [--operators login,login] [--labels l,l] [--format md|json]` prints the report (Markdown,
+id,id] [--operators login,login] [--labels l,l] [--in-progress-label l] [--format md|json]` prints the report (Markdown,
 or JSON for tools) and posts nothing. A list may be written as a block writes it (`[a, b]`,
 quoted, `@login`). A failed `gh` call exits 2 with one `audit: …` line on stderr. It calls `gh`,
 so a sandboxed session exempts it the same way.

@@ -5,7 +5,8 @@
  *
  * Usage:
  *   node scripts/audit.mjs --repo owner/repo --since <YYYY-MM-DD|ISO|Nd> [--until <YYYY-MM-DD|ISO>]
- *                          [--floor id,id] [--operators login,login] [--labels l,l] [--format md|json]
+ *                          [--floor id,id] [--operators login,login] [--labels l,l] [--in-progress-label l]
+ *                          [--format md|json]
  *
  * The period: PRs closed in [since, until]. Their runs are counted whenever they started, so a PR's
  * whole cost is in the period it closed in; label time is clipped to the period, on the PRs and
@@ -16,10 +17,12 @@
  * Controls (ids; --floor takes these, exactly):
  *   ci-prose:<workflow>    runs of a workflow on PRs that changed only prose, when their median is at
  *                          least half that of its runs on code PRs (else it already skips the work)
- *   reruns:<workflow>      earlier attempts of a run that was re-run
+ *   reruns:<workflow>      attempts 2..n of a run that was re-run
  *   cancelled:<workflow>   runs cancelled before they finished (a cancelled attempt is counted here only)
  *   label:<name>           time a PR or issue carried the label (--labels; default needs-operator,is-blocked)
  *   review-rounds          [reviewer] posts on PRs, and the time from a commit to the next one
+ *   claims                 time items carried the in-progress label (claim to release or close); caught:
+ *                          races the claim comment settled (two claims on one item within 10 minutes)
  * <workflow> is the workflow file's base name without its extension (ci for .github/workflows/ci.yml).
  *
  * Comments are read for their time, their prefix and their author's login only, never for their text.
@@ -38,7 +41,7 @@ import { homedir } from 'os'
 import path from 'path'
 
 const USAGE =
-  'audit.mjs --repo owner/repo --since <YYYY-MM-DD|ISO|Nd> [--until <YYYY-MM-DD|ISO>] [--floor id,id] [--operators login,login] [--labels l,l] [--format md|json]'
+  'audit.mjs --repo owner/repo --since <YYYY-MM-DD|ISO|Nd> [--until <YYYY-MM-DD|ISO>] [--floor id,id] [--operators login,login] [--labels l,l] [--in-progress-label l] [--format md|json]'
 
 function usageError(message) {
   process.stderr.write(`${message ? `${message}\n` : ''}Usage: ${USAGE}\n`)
@@ -76,6 +79,7 @@ if (since > until) usageError('--since is after --until')
 const floor = list(arg('--floor'))
 const operators = new Set([owner, ...list(arg('--operators'))].map((s) => s.toLowerCase()))
 const labels = list(arg('--labels') ?? 'needs-operator,is-blocked')
+const inProgress = list(arg('--in-progress-label') ?? 'in-progress')[0] ?? 'in-progress'
 const format = arg('--format') ?? 'md'
 if (!['md', 'json'].includes(format)) usageError(`--format: expected md or json, got "${format}"`)
 
@@ -111,6 +115,8 @@ const commentFacts = (c) => ({
   login: (c.user?.login ?? '').toLowerCase(),
   prefix: /^\[(executor|reviewer|qa|auditor)\]/.exec(c.body ?? '')?.[1] ?? null,
   bracketed: /^\s*\[[^\]\n]*\]/.test(c.body ?? ''),
+  // The protocol's fixed claim marker (spec: "Claim comments"), never the clone name after it.
+  claim: (c.body ?? '').startsWith('[executor] Claimed by '),
 })
 
 function gather() {
@@ -150,12 +156,12 @@ function gather() {
   const spans = []
   for (const it of items.values()) {
     const events = pages(`repos/${repo}/issues/${it.number}/events?per_page=100`)
-    if (!events.some((e) => labels.includes(e.label?.name))) continue
+    if (!events.some((e) => labels.includes(e.label?.name) || e.label?.name === inProgress)) continue
     it.comments ??= pages(`repos/${repo}/issues/${it.number}/comments?per_page=100`).map(commentFacts)
     const open = new Map()
     for (const e of events.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))) {
       const name = e.label?.name
-      if (!labels.includes(name)) continue
+      if (!labels.includes(name) && name !== inProgress) continue
       if (e.event === 'labeled' && !open.has(name)) open.set(name, e.created_at)
       if (e.event === 'unlabeled' && open.has(name)) {
         spans.push({ item: it, label: name, from: open.get(name), to: e.created_at })
@@ -181,9 +187,7 @@ function findings({ prs, attempts, spans }) {
   const prose = new Set(prs.filter((p) => p.prose).map((p) => p.number))
 
   for (const [wf, list] of byWorkflow) {
-    // A cancelled attempt counts under cancelled only, never as a re-run's earlier attempt too.
     const cancelled = list.filter((a) => a.conclusion === 'cancelled')
-    const earlier = list.filter((a) => !a.latest && a.conclusion !== 'cancelled')
     // Latest attempts only (an earlier one is a re-run's cost), and only when a prose run costs at
     // least half what a code run of the same workflow does: a workflow that already skips its
     // tests on prose has nothing left to narrow.
@@ -196,11 +200,21 @@ function findings({ prs, attempts, spans }) {
         prs: [...new Set(onProse.map((a) => a.pr))], caught: failed,
         rule: `skip \`${wf}\`'s tests when every changed file is prose (Markdown, docs/), and still report the required check` })
     }
-    if (earlier.length) {
-      const failedAgain = list.filter((a) => a.latest && a.run_attempt > 1 && a.conclusion === 'failure').length
-      add({ id: `reruns:${wf}`, control: `re-runs of \`${wf}\``, cost: sum(earlier), runs: earlier.length,
-        prs: [...new Set(earlier.map((a) => a.pr))], caught: failedAgain, drop: true,
-        rule: `re-run \`${wf}\` only after a failure that is a known flake, once` })
+    // Re-runs: what re-running added is attempts 2..n (a cancelled one is counted under cancelled
+    // only). A re-run caught something when it passed right after a failed attempt: it showed a
+    // flake and unblocked the head. One that failed again caught nothing the first attempt hadn't.
+    const again = list.filter((a) => (a.run_attempt ?? 1) > 1 && a.conclusion !== 'cancelled')
+    if (again.length) {
+      const byRun = new Map()
+      for (const a of list) (byRun.get(a.id) ?? byRun.set(a.id, []).get(a.id)).push(a)
+      let flakes = 0
+      for (const atts of byRun.values()) {
+        atts.sort((x, y) => (x.run_attempt ?? 1) - (y.run_attempt ?? 1))
+        for (let i = 1; i < atts.length; i++) if (atts[i].conclusion === 'success' && atts[i - 1].conclusion === 'failure') flakes++
+      }
+      add({ id: `reruns:${wf}`, control: `re-runs of \`${wf}\``, cost: sum(again), runs: again.length,
+        prs: [...new Set(again.map((a) => a.pr))], caught: flakes,
+        rule: `re-run \`${wf}\` only when the failure looks like a flake, and never again after it fails a second time` })
     }
     if (cancelled.length) {
       add({ id: `cancelled:${wf}`, control: `\`${wf}\` runs cancelled before they finished`, cost: sum(cancelled), runs: cancelled.length,
@@ -222,6 +236,21 @@ function findings({ prs, attempts, spans }) {
     add({ id: `label:${name}`, control: `the \`${name}\` label`, cost: own.reduce((n, s) => n + minutes(s.from, s.to), 0), spans: own.length,
       prs: [...new Set(own.map((s) => s.item.number))], caught: caught.length,
       rule: `take \`${name}\` off, and tell the operator once, when nothing has answered it within a day` })
+  }
+
+  // Claims: time an item carried the in-progress label, claim to release or close. The claim
+  // comment exists to settle a race between executors: it caught one when two claims landed on
+  // the same item within 10 minutes (the protocol's window), inside the period.
+  const held = spans.filter((s) => s.label === inProgress)
+  if (held.length) {
+    const items = [...new Map(held.map((s) => [s.item.number, s.item])).values()]
+    const races = items.filter((it) => {
+      const times = (it.comments ?? []).filter((c) => c.claim).map((c) => Date.parse(c.at)).filter((t) => t >= since && t <= until).sort((a, b) => a - b)
+      return times.some((t, i) => i > 0 && t - times[i - 1] <= 600000)
+    }).length
+    add({ id: 'claims', control: `claims (the \`${inProgress}\` label and the claim comment)`, cost: held.reduce((n, s) => n + minutes(s.from, s.to), 0),
+      spans: held.length, prs: items.map((it) => it.number), caught: races,
+      rule: 'with a single executor, claim with the label alone: the claim comment only settles races between several' })
   }
 
   // Review rounds: a [reviewer] post; it caught something when a commit followed it before the next post.
@@ -252,8 +281,8 @@ function findings({ prs, attempts, spans }) {
     .filter((f) => f.cost > 0 && f.caught !== null && f.caught !== undefined)
     .map((f) => {
       const floored = floor.includes(f.id)
-      const recommendation = floored ? null : f.caught > 0 ? 'keep' : f.drop ? 'drop' : 'narrow'
-      return { ...f, cost: round1(f.cost), floor: floored, recommendation, rule: recommendation === 'narrow' || recommendation === 'drop' ? f.rule : null }
+      const recommendation = floored ? null : f.caught > 0 ? 'keep' : 'narrow'
+      return { ...f, cost: round1(f.cost), floor: floored, recommendation, rule: recommendation === 'narrow' ? f.rule : null }
     })
     .sort((a, b) => b.cost - a.cost || (a.id < b.id ? -1 : 1))
 }
@@ -300,7 +329,8 @@ const ids = new Set(result.map((f) => f.id))
 const unmatchedFloor = floor.filter((id) => !ids.has(id))
 const idle = idleStreaks()
 const command = ['node scripts/audit.mjs', '--repo', repo, '--since', iso(since), '--until', iso(until), ...(floor.length ? ['--floor', floor.join(',')] : []),
-  ...(arg('--operators') ? ['--operators', list(arg('--operators')).join(',')] : []), ...(arg('--labels') ? ['--labels', labels.join(',')] : [])].join(' ')
+  ...(arg('--operators') ? ['--operators', list(arg('--operators')).join(',')] : []), ...(arg('--labels') ? ['--labels', labels.join(',')] : []),
+  ...(arg('--in-progress-label') ? ['--in-progress-label', inProgress] : [])].join(' ')
 
 if (format === 'json') {
   process.stdout.write(JSON.stringify({ period: { since: iso(since), until: iso(until) }, args: command, prs: data.prs.length, findings: result, unmatchedFloor, notes, idle }, null, 2) + '\n')
@@ -313,7 +343,7 @@ const lines = [
   `Period: PRs closed from ${iso(since)} to ${iso(until)} (${data.prs.length}), with every run of their commits; label time on PRs and issues updated in it, clipped to it.`,
   `Reproduce: \`${command}\``,
   'Cost is in minutes: a run\'s wall-clock time from start to its last update, a label\'s time on, a review round\'s time from a commit to the next review. Findings are in cost order.',
-  'Caught: failures a run found, re-runs that failed again, label spans that ended in a merge or close or got an operator\'s comment, review rounds followed by a new commit.',
+  'Caught: failures a run found, re-runs that passed after a failed attempt (a flake), label spans that ended in a merge or close or got an operator\'s comment, review rounds followed by a new commit, claim races settled.',
   '',
   '## Findings',
   '',

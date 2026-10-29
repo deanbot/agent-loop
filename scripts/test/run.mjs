@@ -1003,8 +1003,11 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
       11: [comment('[reviewer] Review of b11.', at('05T12:00:00'), 'acme'), comment('[reviewer] LGTM', at('06T12:00:00'), 'acme'), comment('merging', at('06T20:00:00'), 'acme')],
       20: [comment('[executor] BLOCKED: waiting.', at('10T00:05:00'), 'acme'), comment('[dev] noted', at('10T01:00:00'), 'acme'), comment('ping', at('10T06:00:00'), 'stranger')],
       21: [],
+      // Two executors claimed #22 three minutes apart: the claim comment settled a race.
+      22: [comment('[executor] Claimed by exec-a', at('15T10:00:00'), 'acme'), comment('[executor] Claimed by exec-b', at('15T10:03:00'), 'acme')],
     },
-    items: [{ number: 20, state: 'open', closed_at: null, labels: [] }, { number: 11, state: 'closed', closed_at: at('07T00:00:00') }, { number: 21, state: 'open', closed_at: null }],
+    items: [{ number: 20, state: 'open', closed_at: null, labels: [] }, { number: 11, state: 'closed', closed_at: at('07T00:00:00') }, { number: 21, state: 'open', closed_at: null },
+      { number: 22, state: 'open', closed_at: null }],
     events: {
       11: [{ event: 'labeled', label: { name: 'needs-operator' }, created_at: at('06T13:00:00') }],
       // A span wholly before the period, then the day-long one inside it.
@@ -1012,6 +1015,7 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
         { event: 'labeled', label: { name: 'is-blocked' }, created_at: at('10T00:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: at('11T00:00:00') }],
       // A span that crosses the period's end: cut at --until (the end of 2026-03-31).
       21: [{ event: 'labeled', label: { name: 'is-blocked' }, created_at: at('31T12:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: '2026-04-01T12:00:00Z' }],
+      22: [{ event: 'labeled', label: { name: 'in-progress' }, created_at: at('15T10:00:00') }, { event: 'unlabeled', label: { name: 'in-progress' }, created_at: at('16T10:00:00') }],
     },
   }
   const audit = (extra = []) => run_(['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json', ...extra])
@@ -1029,9 +1033,11 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   check('audit: a prose-only PR gated in full → ci-prose finding, its run\'s minutes, caught 0, narrow with the narrower rule',
     f('ci-prose:ci')?.cost === 11 && f('ci-prose:ci').caught === 0 && f('ci-prose:ci').recommendation === 'narrow' && /prose/.test(f('ci-prose:ci').rule) &&
       JSON.stringify(f('ci-prose:ci').prs) === '[10]', brief + (r.error ?? ''))
-  check('audit: a cancelled run and a cancelled first attempt → cancelled cost 3 min over 2 runs, caught 0; the re-run after a cancel is not also a re-run finding\'s cost',
-    f('cancelled:ci')?.cost === 3 && f('cancelled:ci').runs === 2 && f('reruns:ci')?.cost === 5 && f('reruns:ci').runs === 1, brief)
-  check('audit: a re-run after a failure that passed → reruns cost, caught 0, drop', f('reruns:ci')?.caught === 0 && f('reruns:ci').recommendation === 'drop', brief)
+  check('audit: a cancelled run and a cancelled first attempt → cancelled cost 3 min over 2 runs, caught 0; re-runs cost only the later attempts (10 + 5 min), never the cancelled one',
+    f('cancelled:ci')?.cost === 3 && f('cancelled:ci').runs === 2 && f('reruns:ci')?.cost === 15 && f('reruns:ci').runs === 2, brief)
+  check('audit: a re-run that passed after a failed attempt (a flake) → caught 1, keep', f('reruns:ci')?.caught === 1 && f('reruns:ci').recommendation === 'keep', brief)
+  check('audit: claims → the in-progress label\'s time, and a race settled by two claim comments within 10 minutes → caught 1, keep',
+    f('claims')?.cost === 1440 && f('claims').caught === 1 && f('claims').recommendation === 'keep' && JSON.stringify(f('claims').prs) === '[22]', brief)
   check('audit: an issue left blocked for a day with no operator comment (a stranger\'s, a role-prefixed and a [dev] one by the owner don\'t count) → caught 0, narrow',
     f('label:is-blocked')?.caught === 0 && f('label:is-blocked').recommendation === 'narrow', brief)
   check('audit: label time is clipped to the period: a span before it adds nothing, one crossing its end is cut there (1440 + 720 min)',
@@ -1052,7 +1058,29 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   check('audit: a finding with a zero cost (a run that took no time) is not posted: both numbers or nothing',
     !(r.findings ?? []).some((x) => x.id.endsWith(':docs')), brief)
   check('audit: findings come in cost order', JSON.stringify((r.findings ?? []).map((x) => x.id)) ===
-    JSON.stringify(['label:is-blocked', 'label:needs-operator', 'review-rounds', 'ci-prose:ci', 'reruns:ci', 'cancelled:ci']), brief)
+    JSON.stringify(['label:is-blocked', 'claims', 'label:needs-operator', 'review-rounds', 'reruns:ci', 'ci-prose:ci', 'cancelled:ci']), brief)
+  // #103 review: a re-run of a real failure caught nothing (the first attempt found it); one claim
+  // per item settles no race.
+  const rerunFx = (runs, attempts, extra = {}) => ({
+    prs: [{ number: 31, createdAt: at('04T08:00:00'), closedAt: at('04T20:00:00'), mergedAt: null, files: [{ path: 'src/b.js' }] }],
+    prCommits: { 31: [{ sha: 'd31', commit: { committer: { date: at('04T09:00:00') } } }] },
+    runs, attempts, issueComments: { 31: [], ...(extra.comments ?? {}) }, items: extra.items ?? [], events: extra.events ?? {},
+  })
+  const det = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
+    [wfRun(3101, 'd31', '04T10:20:00', '04T10:30:00', { run_attempt: 3, conclusion: 'failure' })],
+    { '3101/1': wfRun(3101, 'd31', '04T10:00:00', '04T10:10:00', { conclusion: 'failure' }), '3101/2': wfRun(3101, 'd31', '04T10:10:00', '04T10:20:00', { run_attempt: 2, conclusion: 'failure' }) },
+    { comments: { 33: [comment('[executor] Claimed by exec-a', at('20T10:00:00'), 'acme')] }, items: [{ number: 33, state: 'open', closed_at: null }],
+      events: { 33: [{ event: 'labeled', label: { name: 'in-progress' }, created_at: at('20T10:00:00') }, { event: 'unlabeled', label: { name: 'in-progress' }, created_at: at('20T12:00:00') }] } }))
+  const detF = (id) => (JSON.parse(det.startsWith('{') ? det : '{}').findings ?? []).find((x) => x.id === id)
+  check('audit: a deterministic failure re-run twice → cost of attempts 2 and 3 (20 min), caught 0, narrow with the never-again rule',
+    detF('reruns:ci')?.cost === 20 && detF('reruns:ci').runs === 2 && detF('reruns:ci').caught === 0 && detF('reruns:ci').recommendation === 'narrow' &&
+      /never again after it fails a second time/.test(detF('reruns:ci').rule), det)
+  check('audit: one claim per item → claims caught 0, narrow', detF('claims')?.cost === 120 && detF('claims').caught === 0 && detF('claims').recommendation === 'narrow', det)
+  const flake = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
+    [wfRun(3201, 'd31', '04T10:10:00', '04T10:20:00', { run_attempt: 2 })], { '3201/1': wfRun(3201, 'd31', '04T10:00:00', '04T10:10:00', { conclusion: 'failure' }) }))
+  const flakeF = (JSON.parse(flake.startsWith('{') ? flake : '{}').findings ?? []).find((x) => x.id === 'reruns:ci')
+  check('audit: a flake (failure, then a pass on re-run) → cost of the re-run alone (10 min), caught 1, keep',
+    flakeF?.cost === 10 && flakeF.caught === 1 && flakeF.recommendation === 'keep', flake)
   const fl = audit(['--floor', 'ci-prose:ci,label:typo'])
   const flp = (fl.findings ?? []).find((x) => x.id === 'ci-prose:ci')
   check('audit: a floor control keeps its cost but gets no recommendation; a floor id that matched nothing is listed',
