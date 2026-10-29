@@ -13,7 +13,10 @@
  *     git diff <before>..<after> -- <file> <file> …
  * The second line is the command that shows what changed: read it, never the whole files (a path
  * with a space or a shell character is single-quoted there). No such file changed (or nothing was
- * pulled) → nothing.
+ * pulled) → nothing. The change is also recorded as pending for this clone (lib/rules.mjs), added
+ * to any still pending: pick-next.mjs refuses to pick until rules-ack.mjs has printed it. A record
+ * that can't be written prints `pull: rules change not recorded: <message>` on stderr and still
+ * exits 0 (the pull itself worked).
  *
  * --start <command> (a between-issues point): then prints the operator's restart line, with the
  * loop's own start arguments:
@@ -24,6 +27,7 @@
  */
 
 import { execFileSync } from 'child_process'
+import { recordFile, addPending, shellWord } from './lib/rules.mjs'
 
 const USAGE = 'pull.mjs [--start <command> [--milestone <title>]]'
 
@@ -57,9 +61,6 @@ function rulesPaths(agents) {
     .filter(Boolean)
 }
 
-// A path as one shell word: bare when plain, else single-quoted, so the printed command diffs it.
-const shellWord = (p) => (/^[\w./@%+=:,-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`)
-
 // The restart line does not depend on the pull: a failed pull still reaches the operator with it.
 const restart =
   start === null
@@ -67,6 +68,7 @@ const restart =
     : `RESTART: exit this session, start a new one in this clone, then run: ${start}${milestone !== null ? ` --milestone "${milestone.replace(/(["\\])/g, '\\$1')}"` : ''}`
 
 const lines = []
+let range = null
 try {
   const before = git('rev-parse', 'HEAD').trim()
   git('pull', '--quiet', '--ff-only')
@@ -90,6 +92,7 @@ try {
     if (hits.length > 0) {
       lines.push(`RULES_CHANGED: ${hits.join(' ')}`)
       lines.push(`  git diff ${before.slice(0, 12)}..${after.slice(0, 12)} -- ${hits.map(shellWord).join(' ')}`)
+      range = { from: before, to: after, files: hits }
     }
   }
 } catch (e) {
@@ -99,6 +102,14 @@ try {
   process.stderr.write(`pull: ${all.find((l) => /^(fatal|error):/.test(l)) ?? all[0]}\n`)
   if (restart) process.stdout.write(`${restart}\n`)
   process.exit(2)
+}
+
+if (range) {
+  try {
+    addPending(recordFile(), range)
+  } catch (e) {
+    process.stderr.write(`pull: rules change not recorded: ${e?.message ?? e}\n`)
+  }
 }
 
 if (restart) lines.push(restart)

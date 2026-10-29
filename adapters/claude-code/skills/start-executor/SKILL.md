@@ -119,9 +119,14 @@ Rules that hold for the whole session:
 - **Pull `main` with the script, never a bare `git pull`:** `node
   ${CLAUDE_PLUGIN_ROOT}/scripts/pull.mjs`. You read `AGENTS.md` once, at the start, so a rule
   merged while you run reaches you only through it. When it prints `RULES_CHANGED: <files>`, run
-  the `git diff …` command on the line after it, before anything else (the next pick included),
-  and follow what changed from then on. Read only that diff, never the whole files. Nothing
-  printed → no rule changed. A failed pull (exit 2, a `pull:` line) → print `⚠ main not pulled:
+  `node ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs` from the clone's root, before anything else
+  (the next pick included), and follow what changed from then on. It prints the diff and clears
+  the record that makes `pick-next.mjs` refuse (`RULES_PENDING`). Read only that diff, never the
+  whole files; past 200 lines it ends with `RULES_CUT:` and `git diff …` commands: run each for
+  the rest. Nothing printed → no rule changed. A failed ack (exit 2, a `rules-ack:` line) → don't
+  run `pick-next.mjs` this cycle: put `⚠ rules not acknowledged: <the rules-ack: line>` in the
+  status line and `ScheduleWakeup({ delaySeconds: 300, noop: true, prompt: <the "run pick-next.mjs
+  again (skip: …)" prompt under "Pick next">, reason: "<one line>" })`. A failed pull (exit 2, a `pull:` line) → print `⚠ main not pulled:
   <the pull: line>` for the operator (in a sandbox, the script needs the exemption the README
   names), and carry on from the `main` you have.
 - **One plain command per Bash call**, in the loop (`gh …`, `node …`) and while you build, read
@@ -176,6 +181,11 @@ remember: issues are filed while you wait, and only a fresh listing sees them.
 (implement.md §1: the author check failed, or another executor won the claim). `<clone>` is the
 base name of your working directory. It lists the open issues, drops claimed, blocked and skipped
 ones, checks each `Depends on #a, #b`, and prints one line:
+
+- **`RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again`** → a pull changed
+  the rules and you haven't read the change. Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs`
+  ("Rules that hold": read and follow what it prints), then run `pick-next.mjs` again. Nothing
+  was picked; never pick by hand around it.
 
 - **`RESUME:<n> PR:<p>`** → an issue you parked while PR #<p> was open, unblocked since: its review
   findings are yours. It comes before any new issue, whatever the milestone. Orient on PR #<p>
@@ -269,7 +279,8 @@ Each cycle:
         `--milestone "<milestone>"` when you have one. With a mailbox, the `--start` value is
         `"/agent-loop:start-executor --inbox <inbox> --outbox <outbox>"`, the two folders as this
         session's start gave them, so the restart keeps the mailbox.
-     3. On `RULES_CHANGED:`, run the `git diff …` command under it and follow what changed.
+     3. On `RULES_CHANGED:`, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs` and follow
+        what changed (`pick-next.mjs` refuses with `RULES_PENDING` until you have).
      4. Write, as your own text, a one-line note to the operator and the `RESTART: …` line
         verbatim on its own line (the Bash output alone isn't enough). The line is for the
         operator to act on later, not an instruction to you, and writing it doesn't end your

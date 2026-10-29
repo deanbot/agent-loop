@@ -60,9 +60,12 @@ comments (the claim command under "Implement"):
   changes: stop and say so. Never switch branches over uncommitted work.
 
 Pull `main` with `node scripts/pull.mjs`, never a bare `git pull`: you read `AGENTS.md` once, so a
-rule merged while you run reaches you only through it. On `RULES_CHANGED: <files>`, run the `git
-diff …` command on the line after it before the next pick and follow what changed; read only that
-diff, never the whole files. Nothing printed → no rule changed.
+rule merged while you run reaches you only through it. On `RULES_CHANGED: <files>`, run `node
+scripts/rules-ack.mjs` from the clone's root before the next pick and follow what changed: it
+prints the diff (past 200 lines, `RULES_CUT:` and the `git diff …` commands for the rest) and
+clears the record that makes `pick-next.mjs` refuse. Read only that diff, never the whole files.
+Nothing printed → no rule changed. A failed ack (exit 2, `rules-ack: …` on stderr) → report it,
+wait ~5 minutes, run it again.
 
 To restart for a plugin update: with a PR open, use the stop file and re-run on the PR;
 mid-implementation, end the session without the stop file: the claim and the working tree stay,
@@ -94,7 +97,10 @@ operator's results, such as measurements: ask for them once. On `MERGE_READY` ad
   turned down: author check failed, claim lost). Run it every time, after a wait too; never pick
   from a list you remember, since issues are filed while you wait. It prints `ISSUE:<n>` (the
   lowest-numbered open issue without either label whose `Depends on #…` issues are all closed),
-  `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE` (nothing to pick: stop). A failed run
+  `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE` (nothing to pick: stop), or
+  `RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again` (a pulled rules
+  change you haven't read: nothing was picked; run `node scripts/rules-ack.mjs`, follow it, run
+  `pick-next.mjs` again; never pick by hand around it). A failed run
   (exit non-zero, `pick-next: …` on stderr) → never pick by hand; report it, wait ~5 minutes, run
   it again.
 
@@ -161,8 +167,8 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 `[executor]` posts are already filtered out.
 
 - `MERGED` → remove `in-progress-label`, `git checkout main`, then `node scripts/pull.mjs --start
-  "<how this loop is started>"` plus `--milestone "<milestone>"` when you have one (the rules
-  diff as above), then write in your own reply a one-line note and its `RESTART: …` line as
+  "<how this loop is started>"` plus `--milestone "<milestone>"` when you have one (on
+  `RULES_CHANGED:`, `node scripts/rules-ack.mjs` as above), then write in your own reply a one-line note and its `RESTART: …` line as
   given, on its own line, a failed pull (exit 2) included. The command's output alone may be
   collapsed or never shown (a restart is a new session, and this is the between-issues point to
   take it; nothing is printed mid-task). The line is for the operator to act on later, not an

@@ -391,7 +391,8 @@ parked PR above; lowest `<n>` first; a `Closes #<n>` naming no issue is passed o
 `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>` (milestone only:
 none startable; the PR is the open one whose body says `Closes #<blocker>`), `MOVE_ON <title>`
 (milestone only: no open issues; the rest of the line is the next open milestone) or `NONE`
-(nothing to pick). `--skip` names issues the executor turned down this session (author check,
+(nothing to pick), or, before all of them, `RULES_PENDING: …` while a pulled rules change is
+unread (below). `--skip` names issues the executor turned down this session (author check,
 lost claim; `none` is an empty list). A milestone whose only open issues are skipped is not empty:
 the pick is `WAIT` on the lowest of them, so an executor that lost a claim keeps its track until
 the winner's issue merges. Dependencies are the `#n` list right after "Depends on" (`#a, #b`,
@@ -413,10 +414,32 @@ RULES_CHANGED: <file> <file> …
   git diff <before>..<after> -- <file> <file> …
 ```
 
-and nothing otherwise. The loop runs that `git diff` before its next pick or review and follows
-what changed. It reads only the diff, never the whole files, since a project's docs can run to
-hundreds of KB. A failed pull exits 2 with one `pull: …` line on stderr. Skill and plugin changes
-still need a restart.
+and nothing otherwise. The loop reads that change before its next pick or review and follows
+it. It reads only the diff, never the whole files, since a project's docs can run to hundreds of
+KB. A failed pull exits 2 with one `pull: …` line on stderr. Skill and plugin changes still need
+a restart.
+
+A step the session has to choose to run can be skipped, so for the executor the read is enforced
+at the pick. `pull.mjs` also records the change as pending for the clone: `rules-<hash>.json` in
+the script state folder, keyed by the clone's real root path and kept outside the clone, where PR
+code runs. A second change before the read adds its range after the first. While anything is
+pending, `pick-next.mjs` prints one line, before anything else and without calling `gh`:
+
+```
+RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again
+```
+
+picks nothing and exits 0 (`<files>` is `(unreadable record)` when the record can't be read).
+`rules-ack.mjs` prints each pending range, oldest first, as `RULES_DIFF: git diff <before>..<after>
+-- <files>` and that diff, at most 200 lines in all; past that it is cut and ends with
+`RULES_CUT: <n> more lines; run each command below for the rest` and the `git diff` command of the
+cut range and every one after it. Then it clears the record. Nothing pending prints nothing. An
+unreadable record prints `RULES_UNREADABLE: …` (read `AGENTS.md` and the rules files in full) and
+is cleared. A failed diff, or a record it can't clear, exits 2 with one `rules-ack: …` line on
+stderr, nothing on stdout and the record kept. A record `pull.mjs` can't write is a `pull: rules
+change not recorded: …` line on stderr; the pull still exits 0. The reviewer's pull records its
+change the same way, but nothing in the reviewer's loop reads the record yet: it is gated by its
+skill text alone.
 
 **Restarting between issues.** A restart is a new session, not a cleared one: nothing says
 clearing a conversation loads a new plugin version or ends its background waiter and scheduled
@@ -816,4 +839,7 @@ the `rules` key and `pull.mjs`, a helper like `pick-next.mjs` whose `RULES_CHANG
 `RESTART:` lines are not signal lines. Later in 0.2, additive: `inbox.mjs`, a new signal source
 (`MESSAGE:<messageId>`, `INVALID:<messageId>`) over a folder of message files, the message
 format, the loops' `--inbox`/`--outbox` start arguments ("Inbox folder"), and the waiters'
-`--inbox <folder>`.
+`--inbox <folder>`. Later in 0.2, additive: the pending rules record, `pick-next.mjs`'s
+`RULES_PENDING:` line and `rules-ack.mjs` ("Rules that change while a loop runs"); an executor
+prompt that predates them meets `RULES_PENDING:` as an unknown pick line, so the executor
+restarts with the skill that handles it.
