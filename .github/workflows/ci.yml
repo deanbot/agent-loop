@@ -18,7 +18,9 @@ name: CI
 # event fires and isn't remade when the base branch changes.
 on:
   # `edited` is for a change of base branch, which changes what a pull request merges without a
-  # push. It also fires on title and body edits, which the workflow doesn't read: one more run.
+  # push. It also fires on title and body edits, which the workflow doesn't read: one more run of
+  # the same head, in a concurrency group of its own (below), so it cancels nothing and reports its
+  # own result.
   pull_request:
     types: [opened, synchronize, reopened, edited]
   push:
@@ -27,8 +29,18 @@ on:
 permissions:
   contents: read
 
+# A newer run of a pull request cancels the one in progress, whose `required` job then reports
+# `contract-tests` failed (always(), below) until the newer one ends. The group, by event:
+#   push to main                      ci-<sha>
+#   opened, synchronize, reopened     ci-<pr>: a new head replaces the run of the old one
+#   edited, base branch changed       ci-<pr>: the run against the old base is stale
+#   edited, title or body only        ci-<pr>-edit-<run id>: its own, so an edit right after a push
+#                                     never cancels the push's run (it would report a passing head
+#                                     as failed); the run id, not the head, so a second edit
+#                                     doesn't cancel the first either
+# A base change carries `changes.base` in the event (`changes.title` / `changes.body` otherwise).
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
+  group: ci-${{ github.event.action == 'edited' && !github.event.changes.base && format('{0}-edit-{1}', github.event.pull_request.number, github.run_id) || github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:

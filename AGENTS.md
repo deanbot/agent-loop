@@ -201,7 +201,10 @@ every push to `main`, on Node 22 and 24, with a read-only token and actions pinn
 (the contract tests check both). The check to require in a ruleset is `contract-tests`: it passes
 when the tests pass on both versions, or when the change touches only Markdown files (the tests
 are skipped then). The jobs check out the PR's head commit and compare it with the event's base,
-never GitHub's merge commit, and a change of base branch (`edited`) starts a new run. **After a
+never GitHub's merge commit, and a change of base branch (`edited`) starts a new run, which
+replaces the one in progress. A title or body edit (`edited` too) starts a run of its own that
+cancels nothing, so an edit right after a push never turns the push's `contract-tests` into a
+failure. **After a
 PR's base branch changes, wait for the new run before merging:** until `gh pr checks` shows
 nothing pending and `contract-tests` from the new run, the head still shows the result from the
 old base.
