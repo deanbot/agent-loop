@@ -160,8 +160,8 @@ Then implement:
 6. `gh pr create` with: what and why; a Criterion | Evidence table; Decisions; Known limits;
    `Closes #N`.
 
-Input needed with no PR yet and no safe default: park. `gh issue comment <N> --body "[executor]
-BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N>."`, then
+Input needed with no PR yet and no safe default: park.
+`gh issue comment <N> --body "[executor] BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N>."`, then
 `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label>`, pick next.
 
 ## Poll loop

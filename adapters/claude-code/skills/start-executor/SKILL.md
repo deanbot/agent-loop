@@ -74,8 +74,8 @@ bare start that ran before the intended command) is then seen at once.
    2). Then decide (`<clone>` is the base name of your working directory):
    - **You hold #<N>**: it is open, carries `<in-progress-label>`, and the newest `[executor]
      Claimed by` comment on it names `<clone>` exactly (list them with `gh api --paginate
-     "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "") | startswith("[executor]
-     Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`; a losing claim is deleted, so the newest
+     "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "") |
+     startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`; a losing claim is deleted, so the newest
      one left is the holder's). An issue claimed before claim comments existed has none: it is
      yours only when `$ARGUMENTS` names it. On its branch (`issue-<N>-…`) → **Resume** (below),
      with no `git checkout main` and no `git pull`. On another branch (including `main` with

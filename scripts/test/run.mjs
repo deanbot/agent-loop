@@ -1951,12 +1951,17 @@ const putMessage = (dir, id, extra, meta) => {
   check('loop texts: every loop\'s plain-command rule says --jq filters never end in ]], one array per row', noJqClause.length === 0, noJqClause.join('\n'))
 
   const listing = 'gh api --paginate "repos/<repo>/issues/<N>/comments" --jq \'.[] | select((.body // "") | startswith("[executor] Claimed by ")) | "\\(.id) \\(.created_at) \\(.body)"\''
+  // Counted flat (lines rewrapped) and raw: a copy may wrap at jq's whitespace, never inside the
+  // "[executor] Claimed by " string, where the line break would become part of the match (#99 review).
   const count = (f) => flat(read(f)).split(listing).length - 1
+  const unbroken = (f) => read(f).split('startswith("[executor] Claimed by "))').length - 1
   const cc = flat(read('claude-code/skills/start-executor/SKILL.md'))
-  check('loop texts: every executor\'s resume lists the claims inline, the same command as its claim step',
+  const listings = ['claude-code/skills/start-executor/SKILL.md', 'claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
+  check('loop texts: every executor\'s resume lists the claims inline, the same command as its claim step, never wrapped inside a string',
     count('claude-code/skills/start-executor/SKILL.md') === 1 && count('claude-code/skills/start-executor/reference/implement.md') === 1 &&
-      !cc.includes('list them with the command in') && count('generic/executor.md') === 2 && count('kiro/skills/start-executor/SKILL.md') === 2,
-    ['claude-code/skills/start-executor/SKILL.md', 'claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md'].map((f) => `${f}: ${count(f)}`).join('\n'))
+      !cc.includes('list them with the command in') && count('generic/executor.md') === 2 && count('kiro/skills/start-executor/SKILL.md') === 2 &&
+      listings.every((f) => unbroken(f) === count(f)),
+    listings.map((f) => `${f}: ${count(f)} flat, ${unbroken(f)} unbroken`).join('\n'))
 
   const oneFolder = 'Only one of the two folders → print the `⚠ No mailbox` line without running `--check`; never supply a missing folder yourself.'
   const supplies = ['executor', 'reviewer', 'qa'].filter((r) => !flat(read(`claude-code/skills/start-${r}/SKILL.md`)).includes(oneFolder))
