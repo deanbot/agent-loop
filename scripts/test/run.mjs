@@ -987,6 +987,7 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
       wfRun(1103, 'c11', '06T09:10:00', '06T09:15:00', { run_attempt: 2 }),
       wfRun(1201, 'a10', '02T10:01:00', '02T10:02:00', { path: '.github/workflows/lint.yml', status: 'in_progress', conclusion: null }),
       wfRun(9999, 'zzz', '05T09:00:00', '05T10:00:00'),
+      wfRun(1301, 'a10', '02T10:05:00', '02T10:05:00', { path: '.github/workflows/docs.yml' }),
     ],
     attempts: {
       '1102/1': wfRun(1102, 'b11', '05T09:03:00', '05T09:04:00', { conclusion: 'cancelled' }),
@@ -1028,6 +1029,8 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
     f('review-rounds')?.rounds === 2 && f('review-rounds').caught === 1 && f('review-rounds').cost === 360 && f('review-rounds').recommendation === 'keep', brief)
   check('audit: a run with no cost yet (in progress) gives no finding, and a run of no PR in the period is not counted',
     !(r.findings ?? []).some((x) => x.id.endsWith(':lint')) && !brief.includes('9999') && f('ci-prose:ci')?.runs === 1, brief)
+  check('audit: a finding with a zero cost (a run that took no time) is not posted: both numbers or nothing',
+    !(r.findings ?? []).some((x) => x.id.endsWith(':docs')), brief)
   check('audit: findings come in cost order', JSON.stringify((r.findings ?? []).map((x) => x.id)) ===
     JSON.stringify(['label:is-blocked', 'label:needs-operator', 'review-rounds', 'ci-prose:ci', 'reruns:ci', 'cancelled:ci']), brief)
   const fl = audit(['--floor', 'ci-prose:ci,label:typo'])
