@@ -1934,6 +1934,26 @@ const putMessage = (dir, id, extra, meta) => {
   check('no adapter\'s --jq holds an object with a comma (a permission prompt in Claude Code)', objects.length === 0, objects.join('\n'))
 }
 
+// ---------------------------------------------------------------- the waiter's exit-3 rule (#86)
+{
+  // A loop once carried "a waiter is running" from an exit-3 cycle into the next one and started
+  // none. The scope has to sit in the rule's own paragraph, and the invariant has to say which
+  // waiter counts.
+  const skills = path.resolve(scripts, '..', 'adapters', 'claude-code', 'skills')
+  const paragraph = (text, start) => text.split(/\n[ \t]*\n/).map((p) => p.replace(/\n\s*/g, ' ')).find((p) => p.startsWith(start)) ?? ''
+  for (const role of ['executor', 'reviewer', 'qa']) {
+    const text = readFileSync(path.join(skills, `start-${role}`, 'SKILL.md'), 'utf8')
+    const rule = paragraph(text, "A waiter's notification that says **`failed with exit code 3`** is the exception")
+    check(`exit-3 rule (${role}): its paragraph scopes it to this cycle only, names the surviving waiter's own exit as another wake, and says never to assume a waiter`,
+      rule.includes('This covers only the cycle this exit-3 notification starts.') &&
+        rule.includes("The next wake of any other kind (the surviving waiter's own exit, a message, the fallback wakeup) runs a full cycle, ended as usual with a new waiter") &&
+        rule.includes('a waiter whose exit has notified you is gone, so never assume one is still running because an earlier cycle saw it'), rule)
+    const invariant = paragraph(text, '**Loop invariant: every cycle ends with a waiter running')
+    check(`exit-3 rule (${role}): the loop invariant says a waiter running is one this cycle started, never one an earlier cycle saw`,
+      invariant.includes('"A waiter running" means one this cycle started or, on an exit-3 wake only, the one that refused a second; never one an earlier cycle saw.'), invariant)
+  }
+}
+
 // ---------------------------------------------------------------- .github/workflows/ci.yml
 {
   const ci = readFileSync(path.resolve(scripts, '..', '.github', 'workflows', 'ci.yml'), 'utf8')
