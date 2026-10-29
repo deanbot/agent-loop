@@ -42,6 +42,7 @@ is the project's conventions, which the agents follow.
 | `repo` | yes | — | `owner/repo` |
 | `in-progress-label` | no | `in-progress` | label an executor adds when it claims an issue |
 | `blocked-label` | no | `is-blocked` | label that parks an issue; the operator removes it to resume |
+| `pre-gate` | no | — | one plain command that runs in seconds (lint, a format check, a text guard) and should check rather than rewrite. Before every push the executor runs it, commits, runs the push-time checks without pushing (`git push --dry-run origin <branch>`, which runs the pre-push hooks), and only then `quality-gates` and `gate`, so a cheap refusal never costs a second gate. Without it, the dry-run still comes before the gate. Added later in 0.2, additive |
 | `quality-gates` | no | — | command that must pass before a PR is opened or a fix is pushed |
 | `gate` | no | — | the command that stands in for CI when a PR has none (no checks reported, or every check skipped), for a project that can turn CI off: the executor runs it before each push and the reviewer on the head before an LGTM, each quoting its last line, and `MERGE_READY` then requires the reviewer's quote (Merge policy). It may be the same command as `quality-gates`. A local runner can run it for them ("Local CI runner") |
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |

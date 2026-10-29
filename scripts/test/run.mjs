@@ -616,6 +616,26 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- the executor's check order (#87)
+{
+  // The checks that take seconds run before the one that takes minutes, so a refusal at push time
+  // never costs a second gate. Every executor text, and the fix rounds, name the same order.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const order = [
+    '**Before every push, in this order:** `pre-gate` when the block has it, fixed and run again until it passes (commit what a formatter changed); commit;',
+    'the push-time checks without pushing: `git push --dry-run origin <branch>`, which runs the project\'s pre-push hooks on the commits it would send,',
+    'then `quality-gates` and the gate on the committed, clean tree; then the push.',
+  ]
+  const texts = ['claude-code/skills/start-executor/reference/implement.md', 'claude-code/skills/start-executor/reference/signals.md',
+    'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
+  const missing = texts.filter((f) => {
+    const t = readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+    const at = order.map((s) => t.indexOf(s))
+    return at.some((i) => i === -1) || !(at[0] < at[1] && at[1] < at[2])
+  })
+  check('executor order: every executor text, and the fix rounds, run pre-gate, then the push-time dry-run, then the gate, then the push', missing.length === 0, missing.join('\n'))
+}
+
 // ---------------------------------------------------------------- --wait (lib/wait.mjs)
 // The waiter runs in the background so a test can change the fixture mid-wait. Intervals are 1s.
 function start(ctx, script, args) {
@@ -1846,6 +1866,10 @@ const putMessage = (dir, id, extra, meta) => {
     guard('sess-new', 'Bash', { command: 'git status' }) === 'ALLOW' && guard('sess-new', 'Edit', { file_path: 'x' }) === 'ALLOW' &&
     guard('sess-operator', 'Bash', { command: 'git status' }) === 'ALLOW')
   check('guard: merging is still refused for the holder', /operator's action/.test(guard('sess-new', 'Bash', { command: 'gh pr merge 7' })))
+  // #87: the executor runs the push-time checks with `git push --dry-run` before the gate.
+  check('guard: git push --dry-run to a feature branch passes; to main it is refused like a push',
+    guard('sess-new', 'Bash', { command: 'git push --dry-run origin 87-cheap-checks' }) === 'ALLOW' &&
+      /operator's action/.test(guard('sess-new', 'Bash', { command: 'git push --dry-run origin main' })))
   const status = (fields) => guard('sess-new', 'Bash', { command: `gh api -X POST repos/o/r/statuses/abc123 ${fields}` })
   check('guard: a commit status other than pending is refused (success, failure, error, quoted, no gap, no state, --input)',
     ['-f state=success -f context=local-ci', '-f state=failure', '-f state=error', "-f 'state=success'", '-fstate=success', '-F state=success',

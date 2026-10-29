@@ -38,8 +38,9 @@ bare start that ran before the intended command) is then seen at once.
    not, stop and say so (the project owner adds it; `/agent-loop:setup` prints the template).
    Read the whole file: the rest of it is the project's conventions, and you follow them.
 2. From the block take: `repo` (owner/repo), `in-progress-label` (default `in-progress`),
-   `blocked-label` (default `is-blocked`), `quality-gates` (the command that must pass before a
-   PR), `gate` (optional: the command that stands in for CI on a PR that has none; see
+   `blocked-label` (default `is-blocked`), `pre-gate` (optional: a check that runs in seconds,
+   before the gate; [reference/implement.md](reference/implement.md) §3), `quality-gates` (the
+   command that must pass before a PR), `gate` (optional: the command that stands in for CI on a PR that has none; see
    [reference/implement.md](reference/implement.md) §3), `qa-gate` (`on` or `off`, default
    `off`), `needs-operator-label` (default `needs-operator`), and the author allowlist
    (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).

@@ -100,7 +100,9 @@ An adapter is valid if:
    local runner posts as the same login); adapters enforce both structurally where the tool allows
 7. Executor prompt includes the pre-PR self-check: each criterion mapped to a test CI runs, or
    given the exact steps the operator runs by hand. A hand check never blocks an approval; the
-   operator confirms by a comment or by merging
+   operator confirms by a comment or by merging. Before every push it runs the cheap checks
+   first: the block's `pre-gate`, then the push-time checks without pushing (`git push --dry-run`),
+   then `quality-gates` and the gate, then the push
 8. Prompts give shell commands as single plain commands (no `$(…)`, `;`, pipes) so permission
    allowlists can match them
 

@@ -154,7 +154,8 @@ wake re-schedules in 300 seconds instead of 1800.
 Skills declare `allowed-tools` for `gh`, the plugin scripts and (reviewer) read-only `git`; that
 grant covers the invoking turn. Unattended wakeups rely on the rules `setup-project.sh` writes to
 `.claude/settings.local.json`, which include the block's `gate` command (`Bash(<gate>)` and
-`Bash(<gate> *)`) for the executor and the reviewer, so re-run setup after adding `gate`. Every
+`Bash(<gate> *)`) for the executor and the reviewer, and its `pre-gate` command the same way for
+the executor, so re-run setup after adding `gate` or `pre-gate`. Every
 loop role also gets `Bash(git grep *)` and `Bash(git ls-files *)`: the skills search and list
 files with those where a session has no Grep and Glob tools. Skill text gives Bash as one plain command per call — `$(…)`, `;`
 and pipes are not statically matchable and would prompt every cycle. `find` is not
