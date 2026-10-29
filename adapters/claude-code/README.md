@@ -126,7 +126,9 @@ A working directory clears the check, but on its own it would make the inbox wri
 inbox the session's environment can't write is what keeps PR code from writing direction to its
 own reviewer. The sandbox's `denyWrite` takes that back for every process the session starts (the
 gate, probes, PR code), enforced by the OS; the `Edit` deny takes it back for Claude's own file
-tools.
+tools. A `Read(…)` allow rule does not clear the check for a path passed to a script. Commands
+that name no folder (the start recording the pair, later calls taking no path) were not chosen:
+they pass only because the check can't see the path, and the start still prompts.
 
 **The sandbox is required for a read-only inbox.** `denyWrite` acts only with the sandbox on
 (`"sandbox": { "enabled": true, … }`; it is off by default). With it off, the inbox is protected
@@ -147,12 +149,17 @@ sandbox-on run on macOS (Claude Code 2.1) showed:
   above). Not chosen: the state folder in `sandbox.filesystem.allowWrite`, which would let PR code
   rewrite the inbox's record of what was reported, hiding a message, or another script's state.
 - An exempt command runs outside the sandbox and can write anywhere, the inbox included:
-  `gh repo clone … <inbox>/x` did, under `"gh *"`. PR code can't run an exempt command (a gate's
-  `gh` is its own child, so it stays sandboxed); only the session can, through its own Bash calls,
-  which the loop's rules keep to the forms the skills give. `git -C <inbox> …` does not match a
-  `git fetch *` exemption, and failed. A `Read(…)` allow rule does not clear the check for a path passed to a script. Commands
-that name no folder (the start recording the pair, later calls taking no path) were not chosen:
-they pass only because the check can't see the path, and the start still prompts.
+  `gh repo clone … <inbox>/x` did, under `"gh *"`. A command that a gate or PR code starts is
+  its own child and stays sandboxed, even when it matches an exemption (the child `inbox.mjs`
+  above). `git -C <inbox> …` does not match a `git fetch *` exemption, and failed.
+
+**Not tested: git hooks and config in the clone.** An exempt git command runs what the clone's
+`.git` tells it to: a hook in `.git/hooks` (`post-merge` on `git pull`, `pre-push` on `git push`)
+or a program set in `.git/config` (`core.fsmonitor`, say). If PR code can write there, an exempt
+`git pull`, `git push` or `pull.mjs` later runs what it planted outside the sandbox, and that can
+write into the inbox. Whether a sandboxed process can write `<clone>/.git/hooks` and
+`<clone>/.git/config` was not part of the run above, so treat the inbox as writable by PR code
+until it has been shown otherwise.
 
 The fallback fires only if no waiter woke the session; a new `ScheduleWakeup` replaces the
 pending one, so it never stacks. "stop" ends the waiter with `TaskStop` (which wakes nothing) and
@@ -224,5 +231,6 @@ doesn't depend on the model.
   above), every mailbox command prompts, and every cycle of a loop started with `--inbox` stalls
   until someone approves it. The inbox is read-only only with the sandbox on; with it off, any
   command, PR code included, can write into it. Sandboxed, `scripts/inbox.mjs` must be exempt by
-  name, or its record write fails. Seen on macOS only; the Linux sandbox is a different
+  name, or its record write fails. Hooks or config that PR code plants in the clone's `.git` may
+  run under an exempt git command, outside the sandbox: untested. Seen on macOS only; the Linux sandbox is a different
   implementation and has not been run.
