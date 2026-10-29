@@ -2061,6 +2061,28 @@ const putMessage = (dir, id, extra, meta) => {
   const types = /^  pull_request:\n    types: \[(.*)\]$/m.exec(ci)?.[1].split(',').map((s) => s.trim()) ?? []
   check('ci: a pull request reruns on edited (a change of base branch), and on the default types',
     ['opened', 'synchronize', 'reopened', 'edited'].every((t) => types.includes(t)), types.join())
+  // #84: a title or body edit right after a push cancelled the push's run, whose always() job then
+  // reported contract-tests failed on a passing head. An edit that keeps the base runs in a group
+  // of its own (per run, so a second edit can't cancel the first); a base change still shares the
+  // pull request's group and replaces the stale run.
+  const group = /^concurrency:\n {2}group: (.*)\n {2}cancel-in-progress: (.*)$/m.exec(ci)
+  check('ci: one workflow-level concurrency group, cancel-in-progress: true', group !== null && group[2] === 'true' && ci.match(/^\s*concurrency:/gm).length === 1, group?.[0])
+  // The expression read as JavaScript (its &&, || and ! return values the same way; a missing
+  // property is null there, so every . is ?.), per event.
+  const expr = /^ci-\$\{\{ (.*) \}\}$/.exec(group?.[1] ?? '')?.[1] ?? 'null'
+  const js = expr.replace(/==/g, '===').replace(/\.(?=[A-Za-z_])/g, '?.')
+  const groupFor = (event) => `ci-${new Function('github', 'format', `return ${js}`)(event, (f, ...a) => f.replace(/\{(\d+)\}/g, (_, i) => a[i]))}`
+  const pr = (action, changes) => ({ event: { action, changes, pull_request: { number: 84 } }, sha: 'h1', run_id: 9001 })
+  const groups = {
+    push: groupFor({ event: { before: 'h0' }, sha: 'h1', run_id: 9001 }),
+    synchronize: groupFor(pr('synchronize')),
+    base: groupFor(pr('edited', { base: { ref: { from: 'dev' }, sha: { from: 'b0' } } })),
+    title: groupFor(pr('edited', { title: { from: 'old' } })),
+    body: groupFor({ ...pr('edited', { body: { from: 'old' } }), run_id: 9002 }),
+  }
+  check('ci: the group per event: push → ci-<sha>; a new head and a base change → ci-<pr>; a title or body edit → ci-<pr>-edit-<run id>, one per run',
+    groups.push === 'ci-h1' && groups.synchronize === 'ci-84' && groups.base === 'ci-84' && groups.title === 'ci-84-edit-9001' && groups.body === 'ci-84-edit-9002',
+    JSON.stringify(groups))
   const checkouts = [...ci.matchAll(/uses: actions\/checkout@\S+.*\n((?: {8}.*\n)*)/g)].map((m) => m[1])
   check('ci: every checkout is the pull request\'s head commit (or the pushed one), never the merge commit',
     checkouts.length === 2 && checkouts.every((w) => /^\s+ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}$/m.test(w)), checkouts.join('---\n'))
