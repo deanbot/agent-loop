@@ -15,7 +15,7 @@
  * produce SHA changes; reviewer findings are irrelevant to A.C. evaluation).
  *
  * Usage:
- *   node scripts/pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--idle-after <n>] [--wait [secs] [--max secs]]
+ *   node scripts/pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]
  *
  * Output — one line, then exits (with --wait: the first line that is news, see lib/wait.mjs):
  *   NONE <timestamp>         no PRs changed since last run
@@ -36,7 +36,7 @@ import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
-const USAGE = 'pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--idle-after <n>] [--wait [secs] [--max secs]]'
+const USAGE = 'pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)

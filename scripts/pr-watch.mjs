@@ -14,7 +14,7 @@
  *
  * Usage:
  *   node scripts/pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>]]
- *                             [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs]]
+ *                             [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]
  *   node scripts/pr-watch.mjs --repo owner/repo --reviewer <clone> --check-claim <n> [--stale-after <secs>]
  *
  * Several reviewers (--reviewer <clone>): each reviewer claims a PR with a "[reviewer] Reviewing
@@ -61,7 +61,7 @@ import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
 const USAGE =
-  'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs]]'
+  'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -221,7 +221,7 @@ function pass({ gh, save }) {
       } else {
         // The reviewer re-reads the thread and the inline threads immediately before it posts, so an
         // [executor] comment older than its newest post was already read, even when it landed after
-        // this script's last run (the executor's "Pushed fix" note, loom#72). Operator and [qa]
+        // this script's last run (the executor's "Pushed fix" note). Operator and [qa]
         // comments stay news whenever unseen: one landing between that re-read and the post would
         // otherwise be lost. Timeline ids are one sequence; inline comments have their own, so they
         // compare by time (a tie, or no timestamp, counts as news).

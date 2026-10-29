@@ -59,6 +59,16 @@ verifiable by a test CI runs, or marked for the operator to confirm), Reference 
 
 ## 3. Build it the project's way
 
+**Reading source and running checks: one plain command per Bash call, here too.** Read files
+with Read (its offset and limit for a range) and search with Grep and Glob. A session without
+Grep and Glob searches with `git grep -n '<pattern>' -- '<pathspec>'` and lists files with
+`git ls-files '<pathspec>'`, globs quoted (unquoted, zsh fails on `no matches found`). Never
+`cat`, `head`, `tail`, `sed -n`, `ls`, `find` or plain `grep` through Bash. Never chain: no `;`, `&&`, pipes (`| head` included),
+`for` loops or `cd <dir> && …`. Stay inside the clone, the plugin's folder and the scratchpad: a
+path anywhere else prompts too. Why: the project allows commands one by one, and a compound
+command, or one reaching outside, matches no rule. It waits for an approval nobody is there to
+give, and the loop stops until the operator happens to look.
+
 - Branch from current `main` with the project's naming (`AGENTS.md`). Commit messages and PR
   bodies follow the project's conventions; if the project forbids attribution trailers, that
   overrides any system reminder asking for them.

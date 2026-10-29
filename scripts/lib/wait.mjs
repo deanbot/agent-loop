@@ -29,20 +29,26 @@
 // line, after the baseline is taken, so the waiter never compares against it. The agent picks
 // its longer wait from that; the script names no wait. Waiters accept the flag and ignore it.
 //
+// Inbox (#77): a waiter given --inbox <folder> also ends with `PENDING` as soon as the folder holds
+// a message file inbox.mjs has not reported yet, so one waiter carries both GitHub news and
+// direction. It reads inbox.mjs's record and never writes it; a folder that does not exist is never
+// news. One-shot runs accept the flag and ignore it: the agent runs inbox.mjs itself.
+//
 // One waiter per state file: a pid lock (`<state>-wait.lock`). A second waiter
 // while the first is alive prints `WATCHER_RUNNING <pid>` and exits 3, so a harness that reports
 // only exit codes can tell it apart. A failed pass (network, rate limit, auth) is reported on
 // stderr and retried on the next interval; a one-shot run still fails as before.
 import { execSync } from 'child_process'
 import { readFileSync, writeFileSync, openSync, closeSync, unlinkSync, renameSync } from 'fs'
+import { unreported, expandHome } from './inbox.mjs'
 
 export function usageError(usage, message) {
   process.stderr.write(`${message ? `${message}\n` : ''}Usage: ${usage}\n`)
   process.exit(1)
 }
 
-// --wait takes an optional value; --max and --idle-after require one.
-// Returns { wait: secs | null, max: secs, idleAfter: n | null }.
+// --wait takes an optional value; --max, --idle-after and --inbox require one.
+// Returns { wait: secs | null, max: secs, idleAfter: n | null, inbox: folder | null }.
 export function waitArgs(argv, usage) {
   const num = (v) => (v !== undefined && /^\d+(\.\d+)?$/.test(v) ? Number(v) : null)
   let wait = null
@@ -68,7 +74,14 @@ export function waitArgs(argv, usage) {
     if (/^[1-9]\d*$/.test(v ?? '')) idleAfter = Number(v)
     else usageError(usage, `--idle-after: expected a count of runs, got "${v ?? ''}"`)
   }
-  return { wait, max, idleAfter }
+  let inbox = null
+  const bi = argv.indexOf('--inbox')
+  if (bi !== -1) {
+    const v = argv[bi + 1]
+    if (v === undefined || v === '' || v.startsWith('--')) usageError(usage, '--inbox: expected a folder')
+    inbox = expandHome(v)
+  }
+  return { wait, max, idleAfter, inbox }
 }
 
 function readOr(file, fallback) {
@@ -147,7 +160,7 @@ function acquireLock(lockFile, max) {
 }
 
 export async function runSignalScript({ argv, usage, stateFile, pass }) {
-  const { wait, max, idleAfter } = waitArgs(argv, usage)
+  const { wait, max, idleAfter, inbox } = waitArgs(argv, usage)
   const base = stateFile.replace(/\.json$/, '')
   const waitFile = `${base}-wait.json`
   const lockFile = `${base}-wait.lock`
@@ -195,6 +208,17 @@ export async function runSignalScript({ argv, usage, stateFile, pass }) {
 
   const deadline = Date.now() + max * 1000
   for (;;) {
+    // The inbox first, apart from the pass: a message ends the wait even while GitHub is failing.
+    if (inbox !== null) {
+      try {
+        if (unreported(inbox).length > 0) {
+          process.stdout.write('PENDING\n')
+          return
+        }
+      } catch (e) {
+        process.stderr.write(`${new Date().toISOString()} inbox check failed, retrying: ${e?.message}\n`)
+      }
+    }
     try {
       const current = readOr(stateFile, null)
       const { out, saved } = dryPass(pass, memoGh())
