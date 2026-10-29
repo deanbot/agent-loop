@@ -1033,11 +1033,12 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   check('audit: a prose-only PR gated in full → ci-prose finding, its run\'s minutes, caught 0, narrow with the narrower rule',
     f('ci-prose:ci')?.cost === 11 && f('ci-prose:ci').caught === 0 && f('ci-prose:ci').recommendation === 'narrow' && /prose/.test(f('ci-prose:ci').rule) &&
       JSON.stringify(f('ci-prose:ci').prs) === '[10]', brief + (r.error ?? ''))
-  check('audit: a cancelled run and a cancelled first attempt → cancelled cost 3 min over 2 runs, caught 0; re-runs cost only the later attempts (10 + 5 min), never the cancelled one',
-    f('cancelled:ci')?.cost === 3 && f('cancelled:ci').runs === 2 && f('reruns:ci')?.cost === 15 && f('reruns:ci').runs === 2, brief)
+  check('audit: a cancelled run and a cancelled first attempt → cancelled cost 3 min over 2 runs, caught 0; the attempt after the cancel is no re-run cost (re-runs: 5 min, one attempt)',
+    f('cancelled:ci')?.cost === 3 && f('cancelled:ci').runs === 2 && f('reruns:ci')?.cost === 5 && f('reruns:ci').runs === 1, brief)
   check('audit: a re-run that passed after a failed attempt (a flake) → caught 1, keep', f('reruns:ci')?.caught === 1 && f('reruns:ci').recommendation === 'keep', brief)
-  check('audit: claims → the in-progress label\'s time, and a race settled by two claim comments within 10 minutes → caught 1, keep',
-    f('claims')?.cost === 1440 && f('claims').caught === 1 && f('claims').recommendation === 'keep' && JSON.stringify(f('claims').prs) === '[22]', brief)
+  check('audit: claim and release times are measured with no finding: the time held, the claim comments and a race settled within 10 minutes',
+    !(r.findings ?? []).some((x) => x.id === 'claims') && JSON.stringify(r.claims) === JSON.stringify({ items: [22], minutes: 1440, claims: 2, races: 1 }) &&
+      (r.notes ?? []).some((n) => n.startsWith('Claims: 1 item (#22) held `in-progress` for 1440 min')), JSON.stringify([r.claims, r.notes]))
   check('audit: an issue left blocked for a day with no operator comment (a stranger\'s, a role-prefixed and a [dev] one by the owner don\'t count) → caught 0, narrow',
     f('label:is-blocked')?.caught === 0 && f('label:is-blocked').recommendation === 'narrow', brief)
   check('audit: label time is clipped to the period: a span before it adds nothing, one crossing its end is cut there (1440 + 720 min)',
@@ -1058,7 +1059,7 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   check('audit: a finding with a zero cost (a run that took no time) is not posted: both numbers or nothing',
     !(r.findings ?? []).some((x) => x.id.endsWith(':docs')), brief)
   check('audit: findings come in cost order', JSON.stringify((r.findings ?? []).map((x) => x.id)) ===
-    JSON.stringify(['label:is-blocked', 'claims', 'label:needs-operator', 'review-rounds', 'reruns:ci', 'ci-prose:ci', 'cancelled:ci']), brief)
+    JSON.stringify(['label:is-blocked', 'label:needs-operator', 'review-rounds', 'ci-prose:ci', 'reruns:ci', 'cancelled:ci']), brief)
   // #103 review: a re-run of a real failure caught nothing (the first attempt found it); one claim
   // per item settles no race.
   const rerunFx = (runs, attempts, extra = {}) => ({
@@ -1075,7 +1076,14 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   check('audit: a deterministic failure re-run twice → cost of attempts 2 and 3 (20 min), caught 0, narrow with the never-again rule',
     detF('reruns:ci')?.cost === 20 && detF('reruns:ci').runs === 2 && detF('reruns:ci').caught === 0 && detF('reruns:ci').recommendation === 'narrow' &&
       /never again after it fails a second time/.test(detF('reruns:ci').rule), det)
-  check('audit: one claim per item → claims caught 0, narrow', detF('claims')?.cost === 120 && detF('claims').caught === 0 && detF('claims').recommendation === 'narrow', det)
+  const detJ = JSON.parse(det.startsWith('{') ? det : '{}')
+  check('audit: a single long claim gives no claims finding; it is measured (120 min held, one claim, no race)',
+    !detF('claims') && JSON.stringify(detJ.claims) === JSON.stringify({ items: [33], minutes: 120, claims: 1, races: 0 }), det)
+  const resumed = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
+    [wfRun(3301, 'd31', '04T10:02:00', '04T10:12:00', { run_attempt: 2 })], { '3301/1': wfRun(3301, 'd31', '04T10:00:00', '04T10:02:00', { conclusion: 'cancelled' }) }))
+  const resumedJ = JSON.parse(resumed.startsWith('{') ? resumed : '{}')
+  check('audit: a cancelled attempt re-run to a pass → no reruns finding (the head needed a result); cancelled:ci costs the 2 cancelled minutes',
+    !(resumedJ.findings ?? []).some((x) => x.id === 'reruns:ci') && (resumedJ.findings ?? []).find((x) => x.id === 'cancelled:ci')?.cost === 2, resumed)
   const flake = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
     [wfRun(3201, 'd31', '04T10:10:00', '04T10:20:00', { run_attempt: 2 })], { '3201/1': wfRun(3201, 'd31', '04T10:00:00', '04T10:10:00', { conclusion: 'failure' }) }))
   const flakeF = (JSON.parse(flake.startsWith('{') ? flake : '{}').findings ?? []).find((x) => x.id === 'reruns:ci')

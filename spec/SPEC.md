@@ -737,17 +737,19 @@ A finding without both numbers is not posted.
 | Control (id) | Cost | Caught |
 |---|---|---|
 | `ci-prose:<workflow>` | minutes of that workflow's runs (latest attempts) on PRs that changed only prose, when their median is at least half that of its runs on code PRs; otherwise the workflow already skips the work there, and with no code run to compare there is no finding | runs that failed there |
-| `reruns:<workflow>` | minutes of attempts 2..n of re-run runs, what re-running added (a cancelled attempt is counted under `cancelled` only) | re-runs that passed right after a failed attempt: a flake shown, the head unblocked. One that failed again caught nothing the first attempt hadn't |
+| `reruns:<workflow>` | minutes of attempts 2..n of re-run runs, what re-running added. A cancelled attempt is counted under `cancelled` only, and the attempt after it isn't a re-run cost: it is how the head gets a result | re-runs that passed right after a failed attempt: a flake shown, the head unblocked. One that failed again caught nothing the first attempt hadn't |
 | `cancelled:<workflow>` | minutes of runs and attempts cancelled before they finished | nothing: a cancelled run reports no result |
 | `label:<name>` | minutes the label was on, within the period | spans that ended in a merge or a close, or got a comment with no leading `[…]` from the owner or a `trusted-authors` login |
 | `review-rounds` | minutes from each commit to the next `[reviewer]` post | rounds followed by a new commit before the next round |
-| `claims` | minutes items carried `in-progress-label` (claim to release or close), within the period | races the claim comment settled: two `[executor] Claimed by` comments on one item within 10 minutes |
-
 `<workflow>` is the workflow file's name without its extension. The recommendation is **keep**
 (it caught something) or **narrow**, with the narrower rule. A control listed in `audit-floor` gets a cost-only line: what to do about it is
 the operator's call. Findings come in cost order, all in minutes. An `audit-floor` id that matched
-no control in the period is listed, so a typo is never silent. Idle wake-ups are reported but give
-no finding: what a wake-up catches isn't recorded.
+no control in the period is listed, so a typo is never silent. Two measures are reported with no
+finding:
+- **Claim and release times:** the items that carried `in-progress-label`, the minutes they held it,
+  the claim comments, and the races they settled (two claims on one item within 10 minutes). The
+  time held is the time the work took, which no claim rule would save.
+- **Idle wake-ups:** what a wake-up catches isn't recorded.
 
 **The report.** One per run: a header with the period, the exact command that reproduces the
 numbers and the cost unit, then the findings. With `audit-report: issue` (the default), it is a

@@ -48,7 +48,8 @@ Three layers. Boundaries are strict.
 - `scripts/audit.mjs` — the auditor's numbers, read-only. `--repo owner/repo --since <date|Nd>
   [--until <date>] [--floor id,id] [--operators l,l] [--labels l,l] [--format md|json]`. For each
   control the loop ran over the period (a workflow on prose-only PRs, re-runs, cancelled runs, a
-  label, review rounds, claims), what it cost and what it caught, and keep or narrow; prints a
+  label, review rounds), what it cost and what it caught, and keep or narrow, plus claim and
+  release times as measured; prints a
   report and posts nothing (spec: "Auditor"). Reads comments for their time, author and prefix,
   never their text. `pick-next.mjs` never lists an issue labelled `auditor-report`.
 - `scripts/inbox.mjs` — a folder of message files as a signal source. `--dir <folder>` (no default:

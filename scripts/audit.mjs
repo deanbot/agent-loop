@@ -17,12 +17,12 @@
  * Controls (ids; --floor takes these, exactly):
  *   ci-prose:<workflow>    runs of a workflow on PRs that changed only prose, when their median is at
  *                          least half that of its runs on code PRs (else it already skips the work)
- *   reruns:<workflow>      attempts 2..n of a run that was re-run
+ *   reruns:<workflow>      attempts 2..n of a run that was re-run (not one after a cancelled attempt)
  *   cancelled:<workflow>   runs cancelled before they finished (a cancelled attempt is counted here only)
  *   label:<name>           time a PR or issue carried the label (--labels; default needs-operator,is-blocked)
  *   review-rounds          [reviewer] posts on PRs, and the time from a commit to the next one
- *   claims                 time items carried the in-progress label (claim to release or close); caught:
- *                          races the claim comment settled (two claims on one item within 10 minutes)
+ * Measured with no finding: claim and release times (the in-progress label's spans, the claim
+ * comments, races settled), and each waiter's idle streak.
  * <workflow> is the workflow file's base name without its extension (ci for .github/workflows/ci.yml).
  *
  * Comments are read for their time, their prefix and their author's login only, never for their text.
@@ -203,15 +203,21 @@ function findings({ prs, attempts, spans }) {
     // Re-runs: what re-running added is attempts 2..n (a cancelled one is counted under cancelled
     // only). A re-run caught something when it passed right after a failed attempt: it showed a
     // flake and unblocked the head. One that failed again caught nothing the first attempt hadn't.
-    const again = list.filter((a) => (a.run_attempt ?? 1) > 1 && a.conclusion !== 'cancelled')
-    if (again.length) {
-      const byRun = new Map()
-      for (const a of list) (byRun.get(a.id) ?? byRun.set(a.id, []).get(a.id)).push(a)
-      let flakes = 0
-      for (const atts of byRun.values()) {
-        atts.sort((x, y) => (x.run_attempt ?? 1) - (y.run_attempt ?? 1))
-        for (let i = 1; i < atts.length; i++) if (atts[i].conclusion === 'success' && atts[i - 1].conclusion === 'failure') flakes++
+    // An attempt after a cancelled one is how the head gets a result at all: not a re-run's cost
+    // (the waste is the cancelled minutes, under cancelled).
+    const byRun = new Map()
+    for (const a of list) (byRun.get(a.id) ?? byRun.set(a.id, []).get(a.id)).push(a)
+    const again = []
+    let flakes = 0
+    for (const atts of byRun.values()) {
+      atts.sort((x, y) => (x.run_attempt ?? 1) - (y.run_attempt ?? 1))
+      for (let i = 1; i < atts.length; i++) {
+        if (atts[i].conclusion === 'cancelled' || atts[i - 1].conclusion === 'cancelled') continue
+        again.push(atts[i])
+        if (atts[i].conclusion === 'success' && atts[i - 1].conclusion === 'failure') flakes++
       }
+    }
+    if (again.length) {
       add({ id: `reruns:${wf}`, control: `re-runs of \`${wf}\``, cost: sum(again), runs: again.length,
         prs: [...new Set(again.map((a) => a.pr))], caught: flakes,
         rule: `re-run \`${wf}\` only when the failure looks like a flake, and never again after it fails a second time` })
@@ -238,19 +244,17 @@ function findings({ prs, attempts, spans }) {
       rule: `take \`${name}\` off, and tell the operator once, when nothing has answered it within a day` })
   }
 
-  // Claims: time an item carried the in-progress label, claim to release or close. The claim
-  // comment exists to settle a race between executors: it caught one when two claims landed on
-  // the same item within 10 minutes (the protocol's window), inside the period.
+  // Claims: measured, no finding. The time an item carries the in-progress label is the time it
+  // is being built, which no rule about claiming would save; what the claim comment does is settle
+  // a race between executors (two claims on one item within 10 minutes, the protocol's window).
   const held = spans.filter((s) => s.label === inProgress)
   if (held.length) {
     const items = [...new Map(held.map((s) => [s.item.number, s.item])).values()]
-    const races = items.filter((it) => {
-      const times = (it.comments ?? []).filter((c) => c.claim).map((c) => Date.parse(c.at)).filter((t) => t >= since && t <= until).sort((a, b) => a - b)
-      return times.some((t, i) => i > 0 && t - times[i - 1] <= 600000)
-    }).length
-    add({ id: 'claims', control: `claims (the \`${inProgress}\` label and the claim comment)`, cost: held.reduce((n, s) => n + minutes(s.from, s.to), 0),
-      spans: held.length, prs: items.map((it) => it.number), caught: races,
-      rule: 'with a single executor, claim with the label alone: the claim comment only settles races between several' })
+    const times = items.map((it) => (it.comments ?? []).filter((c) => c.claim).map((c) => Date.parse(c.at)).filter((t) => t >= since && t <= until).sort((a, b) => a - b))
+    const races = times.filter((ts) => ts.some((t, i) => i > 0 && t - ts[i - 1] <= 600000)).length
+    const minutesHeld = round1(held.reduce((n, s) => n + minutes(s.from, s.to), 0))
+    claimStats = { items: items.map((it) => it.number), minutes: minutesHeld, claims: times.reduce((n, ts) => n + ts.length, 0), races }
+    notes.push(`Claims: ${items.length} item${items.length === 1 ? '' : 's'} (${items.map((n) => `#${n.number}`).join(', ')}) held \`${inProgress}\` for ${minutesHeld} min in all, from claim to release or close; ${claimStats.claims} claim comment${claimStats.claims === 1 ? '' : 's'}, ${races} race${races === 1 ? '' : 's'} settled. No finding: the time held is the time the work took, which no claim rule would save.`)
   }
 
   // Review rounds: a [reviewer] post; it caught something when a commit followed it before the next post.
@@ -294,6 +298,7 @@ function median(list) {
   return m.length % 2 ? m[(m.length - 1) / 2] : (m[m.length / 2 - 1] + m[m.length / 2]) / 2
 }
 const notes = []
+let claimStats = null
 
 // Wake-ups that found nothing: each waiter's current idle streak, from this machine's state folder.
 function idleStreaks() {
@@ -333,7 +338,7 @@ const command = ['node scripts/audit.mjs', '--repo', repo, '--since', iso(since)
   ...(arg('--in-progress-label') ? ['--in-progress-label', inProgress] : [])].join(' ')
 
 if (format === 'json') {
-  process.stdout.write(JSON.stringify({ period: { since: iso(since), until: iso(until) }, args: command, prs: data.prs.length, findings: result, unmatchedFloor, notes, idle }, null, 2) + '\n')
+  process.stdout.write(JSON.stringify({ period: { since: iso(since), until: iso(until) }, args: command, prs: data.prs.length, findings: result, unmatchedFloor, notes, claims: claimStats, idle }, null, 2) + '\n')
   process.exit(0)
 }
 
@@ -343,7 +348,7 @@ const lines = [
   `Period: PRs closed from ${iso(since)} to ${iso(until)} (${data.prs.length}), with every run of their commits; label time on PRs and issues updated in it, clipped to it.`,
   `Reproduce: \`${command}\``,
   'Cost is in minutes: a run\'s wall-clock time from start to its last update, a label\'s time on, a review round\'s time from a commit to the next review. Findings are in cost order.',
-  'Caught: failures a run found, re-runs that passed after a failed attempt (a flake), label spans that ended in a merge or close or got an operator\'s comment, review rounds followed by a new commit, claim races settled.',
+  'Caught: failures a run found, re-runs that passed after a failed attempt (a flake), label spans that ended in a merge or close or got an operator\'s comment, review rounds followed by a new commit.',
   '',
   '## Findings',
   '',
