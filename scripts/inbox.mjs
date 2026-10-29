@@ -36,7 +36,7 @@
  *
  * Checking a mailbox for the clone in the working directory prints `MAILBOX_OK`, or
  * `MAILBOX_REFUSED: <reason>` when either folder is relative or inside the clone, one is inside
- * the other, or either path is something other than a folder. After `MAILBOX_OK`, an inbox that
+ * the other, or either path is something other than a folder or lies under a file. After `MAILBOX_OK`, an inbox that
  * does not exist yet adds
  *   MAILBOX_WARN: the inbox does not exist yet; nothing arrives until it is created
  * (a missing outbox does not: sending creates it). Exit 0 either way; it writes nothing.

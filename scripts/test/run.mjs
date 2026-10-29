@@ -1597,7 +1597,9 @@ const putMessage = (dir, id, extra, meta) => {
     ['an existing inbox given home-relative', [path.join('~', 'made', 'in'), path.join(made, 'out')], OK],
     ['a symlinked inbox whose target exists', [path.join(made, 'link-in'), path.join(made, 'out')], OK],
     ['a dangling symlink for the inbox', [path.join(made, 'dangling'), path.join(made, 'out')], WARN],
-    ['an inbox under a file (it can never be made)', [path.join(made, 'file', 'in'), path.join(made, 'out')], WARN],
+    // #97 review: under a file, the folder can never be made, and `--dir` would fail every cycle.
+    ['an inbox under a file', [path.join(made, 'file', 'in'), path.join(made, 'out')], 'MAILBOX_REFUSED: the inbox is under a file, so it can never be created\n'],
+    ['an outbox under a file', [path.join(made, 'in'), path.join(made, 'file', 'out')], 'MAILBOX_REFUSED: the outbox is under a file, so it can never be created\n'],
     ['a file at the inbox path', [path.join(made, 'file'), path.join(made, 'out')], 'MAILBOX_REFUSED: the inbox is not a folder\n'],
     ['a symlink to a file at the inbox path', [path.join(made, 'link-file'), path.join(made, 'out')], 'MAILBOX_REFUSED: the inbox is not a folder\n'],
     ['a file at the outbox path', [path.join(made, 'in'), path.join(made, 'file')], 'MAILBOX_REFUSED: the outbox is not a folder\n'],

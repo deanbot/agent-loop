@@ -119,25 +119,30 @@ const within = (p, folder) => {
 // What is wrong with a mailbox (an inbox read as direction, an outbox for replies) for the clone at
 // `clone`, or null when nothing is (spec: "Inbox folder", Trust). PR code runs in the clone, so
 // neither folder may be in it; and each is its own folder, so a mount carries one direction. A path
-// that exists as something other than a folder (a symlink is followed) can never hold messages.
+// that exists as something other than a folder (a symlink is followed), or lies under a file, can
+// never hold messages.
 export function mailboxProblem(inbox, outbox, clone) {
   if (!path.isAbsolute(inbox) || !path.isAbsolute(outbox)) return 'both folders must be absolute or start with ~'
   const [i, o, c] = [realish(inbox), realish(outbox), realish(clone)]
   if (within(i, c)) return 'the inbox is inside the clone, where PR code runs'
   if (within(o, c)) return 'the outbox is inside the clone, where PR code runs'
   if (within(i, o) || within(o, i)) return 'the inbox and the outbox must be separate folders, neither inside the other'
-  if (kind(inbox) === 'other') return 'the inbox is not a folder'
-  if (kind(outbox) === 'other') return 'the outbox is not a folder'
+  for (const [name, p] of [['inbox', inbox], ['outbox', outbox]]) {
+    const k = kind(p)
+    if (k === 'other') return `the ${name} is not a folder`
+    if (k === 'blocked') return `the ${name} is under a file, so it can never be created`
+  }
   return null
 }
 
-// 'folder', 'missing' (nothing there yet, a dangling symlink included) or 'other', following symlinks.
-// A path that can't be looked at for another reason counts as a folder: reading it fails loudly.
+// 'folder', 'missing' (nothing there yet, a dangling symlink included), 'blocked' (a file where a
+// parent folder should be: it can never be made) or 'other', following symlinks. A path that can't
+// be looked at for another reason counts as a folder: reading it fails loudly.
 function kind(p) {
   try {
     return statSync(p).isDirectory() ? 'folder' : 'other'
   } catch (e) {
-    return e.code === 'ENOENT' || e.code === 'ENOTDIR' ? 'missing' : 'folder'
+    return e.code === 'ENOENT' ? 'missing' : e.code === 'ENOTDIR' ? 'blocked' : 'folder'
   }
 }
 

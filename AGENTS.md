@@ -53,7 +53,7 @@ Three layers. Boundaries are strict.
   <id> --inbox <inbox> --from … --text …`, which copies the rest from the message) writes one
   atomically and prints `SENT:<messageId>`; `--check --dir <inbox> --outbox <outbox>` prints
   `MAILBOX_OK` (plus `MAILBOX_WARN: …` when the inbox does not exist yet) or `MAILBOX_REFUSED:
-  <reason>` (a path that is not a folder, a folder relative, in the clone, or inside the
+  <reason>` (a path that is not a folder or lies under a file, a folder relative, in the clone, or inside the
   other). The folder logic is `scripts/lib/inbox.mjs` (spec: "Inbox folder").
 - `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a
   waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:

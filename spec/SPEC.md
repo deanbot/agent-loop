@@ -602,7 +602,8 @@ the clone's folder name, so one launch line serves every clone. Each is its own 
 inside the other, so a mount carries exactly one direction. `inbox.mjs --check --dir <inbox>
 --outbox <outbox>`, run in the clone's root, prints `MAILBOX_OK`, or `MAILBOX_REFUSED: <reason>`
 when a folder is relative, inside the clone (after following symlinks) or inside the other, or
-when either path exists as something other than a folder. An inbox that does not exist yet is
+when either path exists as something other than a folder or lies under a file (it could never be
+created). An inbox that does not exist yet is
 accepted, since a mount may appear after the start, but `MAILBOX_OK` is followed by
 `MAILBOX_WARN: the inbox does not exist yet; nothing arrives until it is created`, and the
 adapter warns once: a mistyped folder would otherwise read as an empty inbox for good. A missing
@@ -823,4 +824,4 @@ the `rules` key and `pull.mjs`, a helper like `pick-next.mjs` whose `RULES_CHANG
 format, the loops' `--inbox`/`--outbox` start arguments ("Inbox folder"), and the waiters'
 `--inbox <folder>`. Later in 0.2, additive: `--check`'s `MAILBOX_WARN:` line after `MAILBOX_OK`
 (an adapter that predates it keys on the first line and keeps working) and its refusal of a path
-that is not a folder.
+that is not a folder or lies under a file.
