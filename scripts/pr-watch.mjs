@@ -221,7 +221,7 @@ function pass({ gh, save }) {
       } else {
         // The reviewer re-reads the thread and the inline threads immediately before it posts, so an
         // [executor] comment older than its newest post was already read, even when it landed after
-        // this script's last run (the executor's "Pushed fix" note, loom#72). Operator and [qa]
+        // this script's last run (the executor's "Pushed fix" note). Operator and [qa]
         // comments stay news whenever unseen: one landing between that re-read and the post would
         // otherwise be lost. Timeline ids are one sequence; inline comments have their own, so they
         // compare by time (a tie, or no timestamp, counts as news).

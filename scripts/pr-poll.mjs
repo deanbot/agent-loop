@@ -250,7 +250,7 @@ function pass({ gh, save, dry, mark }) {
   // only post-date a verdict the executor already saw, so it never hides an unaddressed one.
   // A negative verdict stays live until the executor engages (an [executor] comment after it) or its
   // role supersedes it (a newer LGTM or finding; for QA, any newer [qa] post). No commit-date
-  // condition: a push that fixes nothing must not bury a finding (deanbot/loom#91, where the finding
+  // condition: a push that fixes nothing must not bury a finding (#41: a consumer's finding
   // landed before the first poll and a baselines-only commit followed). The commit-date rule stays
   // where it belongs, on LGTM and PASS for MERGE_READY.
   const lastExecutorId = issueComments.filter((c) => /^\[executor\]/.test(c.body ?? '')).at(-1)?.id ?? 0

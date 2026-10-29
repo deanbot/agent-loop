@@ -17,6 +17,6 @@ complexity: intermediate
 
 **Prerequisite:** the project's `## Agent loop` block has `qa-gate: on`; otherwise stop — the project runs without the QA gate and the reviewer does this pass.
 
-Follow the QA prompt in `adapters/generic/qa.md` from the agent-loop repo.
+Follow the QA prompt in `adapters/generic/qa.md` from the agent-loop repo, including its one-plain-command-per-shell-call rule: read files with Kiro's file-read and search tools (if a search tool is missing, `git grep -n '<pattern>' -- '<pathspec>'` and `git ls-files '<pathspec>'`, globs quoted), never chain commands, and stay inside the checkout, or the loop stops on an approval nobody is there to give.
 
 One cycle = one invocation. Between cycles: wait ~60s after `[qa] BLOCKED` or a question, ~300s after `[qa] PASS`, ~120s otherwise.

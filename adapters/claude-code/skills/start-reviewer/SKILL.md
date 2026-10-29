@@ -19,6 +19,8 @@ allowed-tools:
   - Bash(git show *)
   - Bash(git diff *)
   - Bash(git log *)
+  - Bash(git grep *)
+  - Bash(git ls-files *)
 ---
 
 You are the **reviewer** of the agent-loop protocol (spec: `${CLAUDE_PLUGIN_ROOT}/spec/SPEC.md`).
@@ -83,8 +85,9 @@ Rules that hold for the whole session:
 - **No interactive prompts.** A decision you need from the operator is a standalone
   `[reviewer] Question:` comment on the PR (shape under "What you post").
 - **Never `sleep`.** Waiting is a background waiter plus a fallback `ScheduleWakeup` (below).
-- **One plain command per Bash call** in the loop: no `$(…)`, `;` or pipes (they defeat the
-  permission allowlist and prompt every cycle).
+- **One plain command per Bash call**, in the loop and in a review's reads, probes and checks
+  (reference/review.md §3): no `$(…)`, `;` or pipes (they defeat the permission allowlist and
+  prompt, and an unattended loop stops at the prompt).
 - **`gh` and `git fetch` run on their own**, from the clone's root: `gh … --repo <repo>`, never
   `cd <dir> && gh …`. A sandbox exempts these commands by name (in Claude Code,
   `sandbox.excludedCommands`), and a chained command doesn't match, so it runs sandboxed, fails

@@ -116,10 +116,12 @@ const file = '.claude/settings.local.json'
 const common = ['Bash(gh *)', `Bash(node ${cache}/*)`]
 if (pluginRoot && !pluginRoot.startsWith(cache)) common.push(`Bash(node ${pluginRoot.replace(/\/$/, '')}/scripts/*)`)
 const git = (...sub) => sub.map((s) => `Bash(git ${s} *)`)
+// Searching and listing files: the skills' fallback where a session has no Grep and Glob tools.
+const search = git('grep', 'ls-files')
 const byRole = {
-  executor: git('status', 'log', 'diff', 'show', 'fetch', 'pull', 'checkout', 'switch', 'branch', 'add', 'commit', 'push', 'merge', 'rebase', 'stash'),
-  reviewer: git('status', 'log', 'diff', 'show', 'fetch', 'checkout', 'switch', 'branch'),
-  qa: [],
+  executor: [...git('status', 'log', 'diff', 'show', 'fetch', 'pull', 'checkout', 'switch', 'branch', 'add', 'commit', 'push', 'merge', 'rebase', 'stash'), ...search],
+  reviewer: [...git('status', 'log', 'diff', 'show', 'fetch', 'checkout', 'switch', 'branch'), ...search],
+  qa: [...search],
 }
 // The block's `gate` (the command that stands in for CI): the executor runs it before a push and the
 // reviewer on the head before an LGTM, so an unattended loop must not stop on its prompt.
