@@ -1579,10 +1579,28 @@ const putMessage = (dir, id, extra, meta) => {
   mkdirSync(path.join(clone, 'sub'), { recursive: true })
   symlinkSync(path.join(clone, 'sub'), path.join(ctx.home, 'link-into-clone'))
   const mail = path.join(ctx.home, '.agent-loop', 'mail')
+  // #88: an inbox that does not exist yet is accepted (a mount may come later) but warned about,
+  // since a mistyped path reads as an empty inbox forever. Folders that exist live under `made`.
+  const made = path.join(ctx.home, 'made')
+  mkdirSync(path.join(made, 'in'), { recursive: true })
+  writeFileSync(path.join(made, 'file'), 'x\n')
+  symlinkSync(path.join(made, 'in'), path.join(made, 'link-in'))
+  symlinkSync(path.join(made, 'gone'), path.join(made, 'dangling'))
+  symlinkSync(path.join(made, 'file'), path.join(made, 'link-file'))
+  const OK = 'MAILBOX_OK\n'
+  const WARN = 'MAILBOX_OK\nMAILBOX_WARN: the inbox does not exist yet; nothing arrives until it is created\n'
   const cases = [
-    ['two sibling folders outside the clone, not yet made', [path.join(mail, 'in'), path.join(mail, 'out')], 'MAILBOX_OK'],
-    ['home-relative folders outside the clone', [homeRel('mail', 'in'), homeRel('mail', 'out')], 'MAILBOX_OK'],
-    ['a sibling of the clone whose name starts with the clone\'s', [path.join(ctx.home, 'clone-mail', 'in'), path.join(ctx.home, 'clone-mail', 'out')], 'MAILBOX_OK'],
+    ['two sibling folders outside the clone, not yet made', [path.join(mail, 'in'), path.join(mail, 'out')], WARN],
+    ['home-relative folders outside the clone, not yet made', [homeRel('mail', 'in'), homeRel('mail', 'out')], WARN],
+    ['a sibling of the clone whose name starts with the clone\'s, not yet made', [path.join(ctx.home, 'clone-mail', 'in'), path.join(ctx.home, 'clone-mail', 'out')], WARN],
+    ['an existing inbox and a missing outbox', [path.join(made, 'in'), path.join(made, 'out')], OK],
+    ['an existing inbox given home-relative', [path.join('~', 'made', 'in'), path.join(made, 'out')], OK],
+    ['a symlinked inbox whose target exists', [path.join(made, 'link-in'), path.join(made, 'out')], OK],
+    ['a dangling symlink for the inbox', [path.join(made, 'dangling'), path.join(made, 'out')], WARN],
+    ['an inbox under a file (it can never be made)', [path.join(made, 'file', 'in'), path.join(made, 'out')], WARN],
+    ['a file at the inbox path', [path.join(made, 'file'), path.join(made, 'out')], 'MAILBOX_REFUSED: the inbox is not a folder\n'],
+    ['a symlink to a file at the inbox path', [path.join(made, 'link-file'), path.join(made, 'out')], 'MAILBOX_REFUSED: the inbox is not a folder\n'],
+    ['a file at the outbox path', [path.join(made, 'in'), path.join(made, 'file')], 'MAILBOX_REFUSED: the outbox is not a folder\n'],
     ['the inbox in the clone', [path.join(clone, '.agent-loop', 'inbox'), path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox is inside the clone'],
     ['the inbox is the clone', [clone, path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox is inside the clone'],
     ['the outbox in the clone', [path.join(mail, 'in'), path.join(clone, 'out')], 'MAILBOX_REFUSED: the outbox is inside the clone'],
@@ -1594,8 +1612,18 @@ const putMessage = (dir, id, extra, meta) => {
   ]
   for (const [name, [i, o], want] of cases) {
     const r = inbox(ctx, ['--check', '--dir', i, '--outbox', o], clone)
-    check(`inbox --check: ${name} → ${want.split(':')[0]}`, r.code === 0 && r.out.startsWith(want) && r.out.endsWith('\n') && r.out.split('\n').length === 2, JSON.stringify(r))
+    // OK cases are exact; a refusal is one line (never a warning too, though most name missing inboxes).
+    const exact = want.endsWith('\n')
+    const ok = exact ? r.out === want : r.out.startsWith(want) && r.out.endsWith('\n') && r.out.split('\n').length === 2
+    check(`inbox --check: ${name} → ${want.split('\n').filter(Boolean).map((l) => l.split(':')[0]).join(' + ')}`, r.code === 0 && ok, JSON.stringify(r))
   }
+  const skillDir = path.resolve(scripts, '..', 'adapters', 'claude-code', 'skills')
+  const unwarned = ['executor', 'reviewer', 'qa'].filter((role) => {
+    const t = readFileSync(path.join(skillDir, `start-${role}`, 'SKILL.md'), 'utf8').replace(/\n\s*/g, ' ')
+    return !(t.includes('First line `MAILBOX_OK` → you have a mailbox') &&
+      t.includes('A `MAILBOX_WARN` line after it → also print `⚠ Inbox <inbox>: does not exist yet; nothing arrives until it is created.` and keep the mailbox.'))
+  })
+  check('inbox --check: every Claude Code loop keeps the mailbox on a first-line MAILBOX_OK and prints the ⚠ line on MAILBOX_WARN', unwarned.length === 0, unwarned.join('\n'))
   check('inbox --check: … writes nothing (no folder made)', !existsSync(mail) && !existsSync(path.join(clone, '.agent-loop')), String(existsSync(mail)))
   putMessage(path.join(mail, 'in'), 'shown')
   putMessage(path.join(mail, 'in'), 'badrole', { role: 'user' })

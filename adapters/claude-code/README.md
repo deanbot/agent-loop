@@ -85,7 +85,9 @@ instead of a waiter, so a persistent failure cannot spin the session.
 
 **Mailbox.** Started with `--inbox <folder> --outbox <folder>` (`/agent-loop:start-reviewer
 --inbox … --outbox …`, and the same for start-qa and start-executor; spec: "Inbox folder"), a loop
-checks the pair (`inbox.mjs --check`: both outside the clone, neither inside the other) and warns and runs
+checks the pair (`inbox.mjs --check`: both outside the clone, neither inside the other, neither a
+file), warns once with `⚠ Inbox <folder>: does not exist yet; …` when the inbox isn't there yet
+(a mistyped path would read as an empty inbox for good) and keeps the mailbox, and warns and runs
 without one otherwise. Each cycle of the reviewer, QA and the executor's PR loop then runs
 `inbox.mjs --dir <inbox>` before its signal script, reads each new message with `--show`, acts
 on it within the role's rules and replies once into the outbox (`--send --reply-to`, which copies the addressing from the message,

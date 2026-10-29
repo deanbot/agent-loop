@@ -35,8 +35,11 @@
  * the file.
  *
  * Checking a mailbox for the clone in the working directory prints `MAILBOX_OK`, or
- * `MAILBOX_REFUSED: <reason>` when either folder is relative or inside the clone, or one is inside
- * the other. Exit 0 either way; it writes nothing.
+ * `MAILBOX_REFUSED: <reason>` when either folder is relative or inside the clone, one is inside
+ * the other, or either path is something other than a folder. After `MAILBOX_OK`, an inbox that
+ * does not exist yet adds
+ *   MAILBOX_WARN: the inbox does not exist yet; nothing arrives until it is created
+ * (a missing outbox does not: sending creates it). Exit 0 either way; it writes nothing.
  *
  * State persisted in the state folder the other signal scripts use, as inbox-<hash>.json, one per
  * folder (<hash>: the first 16 hex digits of the SHA-256 of the folder's real path). State format:
@@ -46,7 +49,7 @@
 import { mkdirSync } from 'fs'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
-import { listMessages, sendMessage, recordFile, readReported, readMessage, expandHome, mailboxProblem, ROLES } from './lib/inbox.mjs'
+import { listMessages, sendMessage, recordFile, readReported, readMessage, expandHome, mailboxProblem, mailboxWarning, ROLES } from './lib/inbox.mjs'
 
 const USAGE =
   'inbox.mjs --dir <folder> [--wait [secs] [--max secs]] | inbox.mjs --dir <folder> --show <messageId> | inbox.mjs --send --dir <folder> --role ROLE_USER|ROLE_AGENT --from <name> --to <name> --context <contextId> [--task <taskId>] --text <text> | inbox.mjs --send --dir <outbox> --reply-to <messageId> --inbox <inbox> --from <name> --text <text> | inbox.mjs --check --dir <inbox> --outbox <outbox>'
@@ -82,7 +85,8 @@ if (checking) {
   const outbox = arg('--outbox')
   if (outbox === null) usageError(USAGE, '--check needs --outbox')
   const problem = mailboxProblem(expandHome(given), expandHome(outbox), process.cwd())
-  process.stdout.write(problem ? `MAILBOX_REFUSED: ${problem}\n` : 'MAILBOX_OK\n')
+  const warning = problem ? null : mailboxWarning(expandHome(given))
+  process.stdout.write(problem ? `MAILBOX_REFUSED: ${problem}\n` : `MAILBOX_OK\n${warning ? `MAILBOX_WARN: ${warning}\n` : ''}`)
   process.exit(0)
 }
 
