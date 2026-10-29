@@ -8,11 +8,14 @@
  *                          [--floor id,id] [--operators login,login] [--labels l,l] [--format md|json]
  *
  * The period: PRs closed in [since, until]. Their runs are counted whenever they started, so a PR's
- * whole cost is in the period it closed in; issues and PRs with a measured label are those updated
- * in the period. --until defaults to now; `Nd` means N days before --until.
+ * whole cost is in the period it closed in; label time is clipped to the period, on the PRs and
+ * issues updated in it. --until defaults to now (a bare date: the end of that day); `Nd` means N days
+ * before --until. Lists (--floor, --operators, --labels) may be written as a block writes them:
+ * `[a, b]`, quoted, `@login`.
  *
  * Controls (ids; --floor takes these, exactly):
- *   ci-prose:<workflow>    runs of a workflow on PRs that changed only prose
+ *   ci-prose:<workflow>    runs of a workflow on PRs that changed only prose, when their median is at
+ *                          least half that of its runs on code PRs (else it already skips the work)
  *   reruns:<workflow>      earlier attempts of a run that was re-run
  *   cancelled:<workflow>   runs cancelled before they finished (a cancelled attempt is counted here only)
  *   label:<name>           time a PR or issue carried the label (--labels; default needs-operator,is-blocked)
@@ -50,7 +53,8 @@ function arg(name) {
   return v
 }
 
-const list = (v) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+// A list as a block writes it: `a, b`, `[a, b]`, quoted items, `@login` (brackets, quotes and @ dropped).
+const list = (v) => (v ?? '').replace(/^\s*\[|\]\s*$/g, '').split(',').map((s) => s.trim().replace(/^['"]+|['"]+$/g, '').replace(/^@/, '')).filter(Boolean)
 
 const repo = arg('--repo')
 if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) usageError(repo ? `--repo: expected owner/repo, got "${repo}"` : undefined)
@@ -82,9 +86,10 @@ const pages = (p) => (gh('api', '--paginate', '--slurp', p) ?? []).flatMap((page
 const minutes = (a, b) => Math.max(0, (Date.parse(b) - Date.parse(a)) / 60000)
 const round1 = (n) => Math.round(n * 10) / 10
 
-// Prose: Markdown and other text a test can't notice. A PR whose file list hit the API's cap is unknown.
+// Prose: Markdown and other text a test can't notice (in docs/ or anywhere else; docs/app.js is code).
+// A PR whose file list hit the API's cap is never prose.
 const FILE_CAP = 100
-const PROSE = /(\.(md|mdx|markdown|txt|rst|adoc)$|^(LICENSE|NOTICE|AUTHORS|CHANGELOG)(\.|$)|(^|\/)docs?\/)/i
+const PROSE = /(\.(md|mdx|markdown|txt|rst|adoc)$|(^|\/)(LICENSE|NOTICE|AUTHORS|CHANGELOG)(\.(md|txt))?$)/i
 const DEPS = /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.(toml|lock)|go\.(mod|sum)|Gemfile(\.lock)?|requirements[^/]*\.txt|poetry\.lock|Pipfile(\.lock)?|composer\.(json|lock))$/
 const CONFIG = /(^\.github\/|(^|\/)\.[^/]+$|\.(ya?ml|toml|ini|cfg|json)$)/
 export function classify(file) {
@@ -100,10 +105,12 @@ const workflowId = (run) => (path.basename(run.path ?? '').replace(/\.(ya?ml)$/i
 // What the auditor keeps of a comment: its time, its author's login and its prefix (the role word in
 // a leading `[…]`). Never the text after the prefix: comments are data, and on a public repository
 // anyone writes them.
+// Any leading `[…]` is agent traffic (the operator never uses one), whatever the word in it.
 const commentFacts = (c) => ({
   at: c.created_at,
   login: (c.user?.login ?? '').toLowerCase(),
   prefix: /^\[(executor|reviewer|qa|auditor)\]/.exec(c.body ?? '')?.[1] ?? null,
+  bracketed: /^\s*\[[^\]\n]*\]/.test(c.body ?? ''),
 })
 
 function gather() {
@@ -155,9 +162,14 @@ function gather() {
         open.delete(name)
       }
     }
-    for (const [name, at] of open) spans.push({ item: it, label: name, from: at, to: it.closedAt ?? iso(until), stillOn: !it.closedAt })
+    for (const [name, at] of open) spans.push({ item: it, label: name, from: at, to: it.closedAt ?? iso(until) })
   }
-  return { prs: [...byNumber.values()], attempts, spans }
+  // Each span clipped to the period; one wholly outside it is dropped. The end keeps its own time
+  // for the merge-or-close test, `ended`, and the clipped one is the cost.
+  const clipped = spans
+    .map((s) => ({ ...s, ended: s.to, from: iso(Math.max(Date.parse(s.from), since)), to: iso(Math.min(Date.parse(s.to), until)) }))
+    .filter((s) => Date.parse(s.to) > Date.parse(s.from))
+  return { prs: [...byNumber.values()], attempts, spans: clipped }
 }
 
 function findings({ prs, attempts, spans }) {
@@ -172,8 +184,13 @@ function findings({ prs, attempts, spans }) {
     // A cancelled attempt counts under cancelled only, never as a re-run's earlier attempt too.
     const cancelled = list.filter((a) => a.conclusion === 'cancelled')
     const earlier = list.filter((a) => !a.latest && a.conclusion !== 'cancelled')
-    const onProse = list.filter((a) => prose.has(a.pr) && a.conclusion !== 'cancelled')
-    if (onProse.length) {
+    // Latest attempts only (an earlier one is a re-run's cost), and only when a prose run costs at
+    // least half what a code run of the same workflow does: a workflow that already skips its
+    // tests on prose has nothing left to narrow.
+    const onProse = list.filter((a) => prose.has(a.pr) && a.latest && a.conclusion !== 'cancelled')
+    const onCode = list.filter((a) => !prose.has(a.pr) && a.latest && a.conclusion !== 'cancelled')
+    if (onProse.length && !onCode.length) notes.push(`\`ci-prose:${wf}\`: no run on a code PR in the period to compare with, so no finding.`)
+    if (onProse.length && onCode.length && median(onProse) >= median(onCode) / 2) {
       const failed = onProse.filter((a) => a.conclusion === 'failure').length
       add({ id: `ci-prose:${wf}`, control: `\`${wf}\` runs on PRs that changed only prose`, cost: sum(onProse), runs: onProse.length,
         prs: [...new Set(onProse.map((a) => a.pr))], caught: failed,
@@ -199,8 +216,8 @@ function findings({ prs, attempts, spans }) {
     // --operators login, unprefixed) commented during it.
     const caught = own.filter((s) => {
       const end = Date.parse(s.to)
-      if (s.item.closedAt && Math.abs(Date.parse(s.item.closedAt) - end) < 60000) return true
-      return s.item.comments.some((c) => !c.prefix && operators.has(c.login) && Date.parse(c.at) >= Date.parse(s.from) && Date.parse(c.at) <= end)
+      if (s.item.closedAt && Math.abs(Date.parse(s.item.closedAt) - Date.parse(s.ended)) < 60000) return true
+      return s.item.comments.some((c) => !c.bracketed && operators.has(c.login) && Date.parse(c.at) >= Date.parse(s.from) && Date.parse(c.at) <= end)
     })
     add({ id: `label:${name}`, control: `the \`${name}\` label`, cost: own.reduce((n, s) => n + minutes(s.from, s.to), 0), spans: own.length,
       prs: [...new Set(own.map((s) => s.item.number))], caught: caught.length,
@@ -243,6 +260,11 @@ function findings({ prs, attempts, spans }) {
 function sum(list) {
   return list.reduce((n, a) => n + minutes(a.run_started_at, a.updated_at), 0)
 }
+function median(list) {
+  const m = list.map((a) => minutes(a.run_started_at, a.updated_at)).sort((a, b) => a - b)
+  return m.length % 2 ? m[(m.length - 1) / 2] : (m[m.length / 2 - 1] + m[m.length / 2]) / 2
+}
+const notes = []
 
 // Wake-ups that found nothing: each waiter's current idle streak, from this machine's state folder.
 function idleStreaks() {
@@ -281,14 +303,14 @@ const command = ['node scripts/audit.mjs', '--repo', repo, '--since', iso(since)
   ...(arg('--operators') ? ['--operators', list(arg('--operators')).join(',')] : []), ...(arg('--labels') ? ['--labels', labels.join(',')] : [])].join(' ')
 
 if (format === 'json') {
-  process.stdout.write(JSON.stringify({ period: { since: iso(since), until: iso(until) }, args: command, prs: data.prs.length, findings: result, unmatchedFloor, idle }, null, 2) + '\n')
+  process.stdout.write(JSON.stringify({ period: { since: iso(since), until: iso(until) }, args: command, prs: data.prs.length, findings: result, unmatchedFloor, notes, idle }, null, 2) + '\n')
   process.exit(0)
 }
 
 const lines = [
   `# [auditor] Audit ${day(since)}..${day(until)}`,
   '',
-  `Period: PRs closed from ${iso(since)} to ${iso(until)} (${data.prs.length}), with every run of their commits; labels on PRs and issues updated in it.`,
+  `Period: PRs closed from ${iso(since)} to ${iso(until)} (${data.prs.length}), with every run of their commits; label time on PRs and issues updated in it, clipped to it.`,
   `Reproduce: \`${command}\``,
   'Cost is in minutes: a run\'s wall-clock time from start to its last update, a label\'s time on, a review round\'s time from a commit to the next review. Findings are in cost order.',
   'Caught: failures a run found, re-runs that failed again, label spans that ended in a merge or close or got an operator\'s comment, review rounds followed by a new commit.',
@@ -310,6 +332,7 @@ for (const f of result) {
   lines.push('')
 }
 lines.push('## Measured, no finding', '')
+for (const n of notes) lines.push(`- ${n}`)
 if (unmatchedFloor.length) lines.push(`- \`audit-floor\` ids that matched no control in this period: ${unmatchedFloor.map((id) => `\`${id}\``).join(', ')}.`)
 lines.push(idle.length
   ? `- Wake-ups that found nothing, as each waiter's current idle streak on this machine: ${idle.map((i) => `${i.file} ${i.idle}`).join(', ')}. What a wake-up catches isn't recorded, so there is no finding.`

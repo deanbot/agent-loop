@@ -988,6 +988,11 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
       wfRun(1201, 'a10', '02T10:01:00', '02T10:02:00', { path: '.github/workflows/lint.yml', status: 'in_progress', conclusion: null }),
       wfRun(9999, 'zzz', '05T09:00:00', '05T10:00:00'),
       wfRun(1301, 'a10', '02T10:05:00', '02T10:05:00', { path: '.github/workflows/docs.yml' }),
+      wfRun(1302, 'b11', '05T09:05:00', '05T09:05:00', { path: '.github/workflows/docs.yml' }),
+      wfRun(1401, 'a10', '02T10:01:00', '02T10:02:00', { path: '.github/workflows/build.yml' }),
+      wfRun(1402, 'b11', '05T09:01:00', '05T09:11:00', { path: '.github/workflows/build.yml' }),
+      wfRun(1403, 'c11', '06T09:01:00', '06T09:11:00', { path: '.github/workflows/build.yml' }),
+      wfRun(1501, 'a10', '02T10:01:00', '02T10:03:00', { path: '.github/workflows/pages.yml' }),
     ],
     attempts: {
       '1102/1': wfRun(1102, 'b11', '05T09:03:00', '05T09:04:00', { conclusion: 'cancelled' }),
@@ -996,12 +1001,17 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
     issueComments: {
       10: [],
       11: [comment('[reviewer] Review of b11.', at('05T12:00:00'), 'acme'), comment('[reviewer] LGTM', at('06T12:00:00'), 'acme'), comment('merging', at('06T20:00:00'), 'acme')],
-      20: [comment('[executor] BLOCKED: waiting.', at('10T00:05:00'), 'acme'), comment('ping', at('10T06:00:00'), 'stranger')],
+      20: [comment('[executor] BLOCKED: waiting.', at('10T00:05:00'), 'acme'), comment('[dev] noted', at('10T01:00:00'), 'acme'), comment('ping', at('10T06:00:00'), 'stranger')],
+      21: [],
     },
-    items: [{ number: 20, state: 'open', closed_at: null, labels: [] }, { number: 11, state: 'closed', closed_at: at('07T00:00:00') }],
+    items: [{ number: 20, state: 'open', closed_at: null, labels: [] }, { number: 11, state: 'closed', closed_at: at('07T00:00:00') }, { number: 21, state: 'open', closed_at: null }],
     events: {
       11: [{ event: 'labeled', label: { name: 'needs-operator' }, created_at: at('06T13:00:00') }],
-      20: [{ event: 'labeled', label: { name: 'is-blocked' }, created_at: at('10T00:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: at('11T00:00:00') }],
+      // A span wholly before the period, then the day-long one inside it.
+      20: [{ event: 'labeled', label: { name: 'needs-operator' }, created_at: '2026-02-01T00:00:00Z' }, { event: 'unlabeled', label: { name: 'needs-operator' }, created_at: '2026-02-02T00:00:00Z' },
+        { event: 'labeled', label: { name: 'is-blocked' }, created_at: at('10T00:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: at('11T00:00:00') }],
+      // A span that crosses the period's end: cut at --until (the end of 2026-03-31).
+      21: [{ event: 'labeled', label: { name: 'is-blocked' }, created_at: at('31T12:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: '2026-04-01T12:00:00Z' }],
     },
   }
   const audit = (extra = []) => run_(['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json', ...extra])
@@ -1022,8 +1032,18 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   check('audit: a cancelled run and a cancelled first attempt → cancelled cost 3 min over 2 runs, caught 0; the re-run after a cancel is not also a re-run finding\'s cost',
     f('cancelled:ci')?.cost === 3 && f('cancelled:ci').runs === 2 && f('reruns:ci')?.cost === 5 && f('reruns:ci').runs === 1, brief)
   check('audit: a re-run after a failure that passed → reruns cost, caught 0, drop', f('reruns:ci')?.caught === 0 && f('reruns:ci').recommendation === 'drop', brief)
-  check('audit: an issue left blocked for a day with no operator comment (a stranger\'s and a prefixed one don\'t count) → 1440 min, caught 0, narrow',
-    f('label:is-blocked')?.cost === 1440 && f('label:is-blocked').caught === 0 && f('label:is-blocked').recommendation === 'narrow', brief)
+  check('audit: an issue left blocked for a day with no operator comment (a stranger\'s, a role-prefixed and a [dev] one by the owner don\'t count) → caught 0, narrow',
+    f('label:is-blocked')?.caught === 0 && f('label:is-blocked').recommendation === 'narrow', brief)
+  check('audit: label time is clipped to the period: a span before it adds nothing, one crossing its end is cut there (1440 + 720 min)',
+    f('label:is-blocked')?.cost === 2160 && f('label:is-blocked').spans === 2 && f('label:needs-operator')?.spans === 1, brief)
+  check('audit: a workflow whose prose runs cost under half its code runs gets no ci-prose finding (it already skips the work)',
+    !(r.findings ?? []).some((x) => x.id === 'ci-prose:build'), brief)
+  check('audit: prose runs with no code run to compare → no finding, and a note says so',
+    !(r.findings ?? []).some((x) => x.id === 'ci-prose:pages') && (r.notes ?? []).some((n) => n.startsWith('`ci-prose:pages`: no run on a code PR')), JSON.stringify(r.notes))
+  const listed = audit(['--operators', '[@stranger, other]', '--floor', '[ci-prose:ci]'])
+  const lf = (id) => (listed.findings ?? []).find((x) => x.id === id)
+  check('audit: lists written as a block writes them ([a, b], @login) parse: a --operators login\'s comment catches; a bracketed --floor id is honoured',
+    lf('label:is-blocked')?.caught === 1 && lf('label:is-blocked').recommendation === 'keep' && lf('ci-prose:ci')?.floor === true, JSON.stringify(listed))
   check('audit: a label that stayed on until the merge → caught, keep', f('label:needs-operator')?.cost === 660 && f('label:needs-operator').caught === 1 && f('label:needs-operator').recommendation === 'keep', brief)
   check('audit: review rounds → 2 rounds, 1 followed by a commit, 360 min from commit to review, keep',
     f('review-rounds')?.rounds === 2 && f('review-rounds').caught === 1 && f('review-rounds').cost === 360 && f('review-rounds').recommendation === 'keep', brief)
@@ -1047,8 +1067,9 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   const failed = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '7d'], { fail: true })
   check('audit: a failed gh call → one audit: line, exit 2', /^EXIT 2\n\naudit: HTTP 502/.test(failed), failed)
   // An auditor's report is an issue for the operator: no executor may pick it as work.
-  const picked = run(ctx, 'pick-next.mjs', ['--repo', REPO], { issues: [{ number: 5, title: 'a', body: '', labels: [{ name: 'audit' }] }, { number: 6, title: 'b', body: '', labels: [] }] }).trim()
-  check('pick: an issue labelled audit is never picked', picked === 'ISSUE:6', picked)
+  const picked = run(ctx, 'pick-next.mjs', ['--repo', REPO], { issues: [{ number: 5, title: 'a', body: '', labels: [{ name: 'auditor-report' }] }, { number: 6, title: 'b', body: '', labels: [] }] }).trim()
+  const own = run(ctx, 'pick-next.mjs', ['--repo', REPO], { issues: [{ number: 5, title: 'a', body: '', labels: [{ name: 'audit' }] }, { number: 6, title: 'b', body: '', labels: [] }] }).trim()
+  check('pick: an issue labelled auditor-report is never picked; a project\'s own audit label is not that label', picked === 'ISSUE:6' && own === 'ISSUE:5', `${picked} ${own}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 

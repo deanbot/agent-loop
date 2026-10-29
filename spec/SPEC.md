@@ -54,7 +54,7 @@ is the project's conventions, which the agents follow.
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status) |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
 | `audit-floor` | no | — | control ids ("Auditor") the auditor never recommends narrowing or dropping: security and privacy checks, the operator's merge, a named gate. A finding about one reports its cost only |
-| `audit-report` | no | `issue` | where the auditor's report goes: `issue` (a new issue per run, labelled `audit`) or `none` (printed only; the operator posts it) |
+| `audit-report` | no | `issue` | where the auditor's report goes: `issue` (a new issue per run, labelled `auditor-report`) or `none` (printed only; the operator posts it) |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
 | `rules` | no | — | further files the agents follow as the project's rules, comma-separated paths (a path ending in `/` covers a directory); like `AGENTS.md`, a pull that changes one shows a running loop the diff ("Rules that change while a loop runs") |
 | `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
@@ -712,8 +712,8 @@ later in 0.2, additive: a new role, a script and two optional keys.
 
 **What it reads**, all of it available on any project, from GitHub and the loop's own state:
 
-- each PR closed in the period, and its changed files, classed as prose (Markdown, `docs/`, plain
-  text), code, dependencies (manifests and lockfiles) or config (`.github/`, dotfiles, YAML, JSON,
+- each PR closed in the period, and its changed files, classed as prose (Markdown and plain
+  text, in `docs/` or anywhere else), code, dependencies (manifests and lockfiles) or config (`.github/`, dotfiles, YAML, JSON,
   TOML); a PR whose file list reached the API's cap of 100 is not classed as prose;
 - every CI run of those PRs' commits, whenever it started: its workflow, its wall-clock time from
   start to last update, its result, whether it was a re-run (each earlier attempt is read on its
@@ -721,7 +721,7 @@ later in 0.2, additive: a new role, a script and two optional keys.
 - comments on those PRs, for their time, their author's login and their prefix only: review rounds
   are `[reviewer]` posts, and the time from a commit to the next one;
 - labelled and unlabelled events of `needs-operator-label` and `blocked-label` on PRs and issues
-  updated in the period;
+  updated in the period, each span clipped to the period;
 - the loop's own state on the machine it runs on: each waiter's idle streak, the wake-ups that
   found nothing.
 
@@ -734,10 +734,10 @@ A finding without both numbers is not posted.
 
 | Control (id) | Cost | Caught |
 |---|---|---|
-| `ci-prose:<workflow>` | minutes of that workflow's runs on PRs that changed only prose | runs that failed there |
+| `ci-prose:<workflow>` | minutes of that workflow's runs (latest attempts) on PRs that changed only prose, when their median is at least half that of its runs on code PRs; otherwise the workflow already skips the work there, and with no code run to compare there is no finding | runs that failed there |
 | `reruns:<workflow>` | minutes of the earlier attempts of re-run runs (a cancelled attempt is counted under `cancelled` only) | re-runs that failed again |
 | `cancelled:<workflow>` | minutes of runs and attempts cancelled before they finished | nothing: a cancelled run reports no result |
-| `label:<name>` | minutes the label was on | spans that ended in a merge or a close, or got an unprefixed comment from the owner or a `trusted-authors` login |
+| `label:<name>` | minutes the label was on, within the period | spans that ended in a merge or a close, or got a comment with no leading `[…]` from the owner or a `trusted-authors` login |
 | `review-rounds` | minutes from each commit to the next `[reviewer]` post | rounds followed by a new commit before the next round |
 
 `<workflow>` is the workflow file's name without its extension. The recommendation is one of
@@ -749,13 +749,16 @@ no finding: what a wake-up catches isn't recorded.
 
 **The report.** One per run: a header with the period, the exact command that reproduces the
 numbers and the cost unit, then the findings. With `audit-report: issue` (the default), it is a
-new issue per run titled `[auditor] Audit <since>..<until>` and labelled `audit`, so findings can
-be closed one by one. `pick-next.mjs` never lists an issue labelled `audit`: a report is for the
-operator, never work for an executor. With `audit-report: none` it is printed only.
+new issue per run titled `[auditor] Audit <since>..<until>` and labelled `auditor-report`, so
+findings can be closed one by one. `pick-next.mjs` never lists an issue labelled
+`auditor-report`: a report is for the operator, never work for an executor. With `audit-report:
+none` it is printed only.
 
 **`audit.mjs`** `--repo owner/repo --since <YYYY-MM-DD|ISO|Nd> [--until <YYYY-MM-DD|ISO>] [--floor
 id,id] [--operators login,login] [--labels l,l] [--format md|json]` prints the report (Markdown,
-or JSON for tools) and posts nothing. A failed `gh` call exits 2 with one `audit: …` line on stderr.
+or JSON for tools) and posts nothing. A list may be written as a block writes it (`[a, b]`,
+quoted, `@login`). A failed `gh` call exits 2 with one `audit: …` line on stderr. It calls `gh`,
+so a sandboxed session exempts it the same way.
 
 ---
 

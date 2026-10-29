@@ -36,16 +36,19 @@ anyone can write those, so this skill runs on demand only, never as a loop.
 3. **The numbers**, one command:
    `node ${CLAUDE_PLUGIN_ROOT}/scripts/audit.mjs --repo <repo> --since <since> [--until <until>]
    --labels <needs-operator-label>,<blocked-label> [--floor <audit-floor>] [--operators
-   <trusted-authors>]`. It prints the report in Markdown. Exit 2 with an `audit:` line → print
+   <trusted-authors>]`. Pass each list as comma-separated values with no brackets, quotes or
+   spaces (`--operators alice,bob`): a bracket or a space in the command is read by the shell. In
+   a sandbox, the script needs the same exemption as `gh` (it calls it). It prints the report in
+   Markdown. Exit 2 with an `audit:` line → print
    `⚠ audit not run: <the audit: line>` and stop. Don't estimate any number yourself: a finding
    the script didn't compute is not in the report.
 4. **Post it.**
    - `audit-report: none` → print the report as it came, and stop.
    - Otherwise write the report to `.git/audit-report.md` with Write, exactly as printed, then:
-     `gh label create audit --repo <repo> --color C5DEF5 --description "An auditor's report for the operator" --force`,
-     then `gh issue create --repo <repo> --title "<the report's first line, without the leading # >" --body-file .git/audit-report.md --label audit`.
-     The `audit` label keeps the issue out of every executor's pick (`pick-next.mjs` never lists
-     it). Print the issue's URL.
+     `gh label create auditor-report --repo <repo> --color C5DEF5 --description "An auditor's report for the operator" --force`,
+     then `gh issue create --repo <repo> --title "<the report's first line, without the leading # >" --body-file .git/audit-report.md --label auditor-report`.
+     The `auditor-report` label keeps the issue out of every executor's pick (`pick-next.mjs`
+     never lists it). Print the issue's URL.
 5. **End.** One line: the period and how many findings. No wakeup, no waiter.
 
 Never add to the report: no reading of the findings into advice beyond the script's own

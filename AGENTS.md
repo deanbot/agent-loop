@@ -50,7 +50,7 @@ Three layers. Boundaries are strict.
   control the loop ran over the period (a workflow on prose-only PRs, re-runs, cancelled runs, a
   label, review rounds), what it cost and what it caught, and keep, narrow or drop; prints a
   report and posts nothing (spec: "Auditor"). Reads comments for their time, author and prefix,
-  never their text. `pick-next.mjs` never lists an issue labelled `audit`.
+  never their text. `pick-next.mjs` never lists an issue labelled `auditor-report`.
 - `scripts/inbox.mjs` — a folder of message files as a signal source. `--dir <folder>` (no default:
   the loop's `--inbox` start argument names it, outside the clone) prints `MESSAGE:<messageId>` per message not
   reported before (`INVALID:<id>` for a file that is not one), or `NONE`; `--show <id>` prints one
