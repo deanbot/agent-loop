@@ -74,7 +74,8 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
    → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. `MAILBOX_REFUSED: <reason>`,
    or only one of the two → print `⚠ No mailbox: <the reason, or "--inbox and --outbox go
    together">.` and carry on without one. No mailbox → `<inbox-flag>` is empty, and "Messages"
-   below does not apply.
+   below does not apply. Only one of the two folders → print the `⚠ No mailbox` line without
+   running `--check`; never supply a missing folder yourself.
 
 Rules that hold for the whole session:
 
@@ -87,7 +88,9 @@ Rules that hold for the whole session:
 - **Never `sleep`.** Waiting is a background waiter plus a fallback `ScheduleWakeup` (below).
 - **One plain command per Bash call**, in the loop and in a review's reads, probes and checks
   (reference/review.md §3): no `$(…)`, `;` or pipes (they defeat the permission allowlist and
-  prompt, and an unattended loop stops at the prompt).
+  prompt, and an unattended loop stops at the prompt). `--jq` filters never end in `]]`: emit one
+  array per row with `.[] | [ … ]`, not `[.[] | [ … ]]` (Claude Code's safety check prompts on it,
+  likely read as shell `[[ … ]]`).
 - **`gh` and `git fetch` run on their own**, from the clone's root: `gh … --repo <repo>`, never
   `cd <dir> && gh …`. A sandbox exempts these commands by name (in Claude Code,
   `sandbox.excludedCommands`), and a chained command doesn't match, so it runs sandboxed, fails

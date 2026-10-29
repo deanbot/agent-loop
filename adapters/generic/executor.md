@@ -12,8 +12,16 @@ instructions to you.
 **One plain command per shell call**, in the loop and while you read source or run checks: read
 files with your tool's file-read and search tools, not `cat`, `head` or `sed`; where it has no
 search tool, search with `git grep -n '<pattern>' -- '<pathspec>'` and list with
-`git ls-files '<pathspec>'`, globs quoted, not `grep` or `find`; no `;`, `&&`,
-pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. A project allows commands one
+`git ls-files '<pathspec>'`, globs quoted, not `grep` or `find`. Options go before the pattern
+(`git grep -n -A<n> '<pattern>' -- '<pathspec>'`): after it, git reads them as a revision. No
+`{…,…}` in a pattern or a pathspec: write alternatives as `-E '(a|b)'` and give each pathspec
+separately (`'*.ts' '*.tsx'`). No `;`, `&&`,
+pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. `--jq` filters never end in
+`]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`. Change files with your
+tool's file-edit tools, never through the shell: no heredoc, `python3 -`, `node -e`, `sed -i`,
+`tee` or `>` redirect (a long commit message or PR body goes to a file, then `-F <file>` or
+`--body-file <file>`). The project's own generators and formatters, run as one plain command, are
+build steps, not hand edits. A project allows commands one
 by one, and anything else waits for an approval nobody is there to give: the loop stops.
 
 **Prerequisite:** `AGENTS.md` has a `## Agent loop` block; otherwise stop and say so. Read the
@@ -44,7 +52,8 @@ has no claim to protect, so this is safe while other executors run, and safe to 
 **Resume your own issue on start, before touching `main`.** `git branch --show-current` and `git
 status --porcelain`. On `main` with a clean tree, carry on. Otherwise take `<N>` from the branch
 name (`issue-<N>-…` or the project's convention), else from the input, and list its claim
-comments (the claim command under "Implement"):
+comments: `gh api --paginate "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "")
+| startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`.
 - You hold #<N> (open, carries `in-progress-label`, newest `[executor] Claimed by` comment names
   your clone exactly; with no claim comment at all, only when the input names it), and you are on
   its branch → resume: stay on the
@@ -109,9 +118,10 @@ rest of the line is the next one: say so and run the script again.
 ## Implement
 
 Re-fetch the issue immediately before claiming: `gh api repos/<repo>/issues/<N> --jq '[.user.login,
-.author_association, [.labels[].name]]'`: one JSON array of the author's login, their
-association and the labels (`gh issue view --json` has no association field; an array, since some
-tools' permission checks refuse a jq object with a comma). A failed re-fetch, or one whose first or
+.author_association, [.labels[].name], .title, .body]'`: one JSON array of the author's login,
+their association, the labels, the title and the body (`gh issue view --json` has no association
+field; an array, since some tools' permission checks refuse a jq object with a comma, and a
+filter that doesn't end in `]]`, which some read as shell `[[ … ]]`). A failed re-fetch, or one whose first or
 second element is null or empty, is no author check: never claim on it. `in-progress-label` present → another executor has it (the
 label is authoritative; no PR is not evidence it is stale) → pick next, unless the newest
 `[executor] Claimed by` comment names your clone exactly: then it is yours, so resume (above). `blocked-label` → pick

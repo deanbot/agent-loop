@@ -157,7 +157,10 @@ grant covers the invoking turn. Unattended wakeups rely on the rules `setup-proj
 `Bash(<gate> *)`) for the executor and the reviewer, so re-run setup after adding `gate`. Every
 loop role also gets `Bash(git grep *)` and `Bash(git ls-files *)`: the skills search and list
 files with those where a session has no Grep and Glob tools. Skill text gives Bash as one plain command per call — `$(…)`, `;`
-and pipes are not statically matchable and would prompt every cycle. `find` is not
+and pipes are not statically matchable and would prompt every cycle. Claude Code's safety check
+also prompts on a `--jq` filter ending in `]]` and on braces in a command, whatever the allow
+rules, so the skills emit one array per row (`.[] | [ … ]`) and keep braces out of `git grep`
+patterns; files are changed with Edit and Write, since a heredoc or `sed -i` matches no rule. `find` is not
 prefix-approvable either, which is one reason the stop-sentinel mechanism was dropped in favour
 of `ScheduleWakeup({ stop: true })`.
 

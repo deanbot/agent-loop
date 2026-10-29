@@ -62,10 +62,16 @@ verifiable by a test CI runs, or marked for the operator to confirm), Reference 
 **Reading source and running checks: one plain command per Bash call, here too.** Read files
 with Read (its offset and limit for a range) and search with Grep and Glob. A session without
 Grep and Glob searches with `git grep -n '<pattern>' -- '<pathspec>'` and lists files with
-`git ls-files '<pathspec>'`, globs quoted (unquoted, zsh fails on `no matches found`). Never
+`git ls-files '<pathspec>'`, globs quoted (unquoted, zsh fails on `no matches found`). Options go
+before the pattern (`git grep -n -A<n> '<pattern>' -- '<pathspec>'`): after it, git reads them as
+a revision. No `{…,…}` in a pattern or a pathspec: write alternatives as `-E '(a|b)'` and give
+each pathspec separately (`'*.ts' '*.tsx'`). Never
 `cat`, `head`, `tail`, `sed -n`, `ls`, `find` or plain `grep` through Bash. Never chain: no `;`, `&&`, pipes (`| head` included),
 `for` loops or `cd <dir> && …`. Stay inside the clone, the plugin's folder and the scratchpad: a
-path anywhere else prompts too. Why: the project allows commands one by one, and a compound
+path anywhere else prompts too. Change files with Edit or Write, never through Bash: no heredoc,
+`python3 -`, `node -e`, `sed -i`, `tee` or `>` redirect (a long commit message or PR body goes to
+a file with Write, then `-F <file>` or `--body-file <file>`). The project's own generators and
+formatters, run as one plain command, are build steps, not hand edits. Why: the project allows commands one by one, and a compound
 command, or one reaching outside, matches no rule. It waits for an approval nobody is there to
 give, and the loop stops until the operator happens to look.
 
