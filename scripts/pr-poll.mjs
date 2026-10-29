@@ -4,7 +4,7 @@
  *
  * Usage:
  *   node scripts/pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate]
- *                            [--idle-after <n>] [--wait [secs] [--max secs]]
+ *                            [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]
  *
  * Output — signal lines then content blocks, exits when done (with --wait: the first output that is
  * news, see lib/wait.mjs):
@@ -65,7 +65,7 @@ import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
-const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--idle-after <n>] [--wait [secs] [--max secs]]'
+const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)

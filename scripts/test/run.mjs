@@ -2,7 +2,7 @@
 // Contract tests for the signal scripts, run against a fake `gh` (fake-gh.mjs).
 //   node scripts/test/run.mjs
 // No dependencies. Each case gets a fresh HOME (so state files start empty) and a fixture.
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync } from 'fs'
+import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { execFileSync, spawn, spawnSync } from 'child_process'
@@ -1338,6 +1338,349 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- inbox.mjs (#77)
+// Needs no gh. Each case gets a fresh HOME (the record) and a folder; `cwd` is a clone stand-in.
+function inbox(ctx, args, cwd = ctx.home) {
+  const r = spawnSync('node', [path.join(scripts, 'inbox.mjs'), ...args], { env: ctx.env, cwd, encoding: 'utf8' })
+  return { out: r.stdout, err: r.stderr, code: r.status }
+}
+// An A2A 1.0 Message; `meta` overrides keys in its metadata (from, to, sentAt).
+const message = (id, extra = {}, meta = {}) => ({
+  messageId: id,
+  role: 'ROLE_USER',
+  contextId: 'acme/widgets#7',
+  parts: [{ text: 'rebase on main' }],
+  metadata: { from: 'operator', to: 'executor', sentAt: '2026-01-01T10:00:00Z', ...meta },
+  ...extra,
+})
+// A home-relative folder as a block names it (a tilde, then the path), here under the test HOME's
+// .agent-loop. Built with path.join: second-read refuses a tilde path written out in code.
+const homeRel = (...p) => path.join('~', '.agent-loop', ...p)
+const putMessage = (dir, id, extra, meta) => {
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(message(id, extra, meta)))
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  const read = () => inbox(ctx, ['--dir', dir])
+  const missing = read()
+  check('inbox: no such folder → NONE, exit 0', signals(missing.out).join() === 'NONE' && missing.code === 0, JSON.stringify(missing))
+  putMessage(dir, 'm1')
+  const first = read()
+  check('inbox: a new message file → one line, MESSAGE:<messageId>', first.out === 'MESSAGE:m1\n' && first.code === 0, JSON.stringify(first))
+  const again = read()
+  check('inbox: … a reported message is not reported again → NONE', signals(again.out).join() === 'NONE', again.out)
+  putMessage(dir, 'a-late', {}, { sentAt: '2026-01-02T10:00:00Z' })
+  putMessage(dir, 'z-early', {}, { sentAt: '2026-01-01T11:00:00Z' })
+  const two = read()
+  check('inbox: two new messages → one line each, oldest metadata.sentAt first (not by name)', two.out === 'MESSAGE:z-early\nMESSAGE:a-late\n', two.out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  mkdirSync(dir)
+  const body = JSON.stringify(message('t1'))
+  writeFileSync(path.join(dir, '.t1.4242.tmp'), body)
+  writeFileSync(path.join(dir, 't1.json.tmp'), body)
+  writeFileSync(path.join(dir, '.t1.json'), JSON.stringify(message('.t1')))
+  writeFileSync(path.join(dir, '._t1.json'), 'AppleDouble junk')
+  writeFileSync(path.join(dir, 't1.txt'), body)
+  mkdirSync(path.join(dir, 'd1.json'))
+  writeFileSync(path.join(ctx.home, 'outside.json'), JSON.stringify(message('s1')))
+  symlinkSync(path.join(ctx.home, 'outside.json'), path.join(dir, 's1.json'))
+  const r = inbox(ctx, ['--dir', dir])
+  check('inbox: temporary names, dotfiles, other extensions, folders and symlinks are not messages → NONE', signals(r.out).join() === 'NONE' && r.code === 0, JSON.stringify(r))
+  renameSync(path.join(dir, '.t1.4242.tmp'), path.join(dir, 't1.json'))
+  const renamed = inbox(ctx, ['--dir', dir])
+  check('inbox: … the temporary file renamed to its message name → MESSAGE:t1', renamed.out === 'MESSAGE:t1\n', renamed.out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  mkdirSync(dir)
+  writeFileSync(path.join(dir, 'bad.json'), '{"messageId": "bad", ')
+  putMessage(dir, 'other', { messageId: 'not-other' })
+  putMessage(dir, 'norole', { role: 'user' })
+  putMessage(dir, 'noparts', { parts: [] })
+  putMessage(dir, 'kindonly', { parts: [{ kind: 'text' }] })
+  putMessage(dir, 'twocontent', { parts: [{ text: 'a', data: { b: 1 } }] })
+  putMessage(dir, 'toplevel', { from: 'operator' })
+  putMessage(dir, 'nometa', { metadata: undefined })
+  putMessage(dir, 'nofrom', {}, { from: '' })
+  putMessage(dir, 'baddate', {}, { sentAt: 'soon' })
+  putMessage(dir, 'ok')
+  putMessage(dir, 'okparts', { parts: [{ data: null }, { url: 'https://example.com/a.txt', mediaType: 'text/plain', filename: 'a.txt', metadata: {} }, { raw: 'aGk=' }] },
+    { sentAt: '2026-01-01T10:01:00Z', priority: 'high' })
+  const r = inbox(ctx, ['--dir', dir])
+  const lines = r.out.trim().split('\n')
+  check('inbox: A2A 1.0 parts (data, a url with mediaType/filename/metadata, raw) and other metadata keys are valid; the rest → INVALID:<name>, after the valid ones',
+    lines.slice(0, 2).join() === 'MESSAGE:ok,MESSAGE:okparts' &&
+    lines.slice(2).sort().join() === 'INVALID:bad,INVALID:baddate,INVALID:kindonly,INVALID:nofrom,INVALID:nometa,INVALID:noparts,INVALID:norole,INVALID:other,INVALID:toplevel,INVALID:twocontent' && r.code === 0, r.out)
+  check('inbox: … each with its reason on stderr (an A2A 0.3 role "user", a part with only a kind, two content fields)',
+    /bad\.json: unreadable/.test(r.err) && /other\.json: messageId is not the file name/.test(r.err) && /norole\.json: role must be ROLE_USER or ROLE_AGENT/.test(r.err) &&
+    /noparts\.json: parts/.test(r.err) && /kindonly\.json: every part needs exactly one of/.test(r.err) && /twocontent\.json: every part needs exactly one of/.test(r.err), r.err)
+  check('inbox: … from, to and sentAt only in metadata (top-level from, no metadata, an empty metadata.from, a metadata.sentAt that is not a date)',
+    /toplevel\.json: from belongs in metadata/.test(r.err) && /nometa\.json: metadata must be an object/.test(r.err) &&
+    /nofrom\.json: metadata\.from must be/.test(r.err) && /baddate\.json: metadata\.sentAt must be a date/.test(r.err), r.err)
+  const again = inbox(ctx, ['--dir', dir])
+  check('inbox: … and reported once, like a message', signals(again.out).join() === 'NONE' && again.err === '', JSON.stringify(again))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  putMessage(dir, 'gone')
+  putMessage(dir, 'stays')
+  inbox(ctx, ['--dir', dir])
+  rmSync(path.join(dir, 'gone.json'))
+  inbox(ctx, ['--dir', dir])
+  const stateDir = path.join(ctx.home, '.agent-loop', 'state')
+  const record = readdirSync(stateDir).filter((f) => /^inbox-[0-9a-f]{16}\.json$/.test(f))
+  const state = record.length === 1 ? JSON.parse(readFileSync(path.join(stateDir, record[0]), 'utf8')) : null
+  check('inbox: the record is one file per folder, pruned to the files still there', state?.reported.join() === 'stays', `${record} ${JSON.stringify(state)}`)
+  const other = path.join(ctx.home, 'box2')
+  putMessage(other, 'gone')
+  const r = inbox(ctx, ['--dir', other])
+  check('inbox: … another folder keeps its own record (the same id there is new)', r.out === 'MESSAGE:gone\n', r.out)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  putMessage(dir, 'seen')
+  inbox(ctx, ['--dir', dir])
+  const quiet = await start(ctx, 'inbox.mjs', ['--dir', dir, '--wait', '1', '--max', '2']).done
+  check('inbox --wait: nothing new → NONE at --max, exit 0', signals(quiet.out).join() === 'NONE' && quiet.ms >= 2000 && quiet.code === 0, `${quiet.ms}ms\n${quiet.out}${quiet.err}`)
+  const w = start(ctx, 'inbox.mjs', ['--dir', dir, '--wait', '1', '--max', '15'])
+  await pause(1500)
+  const t0 = Date.now()
+  putMessage(dir, 'new')
+  const r = await w.done
+  const after = Date.now() - t0
+  check('inbox --wait: a new file → PENDING within one poll (1 s here), exit 0', r.out === 'PENDING\n' && r.code === 0 && after < 2500, `${after}ms after the write\n${r.out}${r.err}`)
+  const next = inbox(ctx, ['--dir', dir])
+  check('inbox --wait: … the waiter recorded nothing, so the next run reports it', next.out === 'MESSAGE:new\n', next.out)
+  const missing = await start(ctx, 'inbox.mjs', ['--dir', path.join(ctx.home, 'nope'), '--wait', '1', '--max', '2']).done
+  check('inbox --wait: no such folder → keeps polling, NONE at --max', signals(missing.out).join() === 'NONE' && missing.ms >= 2000 && missing.code === 0, `${missing.ms}ms\n${missing.out}${missing.err}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'shared', 'box')
+  const sent = inbox(ctx, ['--send', '--dir', dir, '--role', 'ROLE_AGENT', '--from', 'executor', '--to', 'operator', '--context', 'acme/widgets#7', '--task', 'recheck abc123', '--text', 'Pushed the fix.\nSecond line.'])
+  const id = /^SENT:([0-9a-f-]{36})\n$/.exec(sent.out)?.[1]
+  check('inbox --send: prints SENT:<messageId>, exit 0, creating the folder', id && sent.code === 0, JSON.stringify(sent))
+  const files = readdirSync(dir)
+  const msg = JSON.parse(readFileSync(path.join(dir, `${id}.json`), 'utf8'))
+  check('inbox --send: one file, <messageId>.json, no temporary file left', files.join() === `${id}.json`, files.join())
+  check('inbox --send: the fields, with messageId and metadata.sentAt filled in, and only A2A 1.0 Message fields at the top level',
+    msg.messageId === id && msg.role === 'ROLE_AGENT' && msg.contextId === 'acme/widgets#7' && msg.taskId === 'recheck abc123' &&
+    JSON.stringify(Object.keys(msg.metadata).sort()) === '["from","sentAt","to"]' &&
+    msg.metadata.from === 'executor' && msg.metadata.to === 'operator' && JSON.stringify(msg.parts) === JSON.stringify([{ text: 'Pushed the fix.\nSecond line.' }]) &&
+    Math.abs(Date.parse(msg.metadata.sentAt) - Date.now()) < 60000 &&
+    Object.keys(msg).every((k) => ['messageId', 'role', 'contextId', 'taskId', 'parts', 'metadata'].includes(k)), JSON.stringify(msg))
+  const read = inbox(ctx, ['--dir', dir])
+  check('inbox --send: … and inbox.mjs then reports it', read.out === `MESSAGE:${id}\n`, read.out)
+  const noTask = inbox(ctx, ['--send', '--dir', dir, '--role', 'ROLE_USER', '--from', 'o', '--to', 'e', '--context', 'acme/widgets#8', '--text', 'go'])
+  const noTaskId = /^SENT:(\S+)\n$/.exec(noTask.out)?.[1]
+  const plain = noTaskId ? JSON.parse(readFileSync(path.join(dir, `${noTaskId}.json`), 'utf8')) : {}
+  check('inbox --send: without --task there is no taskId field', noTaskId && !('taskId' in plain) && plain.role === 'ROLE_USER', JSON.stringify(plain))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  const ok = ['--role', 'ROLE_USER', '--from', 'o', '--to', 'e', '--context', 'c', '--text', 't']
+  const without = (flag) => ok.filter((_, i) => ok[i] !== flag && ok[i - 1] !== flag)
+  const cases = [
+    ['no --role', without('--role')],
+    ['--role system', ['--role', 'system', ...without('--role')]],
+    ['--role user (A2A 0.3)', ['--role', 'user', ...without('--role')]],
+    ['no --from', without('--from')],
+    ['no --to', without('--to')],
+    ['no --context', without('--context')],
+    ['no --text', without('--text')],
+    ['an empty --text', [...without('--text'), '--text', '']],
+    ['--task with no value', [...ok, '--task']],
+    ['--wait', [...ok, '--wait', '1']],
+  ]
+  for (const [name, args] of cases) {
+    const r = inbox(ctx, ['--send', '--dir', dir, ...args])
+    check(`inbox --send: ${name} → usage error, exit 1, nothing written`, r.code === 1 && /Usage: inbox\.mjs/.test(r.err) && !existsSync(dir), JSON.stringify(r))
+  }
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // A reply copies to, contextId and taskId from the message (#80 review): nothing the writer
+  // chose passes through the shell, and a value split by the shell fails loudly.
+  const ctx = makeEnv()
+  const inb = path.join(ctx.home, 'in')
+  const out = path.join(ctx.home, 'out')
+  putMessage(inb, 'm1', { taskId: 'recheck abc1234', contextId: 'owner/repo#123' }, { from: 'operator (host); $(touch x)' })
+  const r = inbox(ctx, ['--send', '--dir', out, '--reply-to', 'm1', '--inbox', inb, '--from', 'review-clone', '--text', 'Rechecked.'])
+  const id = /^SENT:(\S+)\n$/.exec(r.out)?.[1]
+  let reply = null
+  try {
+    reply = JSON.parse(readFileSync(path.join(out, `${id}.json`), 'utf8'))
+  } catch {
+    // checked below
+  }
+  check('inbox --send --reply-to: the reply carries the message\'s taskId, contextId and from as to, exactly, as ROLE_AGENT',
+    r.code === 0 && reply?.taskId === 'recheck abc1234' && reply?.contextId === 'owner/repo#123' && reply?.metadata.to === 'operator (host); $(touch x)' && reply?.metadata.from === 'review-clone' && reply?.role === 'ROLE_AGENT' && reply?.parts[0].text === 'Rechecked.',
+    JSON.stringify({ r, reply }))
+  putMessage(inb, 'bad', { role: 'user' })
+  const refusals = [
+    ['an invalid message', ['--reply-to', 'bad', '--inbox', inb]],
+    ['a missing message', ['--reply-to', 'gone', '--inbox', inb]],
+    ['a traversal id', ['--reply-to', '../in/m1', '--inbox', path.join(ctx.home, 'x')]],
+    ['no --inbox', ['--reply-to', 'm1']],
+    ['a --task beside it', ['--reply-to', 'm1', '--inbox', inb, '--task', 't']],
+    ['a --to beside it', ['--reply-to', 'm1', '--inbox', inb, '--to', 'someone']],
+  ]
+  const outbox2 = path.join(ctx.home, 'out2')
+  for (const [name, args] of refusals) {
+    const x = inbox(ctx, ['--send', '--dir', outbox2, ...args, '--from', 'e', '--text', 't'])
+    check(`inbox --send --reply-to: ${name} → usage error, exit 1, nothing written`, x.code === 1 && /Usage: inbox\.mjs/.test(x.err) && !existsSync(outbox2), JSON.stringify(x))
+  }
+  const split = inbox(ctx, ['--send', '--dir', outbox2, '--role', 'ROLE_AGENT', '--from', 'e', '--to', 'o', '--context', 'c', '--task', 'recheck', 'abc1234', '--text', 't'])
+  check('inbox --send: --task recheck abc1234 (a value the shell split) → usage error naming the stray word, exit 1, nothing written',
+    split.code === 1 && /unexpected argument "abc1234"/.test(split.err) && !existsSync(outbox2), JSON.stringify(split))
+  const stray = inbox(ctx, ['--dir', inb, 'extra'])
+  check('inbox: any argument that is no flag or value → usage error, exit 1', stray.code === 1 && /unexpected argument "extra"/.test(stray.err) && stray.out === '', JSON.stringify(stray))
+  const readInbox = inbox(ctx, ['--dir', inb, '--inbox', inb])
+  check('inbox: --inbox outside --send → usage error, exit 1', readInbox.code === 1 && /--inbox goes with --send/.test(readInbox.err), JSON.stringify(readInbox))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // No default folder: the deployment names it, outside the clone (#77: the trust rule in SPEC "Inbox folder").
+  const ctx = makeEnv()
+  const clone = path.join(ctx.home, 'clone')
+  mkdirSync(clone)
+  putMessage(path.join(clone, '.agent-loop', 'inbox'), 'in1')
+  const read = inbox(ctx, [], clone)
+  check('inbox: no --dir → usage error, exit 1 (no default folder in the clone)', read.code === 1 && /--dir is required/.test(read.err) && read.out === '', JSON.stringify(read))
+  const sent = inbox(ctx, ['--send', '--role', 'ROLE_AGENT', '--from', 'executor', '--to', 'operator', '--context', 'acme/widgets#7', '--text', 'done'], clone)
+  check('inbox --send: no --dir → usage error, exit 1, no outbox made', sent.code === 1 && /--dir is required/.test(sent.err) && !existsSync(path.join(clone, '.agent-loop', 'outbox')), JSON.stringify(sent))
+  const quoted = inbox(ctx, ['--send', '--dir', homeRel('mail', 'out'), '--role', 'ROLE_AGENT', '--from', 'e', '--to', 'o', '--context', 'c', '--text', 't'], clone)
+  const qid = /^SENT:(\S+)\n$/.exec(quoted.out)?.[1]
+  check('inbox --send: a quoted home-relative folder is under the home folder', qid && existsSync(path.join(ctx.home, '.agent-loop', 'mail', 'out', `${qid}.json`)) && !existsSync(path.join(clone, '~')), JSON.stringify(quoted))
+  putMessage(path.join(ctx.home, '.agent-loop', 'mail', 'in'), 'home1')
+  const home = inbox(ctx, ['--dir', homeRel('mail', 'in')], clone)
+  check('inbox: … and so is a home-relative folder to read', home.out === 'MESSAGE:home1\n', JSON.stringify(home))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // --check: the mailbox the skills use only when it is safe (spec: "Inbox folder", Trust).
+  const ctx = makeEnv()
+  const clone = path.join(ctx.home, 'clone')
+  mkdirSync(path.join(clone, 'sub'), { recursive: true })
+  symlinkSync(path.join(clone, 'sub'), path.join(ctx.home, 'link-into-clone'))
+  const mail = path.join(ctx.home, '.agent-loop', 'mail')
+  const cases = [
+    ['two sibling folders outside the clone, not yet made', [path.join(mail, 'in'), path.join(mail, 'out')], 'MAILBOX_OK'],
+    ['home-relative folders outside the clone', [homeRel('mail', 'in'), homeRel('mail', 'out')], 'MAILBOX_OK'],
+    ['a sibling of the clone whose name starts with the clone\'s', [path.join(ctx.home, 'clone-mail', 'in'), path.join(ctx.home, 'clone-mail', 'out')], 'MAILBOX_OK'],
+    ['the inbox in the clone', [path.join(clone, '.agent-loop', 'inbox'), path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox is inside the clone'],
+    ['the inbox is the clone', [clone, path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox is inside the clone'],
+    ['the outbox in the clone', [path.join(mail, 'in'), path.join(clone, 'out')], 'MAILBOX_REFUSED: the outbox is inside the clone'],
+    ['the inbox through a symlink into the clone', [path.join(ctx.home, 'link-into-clone', 'in'), path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox is inside the clone'],
+    ['a relative inbox', ['.agent-loop/inbox', path.join(mail, 'out')], 'MAILBOX_REFUSED: both folders must be absolute'],
+    ['the outbox inside the inbox', [path.join(mail, 'in'), path.join(mail, 'in', 'out')], 'MAILBOX_REFUSED: the inbox and the outbox must be separate'],
+    ['the inbox inside the outbox', [path.join(mail, 'out', 'in'), path.join(mail, 'out')], 'MAILBOX_REFUSED: the inbox and the outbox must be separate'],
+    ['one folder for both', [path.join(mail, 'box'), path.join(mail, 'box')], 'MAILBOX_REFUSED: the inbox and the outbox must be separate'],
+  ]
+  for (const [name, [i, o], want] of cases) {
+    const r = inbox(ctx, ['--check', '--dir', i, '--outbox', o], clone)
+    check(`inbox --check: ${name} → ${want.split(':')[0]}`, r.code === 0 && r.out.startsWith(want) && r.out.endsWith('\n') && r.out.split('\n').length === 2, JSON.stringify(r))
+  }
+  check('inbox --check: … writes nothing (no folder made)', !existsSync(mail) && !existsSync(path.join(clone, '.agent-loop')), String(existsSync(mail)))
+  putMessage(path.join(mail, 'in'), 'shown')
+  putMessage(path.join(mail, 'in'), 'badrole', { role: 'user' })
+  writeFileSync(path.join(mail, 'secret.json'), JSON.stringify(message('secret')))
+  symlinkSync(path.join(mail, 'secret.json'), path.join(mail, 'in', 'linked.json'))
+  const shown = inbox(ctx, ['--dir', homeRel('mail', 'in'), '--show', 'shown'], clone)
+  check('inbox --show: a valid message → its JSON, exit 0', shown.code === 0 && JSON.stringify(JSON.parse(shown.out)) === JSON.stringify(message('shown')), JSON.stringify(shown))
+  const shows = [
+    ['an invalid message', 'badrole', 'INVALID: role must be'],
+    ['no such message', 'gone', 'INVALID: no such message'],
+    ['a symlink', 'linked', 'INVALID: not a regular file'],
+    ['a path for an id', '../secret', 'INVALID: not a message id'],
+    ['an absolute path for an id', path.join(mail, 'secret'), 'INVALID: not a message id'],
+    ['an id with a slash', 'in/../../secret', 'INVALID: not a message id'],
+    ['"..", the parent folder', '..', 'INVALID: not a message id'],
+  ]
+  for (const [name, id, want] of shows) {
+    const r = inbox(ctx, ['--dir', homeRel('mail', 'in'), '--show', id], clone)
+    check(`inbox --show: ${name} → ${want.split(':')[0]}, one line and nothing of the file`, r.code === 0 && r.out.startsWith(want) && r.out.split('\n').length === 2 && !r.out.includes('rebase') && r.err === '', JSON.stringify(r))
+  }
+  const record = inbox(ctx, ['--dir', homeRel('mail', 'in')], clone)
+  check('inbox --show: … records nothing (the next run still reports every file)', record.out === 'MESSAGE:shown\nINVALID:badrole\n', JSON.stringify(record))
+  const noOut = inbox(ctx, ['--check', '--dir', path.join(mail, 'in')], clone)
+  check('inbox --check: no --outbox → usage error, exit 1', noOut.code === 1 && /--outbox/.test(noOut.err), JSON.stringify(noOut))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // One waiter for both: a signal script's waiter given --inbox also ends on a new message (#77).
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  setFixture(ctx, watchReviewed)
+  const missing = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir, '--wait', '1', '--max', '2')).done
+  check('wait --inbox: no such folder and nothing on GitHub → NONE at --max', signals(missing.out).join() === 'NONE' && missing.ms >= 2000 && missing.code === 0, `${missing.ms}ms\n${missing.out}${missing.err}`)
+  putMessage(dir, 'old')
+  inbox(ctx, ['--dir', dir])
+  const record = readdirSync(path.join(ctx.home, '.agent-loop', 'state')).filter((f) => f.startsWith('inbox-'))
+  const before = readFileSync(path.join(ctx.home, '.agent-loop', 'state', record[0]), 'utf8')
+  const seen = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir, '--wait', '1', '--max', '2')).done
+  check('wait --inbox: a message inbox.mjs already reported is not news → NONE at --max', signals(seen.out).join() === 'NONE' && seen.ms >= 2000, `${seen.ms}ms\n${seen.out}${seen.err}`)
+  const w = start(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir, '--wait', '1', '--max', '15'))
+  await pause(1500)
+  const t0 = Date.now()
+  putMessage(dir, 'new')
+  const r = await w.done
+  const after = Date.now() - t0
+  check('wait --inbox: a new message mid-wait ends the GitHub waiter → PENDING within one poll', r.out === 'PENDING\n' && r.code === 0 && after < 2500, `${after}ms after the write\n${r.out}${r.err}`)
+  check('wait --inbox: … the waiter wrote nothing to the inbox record', readFileSync(path.join(ctx.home, '.agent-loop', 'state', record[0]), 'utf8') === before, before)
+  const next = inbox(ctx, ['--dir', dir])
+  check('wait --inbox: … so inbox.mjs then reports the message', next.out === 'MESSAGE:new\n', next.out)
+  const gh = run(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir), watchReviewed)
+  check('wait --inbox: a one-shot run takes the flag and prints as before', signals(gh).join() === 'NONE', gh)
+  setFixture(ctx, { ...watchReviewed, fail: true })
+  putMessage(dir, 'during-outage')
+  const outage = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', dir, '--wait', '1', '--max', '10')).done
+  check('wait --inbox: a message ends the wait even while every gh call fails', outage.out === 'PENDING\n' && outage.ms < 4000, `${outage.ms}ms\n${outage.out}${outage.err}`)
+  setFixture(ctx, watchReviewed)
+  putMessage(path.join(ctx.home, '.agent-loop', 'quoted'), 'q1')
+  const tilde = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', homeRel('quoted'), '--wait', '1', '--max', '10')).done
+  check('wait --inbox: a quoted home-relative folder is under the home folder', tilde.out === 'PENDING\n' && tilde.ms < 4000, `${tilde.ms}ms\n${tilde.out}${tilde.err}`)
+  // The skills pass the block's form to both: the record must be the same file, or every waiter
+  // would return at once on a message already handled, and the loop would spin.
+  inbox(ctx, ['--dir', homeRel('quoted')], ctx.home)
+  const handled = await start(ctx, 'pr-watch.mjs', watchArgs('--inbox', homeRel('quoted'), '--wait', '1', '--max', '2')).done
+  check('wait --inbox: … once inbox.mjs reported it under the same home-relative name, not news → NONE at --max', signals(handled.out).join() === 'NONE' && handled.ms >= 2000, `${handled.ms}ms\n${handled.out}${handled.err}`)
+  const bad = run(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--inbox'), watchReviewed)
+  check('wait --inbox: --inbox with no folder → usage error, exit 1', bad.startsWith('EXIT 1') && bad.includes('--inbox'), bad)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, 'box')
+  const lgtm = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
+  poll(ctx, BASE)
+  poll(ctx, lgtm)
+  setFixture(ctx, lgtm)
+  const w = start(ctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--inbox', dir, '--wait', '1', '--max', '15'])
+  await pause(1500)
+  putMessage(dir, 'exec1')
+  const r = await w.done
+  check('wait --inbox (poll): a standing MERGE_READY stays quiet, and a new message ends the executor\'s waiter → PENDING', r.out === 'PENDING\n' && r.ms >= 1500 && r.ms < 5000, `${r.ms}ms\n${r.out}${r.err}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- pull.mjs
 {
   // A real origin, a clone that plays the loop's (on main), and a seed clone that lands merges.
@@ -1416,6 +1759,11 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
     restart.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor --milestone "M3 \\"core\\" loop"\n' &&
     bare.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor\n',
     `${restart.stdout}${bare.stdout}`)
+  // A mailbox comes from the start arguments only (#77), so the restart line must carry them.
+  const mailed = pull('--start', '/agent-loop:start-executor --inbox /srv/agent-mail/<clone>/inbox --outbox /srv/agent-mail/<clone>/outbox', '--milestone', 'M3')
+  check('pull --start: a start with --inbox and --outbox → the restart line keeps both, exactly, before --milestone',
+    mailed.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor --inbox /srv/agent-mail/<clone>/inbox --outbox /srv/agent-mail/<clone>/outbox --milestone "M3"\n',
+    mailed.stdout)
 
   writeFileSync(path.join(loop, 'local.txt'), 'x\n')
   g(loop, 'add', 'local.txt')

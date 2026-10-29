@@ -483,7 +483,7 @@ resume.
 
 ## Waiting for events (`--wait`)
 
-All three scripts take `--wait [secs]` (poll interval, default 30) and `--max <secs>` (default
+All three scripts, and `inbox.mjs` ("Inbox folder"), take `--wait [secs]` (poll interval, default 30) and `--max <secs>` (default
 1500), which turn the script into a **waiter**. Without `--wait` nothing changes.
 
 A waiter never writes state. Every interval it evaluates what a one-shot run would print; as soon
@@ -502,6 +502,11 @@ the waiter's exit and its next run.
   prints `WATCHER_RUNNING <pid>` and exits 3. A stopped waiter prints nothing.
 - A failed poll (network, rate limit, auth) is reported on stderr and retried on the next
   interval.
+- **`--inbox <folder>`** (waiters of the three signal scripts): the waiter also prints `PENDING`
+  as soon as the folder holds a message file `inbox.mjs` has not reported ("Inbox folder"),
+  checked before GitHub each interval, so a message ends the wait while GitHub is failing. It
+  reads `inbox.mjs`'s record and never writes it; a missing folder is never news. One-shot runs
+  accept the flag and ignore it.
 
 Adapters whose harness wakes the agent when a background process exits start a waiter at the end
 of each cycle and keep a timer only as a fallback. Adapters driven by cron or by hand keep
@@ -573,6 +578,120 @@ stopped mid-run leaves the head `pending`, which withholds `MERGE_READY` until i
 login, so `pr-poll` cannot tell the runner's `success` from an agent's. An agent may post
 `pending` under the context (a re-run request) and never another state; adapters refuse the rest
 structurally where the tool allows, like a merge.
+
+---
+
+## Inbox folder (`inbox.mjs`)
+
+A folder of message files is a signal source that needs nothing but a shared folder: it reaches a
+session in a container or VM, or one whose tool has no messaging between sessions. Direction goes
+into a clone's **inbox**; a session writes its replies to its **outbox**. There are no default
+folders: whoever launches a loop names both (`--dir <folder>`; an adapter takes them from the
+loop's start arguments, below), outside the clone ("Trust"). Who reads an outbox is up to the
+deployment.
+
+**Configuration.** A role uses a mailbox only when its start names both, as arguments beside the
+role's others:
+
+```
+start-reviewer --inbox /srv/agent-mail/<clone>/inbox --outbox /srv/agent-mail/<clone>/outbox
+```
+
+Each is an absolute path or starts with `~` and a slash (the home folder); `<clone>` stands for
+the clone's folder name, so one launch line serves every clone. Each is its own folder, neither
+inside the other, so a mount carries exactly one direction. `inbox.mjs --check --dir <inbox>
+--outbox <outbox>`, run in the clone's root, prints `MAILBOX_OK`, or `MAILBOX_REFUSED: <reason>`
+when a folder is relative, inside the clone (after following symlinks) or inside the other.
+Neither argument → no mailbox, and nothing changes. One without the other, or a refused pair → the
+adapter warns once and runs without a mailbox.
+
+The folders are never configuration a project checks in (the `## Agent loop` block, a checked-in
+settings file, environment variables such settings can set). A loop reads the block from the
+working tree at its start, and a reviewer that restarts while its clone sits on a PR's head would
+read that PR's block. The PR would then choose the inbox: any folder outside the clone its own
+code can write, which `--check` cannot tell apart. Start arguments come from whoever launches the
+session, never from a PR. The folders are also one installation's layout, not the project's.
+
+**A message** is one JSON file, `<messageId>.json`:
+
+```json
+{
+  "messageId": "0b9e…",
+  "role": "ROLE_USER",
+  "contextId": "owner/repo#123",
+  "taskId": "recheck abc1234",
+  "parts": [{ "text": "Rebase on main, then push." }],
+  "metadata": {
+    "from": "operator",
+    "to": "executor",
+    "sentAt": "2026-01-01T10:00:00.000Z"
+  }
+}
+```
+
+- `messageId`: letters, digits, `.`, `_`, `-`, at most 128, starting with a letter or digit; the
+  file name without `.json`.
+- `role`: `ROLE_USER` for direction, `ROLE_AGENT` for a session's reply.
+- `contextId`: the work item, such as `owner/repo#123`. `taskId`, optional: one step inside it,
+  such as a recheck at a sha.
+- `parts`: at least one. Each part has exactly one of `text` (a string), `raw` (base64), `url`
+  (a string) or `data` (any JSON value), and optionally `mediaType`, `filename` (strings) and
+  `metadata` (an object). A text part is `{ "text": "…" }`; there is no `kind` field.
+- `metadata`: an object holding agent-loop's three keys, which `inbox.mjs` reads from there:
+  `from` and `to` (who wrote it and for whom, as names the deployment chooses) and `sentAt` (an
+  ISO 8601 time). Other keys are allowed and ignored. `from`, `to` and `sentAt` at the top level
+  make the file invalid.
+
+A message file is an **A2A 1.0** `Message` as it stands, in its JSON form: the fields
+(`messageId`, `role`, `contextId`, `taskId`, `parts`, `metadata`), the role values and the part
+shape are A2A 1.0's, and agent-loop's own keys live in `metadata`, so an A2A adapter carries a
+message over one to one. A2A's task lifecycle is not adopted: the status model is still
+agent-loop's own, its signals and labels.
+
+**Reading:** `inbox.mjs --dir <folder>` prints one line per message it has not reported before,
+oldest `metadata.sentAt` first, then exits:
+
+| Line | Meaning |
+|---|---|
+| `MESSAGE:<messageId>` | a new message; the agent reads it with `inbox.mjs --dir <folder> --show <messageId>` (the message's JSON, or `INVALID: <reason>`; it records nothing), or reads `<folder>/<messageId>.json` |
+| `INVALID:<messageId>` | a new file with a message's name that is not a valid message (unparseable, a field missing or wrong, `messageId` not the file name, over 1 MiB); the reason goes to stderr |
+| `NONE <timestamp>` | nothing new, or no such folder |
+
+Each file is reported once, `INVALID` included. A first run reports every message already in the
+folder: unlike GitHub activity, a message is direction, not history to seed past. Only regular
+files named `<messageId>.json` are read: dotfiles, temporary names, other extensions, folders and
+symlinks are never messages.
+
+**Waiting:** `--wait [secs] --max <secs>` as in "Waiting for events": the waiter lists the folder
+every interval and prints `PENDING` as soon as a new message (or invalid file) is there. It polls
+rather than relying on file-change events, which may not cross a shared folder into a VM. A folder
+that does not exist yet is polled like an empty one.
+
+**One waiter for both.** A loop needs no second waiter for its inbox: the signal scripts' waiters
+take `--inbox <folder>` ("Waiting for events") and also end on a message there that `inbox.mjs`
+has not reported. The agent then runs `inbox.mjs --dir <folder>` one-shot, as well as its signal
+script.
+
+**Writing:** `inbox.mjs --send --dir <folder> --role ROLE_USER|ROLE_AGENT --from <name> --to
+<name> --context <contextId> [--task <taskId>] --text <text>` writes the text as one part and
+`--from`, `--to` into `metadata`, fills in `messageId` (a UUID) and `metadata.sentAt`, creates the
+folder if needed, and prints `SENT:<messageId>`. It writes `.<messageId>.<pid>.tmp`
+in the same folder and renames it to `<messageId>.json`, so a reader never sees half a message.
+Any other writer must do the same: write under a dotfile name in the folder, then rename.
+`inbox.mjs --send --dir <outbox> --reply-to <messageId> --inbox <inbox> --from <name> --text
+<text>` answers a valid message in `<inbox>`: the reply is `ROLE_AGENT`, its `metadata.to` is the
+message's `metadata.from`, and its `contextId` and `taskId` are the message's, so no value a
+message's writer chose reaches a shell command. `inbox.mjs` refuses any argument that is not one
+of its flags or a flag's value, so a value the shell split fails instead of being cut short.
+
+**Trust.** A message counts as direction only because of who can write to the folder. The inbox
+must not be writable by anything a PR's content can influence (a gate, a test, a build step, an
+agent acting on PR text). The clone is where PR code runs, and a sandbox lets it write there and
+little else, so neither folder is ever inside the clone: an inbox there would let a PR write
+direction to its own reviewer. Text inside a message is direction from its writer, within the
+role's fixed rules (a message never makes an agent merge, push to `main` or skip a review); text
+it quotes from GitHub is still data. `from` and `to` are labels the writer chose, not proof of
+who wrote it.
 
 ---
 
@@ -654,6 +773,7 @@ operator looking around in the clone, is not affected.
 | `pr-watch.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-state.json`; with `--reviewer <clone>`, `<owner>-<repo>-pr-state-<clone>.json` |
 | `pr-poll.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json` (one per PR) |
 | `pr-qa.mjs` | `~/.agent-loop/state/<owner>-<repo>-pr-qa-state.json` |
+| `inbox.mjs` | `inbox-<hash>.json` in the same folder as the rows above, one per inbox folder (`<hash>`: the first 16 hex digits of the SHA-256 of the folder's real path): `{ "reported": [messageId, …] }`, pruned to the files still in the folder |
 | `local-ci.mjs` | no state (the statuses are its record); its lock is `~/.agent-loop/state/<owner>-<repo>-local-ci-<context>.lock`, its logs `~/.agent-loop/local-ci/<owner>-<repo>/<pr>-<sha>-<time>.log` |
 
 Per-repo paths prevent collisions when running agent-loop on several repos, and per-PR paths for
@@ -693,4 +813,7 @@ reviewer's gate quote; without the flag nothing changes), and `session.mjs`, a h
 commit status, which the scripts read as a CI check; `pr-poll` tells two runs of a commit status
 apart by its REST id, so a re-run that fails again is `CI_FAILING` again. Later in 0.2, additive:
 the `rules` key and `pull.mjs`, a helper like `pick-next.mjs` whose `RULES_CHANGED:` and
-`RESTART:` lines are not signal lines.
+`RESTART:` lines are not signal lines. Later in 0.2, additive: `inbox.mjs`, a new signal source
+(`MESSAGE:<messageId>`, `INVALID:<messageId>`) over a folder of message files, the message
+format, the loops' `--inbox`/`--outbox` start arguments ("Inbox folder"), and the waiters'
+`--inbox <folder>`.
