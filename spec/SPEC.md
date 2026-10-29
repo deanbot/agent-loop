@@ -434,10 +434,14 @@ picks nothing and exits 0 (`<files>` is `(unreadable record)` when the record ca
 -- <files>` and that diff, at most 200 lines in all; past that it is cut and ends with
 `RULES_CUT: <n> more lines; run each command below for the rest` and the `git diff` command of the
 cut range and every one after it. Then it clears the record. Nothing pending prints nothing. An
-unreadable record prints `RULES_UNREADABLE: …` (read `AGENTS.md` and the rules files in full) and
-is cleared. A failed diff, or a record it can't clear, exits 2 with one `rules-ack: …` line on
-stderr, nothing on stdout and the record kept. A record `pull.mjs` can't write is a `pull: rules
-change not recorded: …` line on stderr; the pull still exits 0. The reviewer's pull records its
+unreadable record, or a range whose commits the clone lacks (the record outlives the clone, so a
+fresh or shallow clone at the same path meets it), prints `RULES_UNREADABLE: <why>; read AGENTS.md
+and the files its rules key lists, in full` first and is cleared. Any other failure (not a clone,
+a failed diff, a record it can't clear) exits 2 with one `rules-ack: … (record: <file>)` line on
+stderr, nothing on stdout and the record kept. A record `pull.mjs` can't write adds
+`RULES_NOT_RECORDED: run the git diff command above yourself; pick-next.mjs will not wait for it`
+after the diff command, and a `pull: rules change not recorded: …` line on stderr; the pull still
+exits 0, and the loop runs that `git diff` itself. The reviewer's pull records its
 change the same way, but nothing in the reviewer's loop reads the record yet: it is gated by its
 skill text alone.
 

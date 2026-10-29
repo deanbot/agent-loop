@@ -63,8 +63,10 @@ Pull `main` with `node scripts/pull.mjs`, never a bare `git pull`: you read `AGE
 rule merged while you run reaches you only through it. On `RULES_CHANGED: <files>`, run `node
 scripts/rules-ack.mjs` from the clone's root before the next pick and follow what changed: it
 prints the diff (past 200 lines, `RULES_CUT:` and the `git diff …` commands for the rest) and
-clears the record that makes `pick-next.mjs` refuse. Read only that diff, never the whole files.
-Nothing printed → no rule changed. A failed ack (exit 2, `rules-ack: …` on stderr) → report it,
+clears the record that makes `pick-next.mjs` refuse. Read only that diff, never the whole files;
+on `RULES_UNREADABLE: …`, read `AGENTS.md` and the files its `rules` key lists in full. The pull
+printing nothing → no rule changed. A `RULES_NOT_RECORDED` line from the pull → nothing was
+recorded: run the `git diff …` command under `RULES_CHANGED` yourself instead. A failed ack (exit 2, `rules-ack: …` on stderr) → report it,
 wait ~5 minutes, run it again.
 
 To restart for a plugin update: with a PR open, use the stop file and re-run on the PR;

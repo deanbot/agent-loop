@@ -15,7 +15,8 @@ then the pull, with the restart line: `node ${CLAUDE_PLUGIN_ROOT}/scripts/pull.m
 "/agent-loop:start-executor"`, plus `--milestone "<milestone>"` when you have one (the current
 track, after any `MOVE_ON`). A `RULES_CHANGED:` line → run `node
 ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs`, which prints the diff, and follow what changed
-(SKILL.md, "Rules that hold"). Until you do, `pick-next.mjs` picks nothing and prints
+(SKILL.md, "Rules that hold"); with a `RULES_NOT_RECORDED` line too, nothing was recorded, so run
+the `git diff …` command under `RULES_CHANGED` yourself instead. Until you do, `pick-next.mjs` picks nothing and prints
 `RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again`. Then, before the next pick, write as your own
 text a one-line note to the operator, and the `RESTART: …` line exactly as the script gave it, on
 its own line. The script's output is not enough: a terminal can collapse or cut a tool's output,

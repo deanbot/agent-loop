@@ -1831,12 +1831,48 @@ const putMessage = (dir, id, extra, meta) => {
     unreadable.stdout === pendingLine('(unreadable record)') && unreadAck.status === 0 &&
       unreadAck.stdout.startsWith('RULES_UNREADABLE: ') && !existsSync(record) && pickIn().stdout === 'ISSUE:11\n',
     `${unreadable.stdout}${unreadAck.stdout}${unreadAck.stderr}`)
-  writeFileSync(record, JSON.stringify({ pending: [{ from: 'deadbeef0000', to: 'deadbeef1111', files: ['AGENTS.md'] }] }))
-  const badDiff = ack()
-  check('rules-ack: a diff that fails → exit 2, one rules-ack: line, nothing on stdout, the record kept',
-    badDiff.status === 2 && badDiff.stdout === '' && /^rules-ack: /.test(badDiff.stderr) && badDiff.stderr.split('\n').filter(Boolean).length === 1 && existsSync(record),
-    `${badDiff.status} ${badDiff.stdout}${badDiff.stderr}`)
+  const headNow = g(loop, 'rev-parse', 'HEAD')
+  writeFileSync(record, JSON.stringify({ pending: [{ from: 'deadbeef0000', to: headNow, files: ['AGENTS.md'] }, { from: bigFrom, to: bigTo, files: ['AGENTS.md'] }] }))
+  const lost = ack()
+  check('rules-ack: a range whose commits the clone lacks → RULES_UNREADABLE first, naming it, the other range still diffed, the record cleared',
+    lost.status === 0 && lost.stdout.startsWith(`RULES_UNREADABLE: this clone lacks the commits of deadbeef0000..${headNow.slice(0, 12)}; read AGENTS.md`) &&
+      lost.stdout.includes(`RULES_DIFF: git diff ${bigFrom.slice(0, 12)}..${bigTo.slice(0, 12)} -- AGENTS.md`) && !existsSync(record),
+    `${lost.status} ${lost.stdout.slice(0, 400)}${lost.stderr}`)
+
+  // #93 review: the record outlives the clone; a shallow clone at the same path lacks the range.
+  const again = path.join(home, 'again')
+  g(home, 'clone', '-q', '--branch', 'main', origin, again)
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nshallow\n` })
+  spawnSync('node', [path.join(scripts, 'pull.mjs')], { cwd: again, env, encoding: 'utf8' })
+  const againRecord = path.join(home, '.agent-loop', 'state', `rules-${createHash('sha256').update(realpathSync(again)).digest('hex').slice(0, 16)}.json`)
+  const recorded = existsSync(againRecord)
+  rmSync(again, { recursive: true, force: true })
+  g(home, 'clone', '-q', '--depth', '1', '--branch', 'main', `file://${origin}`, again)
+  const shallowAck = ack(again)
+  const shallowPick = pickIn(again)
+  check('rules-ack: a shallow re-clone at the same path → RULES_UNREADABLE, exit 0, the record cleared, and the next pick proceeds',
+    recorded && shallowAck.status === 0 && shallowAck.stdout.startsWith('RULES_UNREADABLE: this clone lacks the commits of ') &&
+      !existsSync(againRecord) && shallowPick.stdout === 'ISSUE:11\n', `${recorded} ${shallowAck.status} ${shallowAck.stdout}${shallowAck.stderr}${shallowPick.stdout}`)
+
+  writeFileSync(record, JSON.stringify({ pending: [{ from: bigFrom, to: bigTo, files: ['AGENTS.md'] }] }))
+  chmodSync(path.dirname(record), 0o555)
+  const stuck = ack()
+  chmodSync(path.dirname(record), 0o755)
+  check('rules-ack: a record it can\'t clear → exit 2, one rules-ack: line naming the record, nothing on stdout, the record kept',
+    stuck.status === 2 && stuck.stdout === '' && stuck.stderr.startsWith('rules-ack: ') && stuck.stderr.trimEnd().endsWith(`(record: ${record})`) &&
+      stuck.stderr.split('\n').filter(Boolean).length === 1 && existsSync(record), `${stuck.status} ${stuck.stdout}${stuck.stderr}`)
   rmSync(record)
+
+  chmodSync(path.dirname(record), 0o555)
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nunwritable\n` })
+  const noState = pull()
+  const noStatePick = pickIn()
+  chmodSync(path.dirname(record), 0o755)
+  check('pull: an unwritable state folder → RULES_NOT_RECORDED after the diff command (run it yourself), exit 0, no record, the pick not held',
+    noState.status === 0 && /^RULES_CHANGED: AGENTS\.md\n {2}git diff \w+\.\.\w+ -- AGENTS\.md\nRULES_NOT_RECORDED: run the git diff command above yourself; pick-next\.mjs will not wait for it\n$/.test(noState.stdout) &&
+      /^pull: rules change not recorded: /.test(noState.stderr) && !existsSync(record) && noStatePick.stdout === 'ISSUE:11\n',
+    `${noState.status} ${noState.stdout}${noState.stderr}${noStatePick.stdout}`)
+
   mkdirSync(record)
   land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nlast\n` })
   const unrecorded = pull()

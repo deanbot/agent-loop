@@ -15,8 +15,9 @@
  * with a space or a shell character is single-quoted there). No such file changed (or nothing was
  * pulled) → nothing. The change is also recorded as pending for this clone (lib/rules.mjs), added
  * to any still pending: pick-next.mjs refuses to pick until rules-ack.mjs has printed it. A record
- * that can't be written prints `pull: rules change not recorded: <message>` on stderr and still
- * exits 0 (the pull itself worked).
+ * that can't be written adds a third line,
+ *   RULES_NOT_RECORDED: run the git diff command above yourself; pick-next.mjs will not wait for it
+ * and `pull: rules change not recorded: <message>` on stderr, and still exits 0 (the pull worked).
  *
  * --start <command> (a between-issues point): then prints the operator's restart line, with the
  * loop's own start arguments:
@@ -108,6 +109,7 @@ if (range) {
   try {
     addPending(recordFile(), range)
   } catch (e) {
+    lines.push('RULES_NOT_RECORDED: run the git diff command above yourself; pick-next.mjs will not wait for it')
     process.stderr.write(`pull: rules change not recorded: ${e?.message ?? e}\n`)
   }
 }

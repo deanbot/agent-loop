@@ -46,7 +46,9 @@ Three layers. Boundaries are strict.
 - `scripts/rules-ack.mjs` — no arguments. Prints each pending rules change (`RULES_DIFF: git diff
   …`, then the diff; at most 200 lines, then `RULES_CUT:` and the commands for the rest) and
   clears the record, so the change is in the session's context before `pick-next.mjs` picks again.
-  Nothing pending → nothing.
+  Nothing pending → nothing. A range the clone has no commits for → `RULES_UNREADABLE:` (read the
+  rules in full), cleared too. When `pull.mjs` can't write the record it adds `RULES_NOT_RECORDED`,
+  and the loop runs the printed `git diff` itself.
 - `scripts/local-ci.mjs` — a local CI runner, no agent's. `--repo owner/repo --gate "<command>"
   [--context local-ci] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]`, from the
   root of a clone of its own (it refuses one with a role marker). Runs the gate once per trusted,
