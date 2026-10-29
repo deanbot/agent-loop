@@ -37,7 +37,9 @@ permissions:
 #   edited, title or body only        ci-<pr>-edit-<run id>: its own, so an edit right after a push
 #                                     never cancels the push's run (it would report a passing head
 #                                     as failed); the run id, not the head, so a second edit
-#                                     doesn't cancel the first either
+#                                     doesn't cancel the first either. A new push doesn't cancel
+#                                     an edit's run on the old head (another group); that run's
+#                                     result belongs to the old head
 # A base change carries `changes.base` in the event (`changes.title` / `changes.body` otherwise).
 concurrency:
   group: ci-${{ github.event.action == 'edited' && !github.event.changes.base && format('{0}-edit-{1}', github.event.pull_request.number, github.run_id) || github.event.pull_request.number || github.sha }}
