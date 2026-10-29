@@ -92,9 +92,11 @@ parked and the operator unblocked, `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>`, `M
 fifth, `session.mjs`, keeps one loop session per clone: the newest start wins, and an old session
 left running stops. `pull.mjs` is every pull of `main` in a loop: it names the rules files the
 pull changed, so a running loop reads their diff. `local-ci.mjs` is no agent's: a local CI
-runner for a project with a `gate` (below). `audit.mjs` is the optional auditor's
-(`/agent-loop:start-auditor`, on demand): for each control the loop ran over a period, what it
-cost against what it caught, as one report for the operator (spec: "Auditor").
+runner for a project with a `gate` (below).
+
+`audit.mjs` is the optional auditor's (`/agent-loop:start-auditor`, on demand): for each control
+the loop ran over a period, what it cost against what it caught, as one report for the operator
+(spec: "Auditor").
 
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green + no conflict with `main` (+
 `[qa] PASS` with `qa-gate: on`). A project that can turn CI off names a `gate` command: on a PR

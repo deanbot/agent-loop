@@ -32,7 +32,7 @@
  * state comes from the REST issues endpoint, which also resolves a PR (`gh issue view` reports a
  * merged PR as MERGED, not CLOSED); only state "closed" counts as done. --skip lists issues this session already turned
  * down (author check failed, claim lost), so a pick never returns them again. Labels default to
- * in-progress and is-blocked. An issue labelled audit (an auditor's report) is never listed at all. The listing runs fresh on every call: an issue filed while the
+ * in-progress and is-blocked. The listing runs fresh on every call: an issue filed while the
  * executor waited is seen at the next pick. No state is kept.
  *
  * A failed gh call (network, rate limit, auth) prints `pick-next: <message>` on stderr and exits 2
