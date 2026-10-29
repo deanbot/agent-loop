@@ -963,6 +963,92 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   rmSync(migrated.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- audit.mjs, the auditor's numbers (#85)
+{
+  // One month: a prose-only PR gated in full (#10), a code PR with a run cancelled, a re-run after a
+  // cancelled attempt, a re-run after a failure and two review rounds (#11), and an issue left blocked
+  // for a day (#20). An in-progress lint run has no cost yet, so no lint finding may appear.
+  const ctx = makeEnv()
+  const at = (d) => `2026-03-${d}Z`
+  const wfRun = (id, sha, start, end, extra = {}) => ({ id, path: '.github/workflows/ci.yml', head_sha: sha, status: 'completed', conclusion: 'success', run_attempt: 1, run_started_at: at(start), updated_at: at(end), ...extra })
+  const fx = {
+    prs: [
+      { number: 10, createdAt: at('02T09:00:00'), closedAt: at('03T09:00:00'), mergedAt: at('03T09:00:00'), files: [{ path: 'README.md' }, { path: 'docs/guide.md' }] },
+      { number: 11, createdAt: at('05T08:00:00'), closedAt: at('07T00:00:00'), mergedAt: at('07T00:00:00'), files: [{ path: 'src/a.js' }, { path: 'README.md' }] },
+    ],
+    prCommits: {
+      10: [{ sha: 'a10', commit: { committer: { date: at('02T10:00:00') } } }],
+      11: [{ sha: 'b11', commit: { committer: { date: at('05T09:00:00') } } }, { sha: 'c11', commit: { committer: { date: at('06T09:00:00') } } }],
+    },
+    runs: [
+      wfRun(1001, 'a10', '02T10:01:00', '02T10:12:00'),
+      wfRun(1101, 'b11', '05T09:01:00', '05T09:03:00', { conclusion: 'cancelled' }),
+      wfRun(1102, 'b11', '05T09:05:00', '05T09:15:00', { run_attempt: 2 }),
+      wfRun(1103, 'c11', '06T09:10:00', '06T09:15:00', { run_attempt: 2 }),
+      wfRun(1201, 'a10', '02T10:01:00', '02T10:02:00', { path: '.github/workflows/lint.yml', status: 'in_progress', conclusion: null }),
+      wfRun(9999, 'zzz', '05T09:00:00', '05T10:00:00'),
+    ],
+    attempts: {
+      '1102/1': wfRun(1102, 'b11', '05T09:03:00', '05T09:04:00', { conclusion: 'cancelled' }),
+      '1103/1': wfRun(1103, 'c11', '06T09:01:00', '06T09:06:00', { conclusion: 'failure' }),
+    },
+    issueComments: {
+      10: [],
+      11: [comment('[reviewer] Review of b11.', at('05T12:00:00'), 'acme'), comment('[reviewer] LGTM', at('06T12:00:00'), 'acme'), comment('merging', at('06T20:00:00'), 'acme')],
+      20: [comment('[executor] BLOCKED: waiting.', at('10T00:05:00'), 'acme'), comment('ping', at('10T06:00:00'), 'stranger')],
+    },
+    items: [{ number: 20, state: 'open', closed_at: null, labels: [] }, { number: 11, state: 'closed', closed_at: at('07T00:00:00') }],
+    events: {
+      11: [{ event: 'labeled', label: { name: 'needs-operator' }, created_at: at('06T13:00:00') }],
+      20: [{ event: 'labeled', label: { name: 'is-blocked' }, created_at: at('10T00:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: at('11T00:00:00') }],
+    },
+  }
+  const audit = (extra = []) => run_(['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json', ...extra])
+  const run_ = (args) => {
+    const out = run(ctx, 'audit.mjs', args, fx)
+    try {
+      return JSON.parse(out)
+    } catch {
+      return { error: out }
+    }
+  }
+  const r = audit()
+  const f = (id) => (r.findings ?? []).find((x) => x.id === id)
+  const brief = JSON.stringify((r.findings ?? []).map((x) => [x.id, x.cost, x.caught, x.recommendation]))
+  check('audit: a prose-only PR gated in full → ci-prose finding, its run\'s minutes, caught 0, narrow with the narrower rule',
+    f('ci-prose:ci')?.cost === 11 && f('ci-prose:ci').caught === 0 && f('ci-prose:ci').recommendation === 'narrow' && /prose/.test(f('ci-prose:ci').rule) &&
+      JSON.stringify(f('ci-prose:ci').prs) === '[10]', brief + (r.error ?? ''))
+  check('audit: a cancelled run and a cancelled first attempt → cancelled cost 3 min over 2 runs, caught 0; the re-run after a cancel is not also a re-run finding\'s cost',
+    f('cancelled:ci')?.cost === 3 && f('cancelled:ci').runs === 2 && f('reruns:ci')?.cost === 5 && f('reruns:ci').runs === 1, brief)
+  check('audit: a re-run after a failure that passed → reruns cost, caught 0, drop', f('reruns:ci')?.caught === 0 && f('reruns:ci').recommendation === 'drop', brief)
+  check('audit: an issue left blocked for a day with no operator comment (a stranger\'s and a prefixed one don\'t count) → 1440 min, caught 0, narrow',
+    f('label:is-blocked')?.cost === 1440 && f('label:is-blocked').caught === 0 && f('label:is-blocked').recommendation === 'narrow', brief)
+  check('audit: a label that stayed on until the merge → caught, keep', f('label:needs-operator')?.cost === 660 && f('label:needs-operator').caught === 1 && f('label:needs-operator').recommendation === 'keep', brief)
+  check('audit: review rounds → 2 rounds, 1 followed by a commit, 360 min from commit to review, keep',
+    f('review-rounds')?.rounds === 2 && f('review-rounds').caught === 1 && f('review-rounds').cost === 360 && f('review-rounds').recommendation === 'keep', brief)
+  check('audit: a run with no cost yet (in progress) gives no finding, and a run of no PR in the period is not counted',
+    !(r.findings ?? []).some((x) => x.id.endsWith(':lint')) && !brief.includes('9999') && f('ci-prose:ci')?.runs === 1, brief)
+  check('audit: findings come in cost order', JSON.stringify((r.findings ?? []).map((x) => x.id)) ===
+    JSON.stringify(['label:is-blocked', 'label:needs-operator', 'review-rounds', 'ci-prose:ci', 'reruns:ci', 'cancelled:ci']), brief)
+  const fl = audit(['--floor', 'ci-prose:ci,label:typo'])
+  const flp = (fl.findings ?? []).find((x) => x.id === 'ci-prose:ci')
+  check('audit: a floor control keeps its cost but gets no recommendation; a floor id that matched nothing is listed',
+    flp?.cost === 11 && flp.floor === true && flp.recommendation === null && flp.rule === null && JSON.stringify(fl.unmatchedFloor) === '["label:typo"]', JSON.stringify(fl))
+  const md = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--floor', 'ci-prose:ci'], fx)
+  const section = md.split('\n### ').find((s) => s.startsWith('`ci-prose:ci`')) ?? ''
+  check('audit md: the header names the period and the exact arguments to reproduce it; a floor line is cost only; PRs by number',
+    md.startsWith('# [auditor] Audit 2026-03-01..2026-03-31\n') && md.includes('Reproduce: `node scripts/audit.mjs --repo acme/widgets --since 2026-03-01T00:00:00Z --until 2026-03-31T23:59:59Z --floor ci-prose:ci`') &&
+      section.includes('In `audit-floor`: cost only') && !section.includes('Recommendation') && section.includes('#10'), md)
+  const bad = run(ctx, 'audit.mjs', ['--repo', REPO], fx)
+  check('audit: no --since → usage error, exit 1', /^EXIT 1/.test(bad) && /--since is required/.test(bad), bad)
+  const failed = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '7d'], { fail: true })
+  check('audit: a failed gh call → one audit: line, exit 2', /^EXIT 2\n\naudit: HTTP 502/.test(failed), failed)
+  // An auditor's report is an issue for the operator: no executor may pick it as work.
+  const picked = run(ctx, 'pick-next.mjs', ['--repo', REPO], { issues: [{ number: 5, title: 'a', body: '', labels: [{ name: 'audit' }] }, { number: 6, title: 'b', body: '', labels: [] }] }).trim()
+  check('pick: an issue labelled audit is never picked', picked === 'ISSUE:6', picked)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- already read before the role's own post (#28)
 // A consumer's case: the executor pushes, the reviewer's one-shot run prints REVIEW, the executor's comment
 // lands after that run, and the reviewer re-reads the thread and posts LGTM. The executor comment

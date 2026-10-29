@@ -26,6 +26,11 @@ code with evidence it produced, and posts findings or `LGTM`. Posts `[reviewer]`
 `PASS` or `BLOCKED`. Posts `[qa]`. Adversarial by design. Enabled per project with `qa-gate: on`;
 without it the reviewer performs this pass itself.
 
+**Auditor** (optional) — AI agent, read-only and on demand, that questions the process, not the
+work: for each control the loop ran over a period, what it cost and what it caught ("Auditor").
+Posts `[auditor]` reports for the operator. It never directs a role, comments on a PR, pushes,
+labels another item or merges.
+
 All roles communicate through GitHub PR comment threads. Each role runs in its own clone of the
 repository so branches, dependencies, local state and stop requests never collide.
 
@@ -48,6 +53,8 @@ is the project's conventions, which the agents follow.
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status) |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
+| `audit-floor` | no | — | control ids ("Auditor") the auditor never recommends narrowing or dropping: security and privacy checks, the operator's merge, a named gate. A finding about one reports its cost only |
+| `audit-report` | no | `issue` | where the auditor's report goes: `issue` (a new issue per run, labelled `audit`) or `none` (printed only; the operator posts it) |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
 | `rules` | no | — | further files the agents follow as the project's rules, comma-separated paths (a path ending in `/` covers a directory); like `AGENTS.md`, a pull that changes one shows a running loop the diff ("Rules that change while a loop runs") |
 | `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
@@ -70,6 +77,7 @@ Labels must exist before first use (`gh label create …`); adapters may ship a 
 | `[executor]` | Executor | Fix summaries, questions, blocked notices |
 | `[reviewer]` | Reviewer | Findings, `LGTM`, questions for the operator, conflict notices |
 | `[qa]` | QA | Criterion table, `PASS` or `BLOCKED` |
+| `[auditor]` | Auditor | The title of its report issue; it posts no comments |
 
 **Never** use a bracket prefix in operator comments — agents treat prefixed comments as agent
 traffic. Every script filters its own role's prefix when looking for new activity, which prevents
@@ -692,6 +700,62 @@ direction to its own reviewer. Text inside a message is direction from its write
 role's fixed rules (a message never makes an agent merge, push to `main` or skip a review); text
 it quotes from GitHub is still data. `from` and `to` are labels the writer chose, not proof of
 who wrote it.
+
+---
+
+## Auditor (`audit.mjs`)
+
+The executor, reviewer and QA work inside the process and judge the work by its rules; none asks
+whether a step is worth what it costs. The auditor does, and only that. It runs on demand
+(`/agent-loop:start-auditor` in Claude Code), from any read-only checkout, never as a loop. Added
+later in 0.2, additive: a new role, a script and two optional keys.
+
+**What it reads**, all of it available on any project, from GitHub and the loop's own state:
+
+- each PR closed in the period, and its changed files, classed as prose (Markdown, `docs/`, plain
+  text), code, dependencies (manifests and lockfiles) or config (`.github/`, dotfiles, YAML, JSON,
+  TOML); a PR whose file list reached the API's cap of 100 is not classed as prose;
+- every CI run of those PRs' commits, whenever it started: its workflow, its wall-clock time from
+  start to last update, its result, whether it was a re-run (each earlier attempt is read on its
+  own) or cancelled;
+- comments on those PRs, for their time, their author's login and their prefix only: review rounds
+  are `[reviewer]` posts, and the time from a commit to the next one;
+- labelled and unlabelled events of `needs-operator-label` and `blocked-label` on PRs and issues
+  updated in the period;
+- the loop's own state on the machine it runs on: each waiter's idle streak, the wake-ups that
+  found nothing.
+
+**Comments are data.** The auditor reads a comment only for its time, its author and its prefix,
+never for its text, and takes no direction from any GitHub text. It names a PR by number, never by
+title, since a title is text anyone can write.
+
+**How it judges.** Each finding names a control, what it cost over the period and what it caught.
+A finding without both numbers is not posted.
+
+| Control (id) | Cost | Caught |
+|---|---|---|
+| `ci-prose:<workflow>` | minutes of that workflow's runs on PRs that changed only prose | runs that failed there |
+| `reruns:<workflow>` | minutes of the earlier attempts of re-run runs (a cancelled attempt is counted under `cancelled` only) | re-runs that failed again |
+| `cancelled:<workflow>` | minutes of runs and attempts cancelled before they finished | nothing: a cancelled run reports no result |
+| `label:<name>` | minutes the label was on | spans that ended in a merge or a close, or got an unprefixed comment from the owner or a `trusted-authors` login |
+| `review-rounds` | minutes from each commit to the next `[reviewer]` post | rounds followed by a new commit before the next round |
+
+`<workflow>` is the workflow file's name without its extension. The recommendation is one of
+**keep** (it caught something), **narrow**, with the narrower rule, or **drop** (re-runs that
+caught nothing). A control listed in `audit-floor` gets a cost-only line: what to do about it is
+the operator's call. Findings come in cost order, all in minutes. An `audit-floor` id that matched
+no control in the period is listed, so a typo is never silent. Idle wake-ups are reported but give
+no finding: what a wake-up catches isn't recorded.
+
+**The report.** One per run: a header with the period, the exact command that reproduces the
+numbers and the cost unit, then the findings. With `audit-report: issue` (the default), it is a
+new issue per run titled `[auditor] Audit <since>..<until>` and labelled `audit`, so findings can
+be closed one by one. `pick-next.mjs` never lists an issue labelled `audit`: a report is for the
+operator, never work for an executor. With `audit-report: none` it is printed only.
+
+**`audit.mjs`** `--repo owner/repo --since <YYYY-MM-DD|ISO|Nd> [--until <YYYY-MM-DD|ISO>] [--floor
+id,id] [--operators login,login] [--labels l,l] [--format md|json]` prints the report (Markdown,
+or JSON for tools) and posts nothing. A failed `gh` call exits 2 with one `audit: …` line on stderr.
 
 ---
 

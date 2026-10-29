@@ -32,7 +32,7 @@
  * state comes from the REST issues endpoint, which also resolves a PR (`gh issue view` reports a
  * merged PR as MERGED, not CLOSED); only state "closed" counts as done. --skip lists issues this session already turned
  * down (author check failed, claim lost), so a pick never returns them again. Labels default to
- * in-progress and is-blocked. The listing runs fresh on every call: an issue filed while the
+ * in-progress and is-blocked. An issue labelled audit (an auditor's report) is never listed at all. The listing runs fresh on every call: an issue filed while the
  * executor waited is seen at the next pick. No state is kept.
  *
  * A failed gh call (network, rate limit, auth) prints `pick-next: <message>` on stderr and exits 2
@@ -100,6 +100,7 @@ function isOpen(n, openNumbers) {
 }
 
 const hasLabel = (issue, name) => (issue.labels ?? []).some((l) => l.name === name)
+const AUDIT_LABEL = 'audit'
 
 let prCache = null
 const openPrs = () => (prCache ??= gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,body,isCrossRepository,author'))
@@ -138,7 +139,8 @@ function pick(title) {
     const back = resumable()
     if (back) return back
   }
-  const listed = listOpen(title)
+  // An auditor's report (spec: "Auditor") is for the operator, never work to pick.
+  const listed = listOpen(title).filter((i) => !hasLabel(i, AUDIT_LABEL))
   const open = listed.filter((i) => !skip.has(i.number))
   const openNumbers = new Set(open.map((i) => i.number))
   const startable = (i) =>

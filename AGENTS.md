@@ -45,6 +45,12 @@ Three layers. Boundaries are strict.
   root of a clone of its own (it refuses one with a role marker). Runs the gate once per trusted,
   same-repository PR head, one at a time, and posts the result as a commit status, which
   `gh pr checks` and `pr-poll.mjs` read as CI. One runner per repo and context (pid lock).
+- `scripts/audit.mjs` — the auditor's numbers, read-only. `--repo owner/repo --since <date|Nd>
+  [--until <date>] [--floor id,id] [--operators l,l] [--labels l,l] [--format md|json]`. For each
+  control the loop ran over the period (a workflow on prose-only PRs, re-runs, cancelled runs, a
+  label, review rounds), what it cost and what it caught, and keep, narrow or drop; prints a
+  report and posts nothing (spec: "Auditor"). Reads comments for their time, author and prefix,
+  never their text. `pick-next.mjs` never lists an issue labelled `audit`.
 - `scripts/inbox.mjs` — a folder of message files as a signal source. `--dir <folder>` (no default:
   the loop's `--inbox` start argument names it, outside the clone) prints `MESSAGE:<messageId>` per message not
   reported before (`INVALID:<id>` for a file that is not one), or `NONE`; `--show <id>` prints one
