@@ -2466,6 +2466,31 @@ const putMessage = (dir, id, extra, meta) => {
     const invariant = paragraph(text, '**Loop invariant: every cycle ends with a waiter running')
     check(`exit-3 rule (${role}): the loop invariant says a waiter running is one this cycle started, never one an earlier cycle saw`,
       invariant.includes('"A waiter running" means one this cycle started or, on an exit-3 wake only, the one that refused a second; never one an earlier cycle saw.'), invariant)
+
+    // #95: no cycle ends with neither a waiter nor the short timer.
+    check(`no cycle without a waiter (${role}): an exit-3 wake takes the 300-second timer, never the last cycle's delay`,
+      rule.includes('only call `ScheduleWakeup({ delaySeconds: 300, … })`, step 5\'s call with the short delay') && !rule.includes("the last cycle's delay"), rule)
+    const restart = paragraph(text, '**A failed waiter gets one restart.**')
+    check(`no cycle without a waiter (${role}): a failed waiter, exit 3 included, gets one restart, and a second failure is reported once`,
+      restart.includes('Exit 3 and any other failed exit are both a failed waiter.') &&
+        restart.includes('runs a full cycle ended with a waiter as usual: that is the restart. When that waiter fails too, the second failure in a row,') &&
+        restart.includes("`⚠ No waiter: <the exit code and the waiter's first line>; checking every 5 minutes instead.`") &&
+        restart.includes('--role ROLE_AGENT --from <clone> --to operator') &&
+        restart.includes('A waiter that exits 0 (`PENDING` or `NONE`) ends the count and the 5-minute rhythm'), restart)
+    // The review of #115: a restart within an old waiter's lifetime must not leave the loop without
+    // waiters for good. Exit 3 keeps trying, bounded by the lock; only a broken waiter stops.
+    check(`no cycle without a waiter (${role}): after exit 3 the loop keeps trying a waiter, which the other waiter's lock bounds; only a broken waiter is not retried`,
+      restart.includes('after exit 3, go on as above: each wake the failure causes ends with the 300-second `ScheduleWakeup`, and the next wake runs a full cycle that starts a waiter again.') &&
+        restart.includes('so this stops by itself; the report is not repeated.') &&
+        restart.includes('After any other failure, the waiter itself is broken: start no more waiters') &&
+        restart.includes('`ScheduleWakeup({ delaySeconds: 300, … })` alone'), restart)
+    const endCheck = paragraph(text, '**Before the turn ends, check the waiter.**')
+    check(`no cycle without a waiter (${role}): before the turn ends, a cycle with neither its waiter nor the 300-second timer starts the waiter and says so`,
+      endCheck.includes('ran a Bash call with `run_in_background: true` that started') &&
+        endCheck.includes('Neither → start the waiter now, and add `↻ waiter started at the end of the cycle` to the status line.') &&
+        text.indexOf('**Before the turn ends, check the waiter.**') < text.indexOf('**Loop invariant:'), endCheck)
+    check(`no cycle without a waiter (${role}): the invariant allows only the 300-second timer in place of a waiter`,
+      invariant.includes('A cycle that may start no waiter (above) ends with the 300-second `ScheduleWakeup` instead, never a longer one'), invariant)
   }
 }
 

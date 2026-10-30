@@ -118,17 +118,31 @@ not a cycle: read its output and finish the review it belongs to, then end that 
 
 A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
 is still alive (it printed `WATCHER_RUNNING`). Beat, then run nothing else and start no waiter;
-only call the `ScheduleWakeup` from step 5, with the last cycle's delay (1800, or 3600 when it was
-idle), or `delaySeconds: 300` when this session's start printed `TOOK_OVER` (the live waiter is
-likely the old session's, which ends within 55 minutes). This covers only the cycle this exit-3
+only call `ScheduleWakeup({ delaySeconds: 300, … })`, step 5's call with the short delay: the live
+waiter may be another session's (an old one's after a restart, which ends within 55 minutes), and
+its exit wakes that session, not you. This covers only the cycle this exit-3
 notification starts. The next wake of any other kind (the surviving waiter's own exit, a message,
 the fallback wakeup) runs a full cycle, ended as usual with a new waiter unless the cycle itself
 is an exit: a waiter whose exit has notified you is gone, so never assume one is still running
 because an earlier cycle saw it. A waiter started while another is in fact alive exits 3 again,
 and this rule then covers that wake alone. Any **other failed exit** means the waiter itself broke (a usage
 error, a broken install): name it in the status line, run the cycle, but end it with
-`ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
-again, so a failure that repeats costs one turn per five minutes, not one per second.
+`ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter.
+
+**A failed waiter gets one restart.** Exit 3 and any other failed exit are both a failed waiter.
+The next wake after one (the 300-second fallback, or any other) runs a full cycle ended with a
+waiter as usual: that is the restart. When that waiter fails too, the second failure in a row,
+print `⚠ No waiter: <the exit code and the waiter's first line>; checking every 5 minutes
+instead.` in the status line, and with a mailbox send that line once to your outbox (`node
+${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --send --dir <outbox> --role ROLE_AGENT --from <clone>
+--to operator --context <repo> --text "<the line in plain words>"`). Then, by the failure:
+after exit 3, go on as above: each wake the failure causes ends with the 300-second
+`ScheduleWakeup`, and the next wake runs a full cycle that starts a waiter again. The live
+waiter's lock ends within 57 minutes (its `--max` plus 2), so this stops by itself; the report is
+not repeated. After any other failure, the waiter itself is broken: start no more waiters in this
+session and end every later cycle with `ScheduleWakeup({ delaySeconds: 300, … })` alone. Each of
+those cycles still runs the watch, so news is seen within five minutes. A waiter that exits 0
+(`PENDING` or `NONE`) ends the count and the 5-minute rhythm.
 
 0. With a mailbox, first `node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --dir <inbox>`, in the
    foreground, once per cycle, and handle what it prints before any signal ("Messages").
@@ -222,9 +236,16 @@ cycle. The fallback (30 minutes; 60 when idle) fires only if no waiter woke you.
 one, so scheduling it every cycle never stacks wakeups. Standing signals (`REVIEW:<n>` for a PR
 you have not posted on, say, while you wait for `[qa] PASS`) do not wake you again by themselves.
 
+**Before the turn ends, check the waiter.** This cycle ran a Bash call with `run_in_background:
+true` that started `pr-watch.mjs … --wait`, and its result says it runs in the background; or this
+is a cycle that starts none (an exit-3 wake, a failed waiter, no more waiters) and called
+`ScheduleWakeup` with 300 seconds. Neither → start the waiter now, and add `↻ waiter started at
+the end of the cycle` to the status line.
+
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
 call.** "A waiter running" means one this cycle started or, on an exit-3 wake only, the one that
-refused a second; never one an earlier cycle saw. The only exits are the operator's stop and being superseded. (Claude Code fires one fallback wakeup about 20
+refused a second; never one an earlier cycle saw. A cycle that may start no waiter (above) ends
+with the 300-second `ScheduleWakeup` instead, never a longer one. The only exits are the operator's stop and being superseded. (Claude Code fires one fallback wakeup about 20
 minutes after an iteration that forgets, then ends the loop; do not rely on it.)
 
 ## Messages
