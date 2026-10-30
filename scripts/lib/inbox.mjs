@@ -96,7 +96,7 @@ export function expandHome(p) {
 }
 
 // The real path of `p`, which need not exist yet: its nearest existing ancestor resolved, plus the rest.
-function realish(p) {
+export function realish(p) {
   let head = path.resolve(p)
   const rest = []
   for (;;) {

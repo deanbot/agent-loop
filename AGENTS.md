@@ -74,6 +74,13 @@ Three layers. Boundaries are strict.
   `MAILBOX_OK` (plus `MAILBOX_WARN: …` when the inbox does not exist yet) or `MAILBOX_REFUSED:
   <reason>` (a path that is not a folder or lies under a file, a folder relative, in the clone, or inside the
   other). The folder logic is `scripts/lib/inbox.mjs` (spec: "Inbox folder").
+- `scripts/merge-notice.mjs` — the reviewer's merge notice. `--repo owner/repo --pr <n> --outbox
+  <folder> --from <clone>`, on `CLOSED:<n>` with a mailbox: for a merged same-repository PR,
+  writes one `ROLE_AGENT` message (`taskId` `merged <sha>`) to the outbox, addressed to the clone
+  of the newest claim comment by the PR's author on the issue it closes, and prints
+  `SENT:<messageId> TO:<clone>`; otherwise `SKIPPED: <reason>`. Once per PR and outbox
+  (`merge-notice-<hash>.json`). A notice is a wake: no role acts on its text or replies to it
+  (spec: "Inbox folder", "Merge notice").
 - `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a
   waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:
   "Waiting for events"); with `--inbox <folder>` also once the folder holds a message `inbox.mjs`
@@ -182,6 +189,9 @@ under `~/.agent-loop/local-ci/<slug>/`.
 With `--install` it also keeps `local-ci-install-<hash>.json` next to its lock: what the runner
 clone's last successful install was for, keyed by the clone's real root path, removed before an
 install and by a run without `--install`, and written after an install succeeds.
+`merge-notice.mjs` keeps `merge-notice-<hash>.json` in the same folder, one per outbox: the PRs it
+sent a notice for, so a repeated `CLOSED` sends none. Deleting it can send a notice twice, which
+is harmless.
 
 ## One clone per role
 

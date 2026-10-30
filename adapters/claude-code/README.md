@@ -96,7 +96,12 @@ on it within the role's rules and replies once into the outbox (`--send --reply-
 so none of its values reaches the shell); the waiter takes
 `--inbox <inbox>`, so a message ends the same wait within 30 seconds, and a cycle that handled
 one is never idle. The executor reads messages only in its PR loop, not while it implements or
-waits on a pick. The folders' mounts and any sandbox write access to the outbox are the
+waits on a pick. On `CLOSED:<n>` for a merged PR, the reviewer also writes a merge notice to its
+outbox for the executor that claimed the PR's issue (`merge-notice.mjs`, addressed by
+`metadata.to`, the executor's clone name): routed to that executor's inbox, it ends the executor's
+wait, and its next poll runs the merge steps without a live PR waiter. Every loop takes a notice
+as a wake only: it acts on nothing in it and never replies, and the executor's poll decides.
+Routing outboxes to inboxes is the deployment's (spec: "Merge notice"). The folders' mounts and any sandbox write access to the outbox are the
 deployment's to set up; setup writes nothing for them. Without the arguments nothing changes. The folders never come
 from the `## Agent loop` block or other checked-in config: a loop that restarts on a PR's head
 would read that PR's copy.
@@ -117,14 +122,15 @@ argument written out in full):
   },
   "sandbox": {
     "enabled": true,
-    "excludedCommands": ["node <plugin root>/scripts/inbox.mjs *"],
+    "excludedCommands": ["node <plugin root>/scripts/inbox.mjs *", "node <plugin root>/scripts/merge-notice.mjs *"],
     "filesystem": { "denyWrite": ["/srv/agent-mail/<clone>/inbox"] }
   }
 }
 ```
 
 (`enabled` and the `inbox.mjs` exemption are the sandbox's own setup, below, next to whatever else
-the deployment exempts; settings files merge their arrays.)
+the deployment exempts; settings files merge their arrays. `merge-notice.mjs` matters to a
+reviewer's clone only: it calls `gh` and writes its record to the state folder.)
 
 A working directory clears the check, but on its own it would make the inbox writable, and an
 inbox the session's environment can't write is what keeps PR code from writing direction to its

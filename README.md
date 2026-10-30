@@ -70,6 +70,8 @@ fails, and the loop says so in a `⚠` line each time. `scripts/rules-ack.mjs` c
 the scripts' state folder, outside the clone, so exempt it too: a sandboxed run can't clear it, and
 `pick-next.mjs` then refuses every pick (`RULES_PENDING`). `scripts/inbox.mjs` writes its record to
 the same state folder, so a loop with a mailbox needs it exempt too.
+`scripts/merge-notice.mjs`, which a reviewer with a mailbox runs on a merge, calls `gh` and writes
+its record there as well: exempt it too.
 
 ---
 
