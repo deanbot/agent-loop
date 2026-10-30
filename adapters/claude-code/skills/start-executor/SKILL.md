@@ -78,7 +78,9 @@ bare start that ran before the intended command) is then seen at once.
    --inbox /srv/mail/app-exec2/inbox --outbox /srv/mail/app-exec2/outbox` names none (not 3, not
    2). **A PR number names its issue:** `gh pr view <n> --repo <repo> --json number,body` succeeds
    → the number is a PR, and `<N>` is the first issue its body closes (`Closes #<N>`, as
-   `pick-next.mjs` reads it); no `Closes #N` → there is no `<N>`. It fails → `<N>` is the number.
+   `pick-next.mjs` reads it); no `Closes #N` → there is no `<N>`. It fails with `Could not
+   resolve to a PullRequest` → `<N>` is the number. Any other failure (network, auth) → **stop**
+   and say `Could not tell whether <n> is a PR: <the error>. Restart when gh works.`
    The issue checks and the claim listing below never run on a PR's number. Then decide (`<clone>`
    is the base name of your working directory):
    - **You hold #<N>**: it is open, carries `<in-progress-label>`, and the newest `[executor]

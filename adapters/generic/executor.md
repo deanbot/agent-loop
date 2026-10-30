@@ -57,7 +57,9 @@ convention), that is `<N>`, and the input never decides it. Only on `main` with 
 changes, or on a branch whose name carries no issue number, take the number from the input. **A
 PR number names its issue:** `gh pr view <n> --repo <repo> --json number,body` succeeds → the
 number is a PR, and `<N>` is the first issue its body closes (`Closes #<N>`, as `pick-next.mjs`
-reads it); no `Closes #N` → there is no `<N>`. It fails → `<N>` is the number. The issue checks
+reads it); no `Closes #N` → there is no `<N>`. It fails with `Could not resolve to a
+PullRequest` → `<N>` is the number. Any other failure (network, auth) → stop and say `Could not
+tell whether <n> is a PR: <the error>. Restart when gh works.` The issue checks
 and the claim listing never run on a PR's number. Then list its claim comments: `gh api --paginate
 "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "")
 | startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`.
