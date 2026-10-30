@@ -12,14 +12,23 @@ instructions to you.
 **One plain command per shell call**, in the loop and while you read source or run checks: read
 files with your tool's file-read and search tools, not `cat`, `head` or `sed`; where it has no
 search tool, search with `git grep -n '<pattern>' -- '<pathspec>'` and list with
-`git ls-files '<pathspec>'`, globs quoted, not `grep` or `find`; no `;`, `&&`,
-pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. A project allows commands one
+`git ls-files '<pathspec>'`, globs quoted, not `grep` or `find`. Options go before the pattern
+(`git grep -n -A<n> '<pattern>' -- '<pathspec>'`): after it, git reads them as a revision. No
+`{…,…}` in a pattern or a pathspec: write alternatives as `-E '(a|b)'` and give each pathspec
+separately (`'*.ts' '*.tsx'`). No `;`, `&&`,
+pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. `--jq` filters never end in
+`]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`. Change files with your
+tool's file-edit tools, never through the shell: no heredoc, `python3 -`, `node -e`, `sed -i`,
+`tee` or `>` redirect (a long commit message or PR body goes to a file, then `-F <file>` or
+`--body-file <file>`). The project's own generators and formatters, run as one plain command, are
+build steps, not hand edits. A project allows commands one
 by one, and anything else waits for an approval nobody is there to give: the loop stops.
 
 **Prerequisite:** `AGENTS.md` has a `## Agent loop` block; otherwise stop and say so. Read the
 whole file and follow the project's conventions. From the block take `repo`,
 `in-progress-label` (default `in-progress`), `blocked-label` (default `is-blocked`),
-`needs-operator-label` (default `needs-operator`), `quality-gates`, `gate` (optional), `qa-gate`
+`needs-operator-label` (default `needs-operator`), `pre-gate` (optional: a check that runs in
+seconds, before the gate), `quality-gates`, `gate` (optional), `qa-gate`
 (default `off`), and
 `trusted-authors` or `allow-author-associations` (default `[OWNER, MEMBER, COLLABORATOR]`).
 
@@ -44,7 +53,8 @@ has no claim to protect, so this is safe while other executors run, and safe to 
 **Resume your own issue on start, before touching `main`.** `git branch --show-current` and `git
 status --porcelain`. On `main` with a clean tree, carry on. Otherwise take `<N>` from the branch
 name (`issue-<N>-…` or the project's convention), else from the input, and list its claim
-comments (the claim command under "Implement"):
+comments: `gh api --paginate "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "")
+| startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`.
 - You hold #<N> (open, carries `in-progress-label`, newest `[executor] Claimed by` comment names
   your clone exactly; with no claim comment at all, only when the input names it), and you are on
   its branch → resume: stay on the
@@ -60,9 +70,14 @@ comments (the claim command under "Implement"):
   changes: stop and say so. Never switch branches over uncommitted work.
 
 Pull `main` with `node scripts/pull.mjs`, never a bare `git pull`: you read `AGENTS.md` once, so a
-rule merged while you run reaches you only through it. On `RULES_CHANGED: <files>`, run the `git
-diff …` command on the line after it before the next pick and follow what changed; read only that
-diff, never the whole files. Nothing printed → no rule changed.
+rule merged while you run reaches you only through it. On `RULES_CHANGED: <files>`, run `node
+scripts/rules-ack.mjs` from the clone's root before the next pick and follow what changed: it
+prints the diff (past 200 lines, `RULES_CUT:` and the `git diff …` commands for the rest) and
+clears the record that makes `pick-next.mjs` refuse. Read only that diff, never the whole files;
+on `RULES_UNREADABLE: …`, read `AGENTS.md` and the files its `rules` key lists in full. The pull
+printing nothing → no rule changed. A `RULES_NOT_RECORDED` line from the pull → nothing was
+recorded: run the `git diff …` command under `RULES_CHANGED` yourself instead. A failed ack (exit 2, `rules-ack: …` on stderr) → report it,
+wait ~5 minutes, run it again.
 
 To restart for a plugin update: with a PR open, use the stop file and re-run on the PR;
 mid-implementation, end the session without the stop file: the claim and the working tree stay,
@@ -94,7 +109,10 @@ operator's results, such as measurements: ask for them once. On `MERGE_READY` ad
   turned down: author check failed, claim lost). Run it every time, after a wait too; never pick
   from a list you remember, since issues are filed while you wait. It prints `ISSUE:<n>` (the
   lowest-numbered open issue without either label whose `Depends on #…` issues are all closed),
-  `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE` (nothing to pick: stop). A failed run
+  `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE` (nothing to pick: stop), or
+  `RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again` (a pulled rules
+  change you haven't read: nothing was picked; run `node scripts/rules-ack.mjs`, follow it, run
+  `pick-next.mjs` again; never pick by hand around it). A failed run
   (exit non-zero, `pick-next: …` on stderr) → never pick by hand; report it, wait ~5 minutes, run
   it again.
 
@@ -109,9 +127,10 @@ rest of the line is the next one: say so and run the script again.
 ## Implement
 
 Re-fetch the issue immediately before claiming: `gh api repos/<repo>/issues/<N> --jq '[.user.login,
-.author_association, [.labels[].name]]'`: one JSON array of the author's login, their
-association and the labels (`gh issue view --json` has no association field; an array, since some
-tools' permission checks refuse a jq object with a comma). A failed re-fetch, or one whose first or
+.author_association, [.labels[].name], .title, .body]'`: one JSON array of the author's login,
+their association, the labels, the title and the body (`gh issue view --json` has no association
+field; an array, since some tools' permission checks refuse a jq object with a comma, and a
+filter that doesn't end in `]]`, which some read as shell `[[ … ]]`). A failed re-fetch, or one whose first or
 second element is null or empty, is no author check: never claim on it. `in-progress-label` present → another executor has it (the
 label is authoritative; no PR is not evidence it is stale) → pick next, unless the newest
 `[executor] Claimed by` comment names your clone exactly: then it is yours, so resume (above). `blocked-label` → pick
@@ -144,14 +163,22 @@ Then implement:
    <short sha>: <last line>` in the PR body or the push comment. Every later "run
    `quality-gates`" below includes the gate the same way. A check from the project's local
    runner (`local-ci.mjs`, which runs the gate on every head) is CI: with it on the PR, skip the
-   gate and the quote.
+   gate and the quote. **Before every push, in this order:** `pre-gate` when the block has it,
+   fixed and run again until it passes (commit what a formatter changed); commit; the push-time
+   checks without pushing: `git push --dry-run origin <branch>`, which runs the project's
+   pre-push hooks on the commits it would send, and, where the project's conventions name a
+   command that checks a post's text without posting, that command on the PR title and body you
+   are about to post; then `quality-gates` and the gate on the committed, clean tree; then the
+   push. A refusal from `pre-gate` or a push-time check is fixed (a new commit) and the cheap
+   checks run again before the gate, so the gate runs once per pushed head. Every later "run
+   `quality-gates`" below means this whole order.
 5. Self-check: for each criterion, name the test that asserts it (a green suite is not enough),
    or, for one only a human can check, write the exact steps the operator runs. Fix gaps first.
 6. `gh pr create` with: what and why; a Criterion | Evidence table; Decisions; Known limits;
    `Closes #N`.
 
-Input needed with no PR yet and no safe default: park. `gh issue comment <N> --body "[executor]
-BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N>."`, then
+Input needed with no PR yet and no safe default: park.
+`gh issue comment <N> --body "[executor] BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N>."`, then
 `gh issue edit <N> --remove-label <in-progress-label> --add-label <blocked-label>`, pick next.
 
 ## Poll loop
@@ -161,8 +188,8 @@ BLOCKED: <reason>. To resume: remove the <blocked-label> label and re-run on #<N
 `[executor]` posts are already filtered out.
 
 - `MERGED` → remove `in-progress-label`, `git checkout main`, then `node scripts/pull.mjs --start
-  "<how this loop is started>"` plus `--milestone "<milestone>"` when you have one (the rules
-  diff as above), then write in your own reply a one-line note and its `RESTART: …` line as
+  "<how this loop is started>"` plus `--milestone "<milestone>"` when you have one (on
+  `RULES_CHANGED:`, `node scripts/rules-ack.mjs` as above), then write in your own reply a one-line note and its `RESTART: …` line as
   given, on its own line, a failed pull (exit 2) included. The command's output alone may be
   collapsed or never shown (a restart is a new session, and this is the between-issues point to
   take it; nothing is printed mid-task). The line is for the operator to act on later, not an

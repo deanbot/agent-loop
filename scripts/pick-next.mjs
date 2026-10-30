@@ -7,7 +7,12 @@
  *                              [--blocked-label <l>] [--skip <n,n,...>] [--clone <clone>]
  *
  * Output â€” one line, then exits:
- *   RESUME:<n> PR:<p>            with --clone only, before anything else: an open PR <p> whose body
+ *   RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again
+ *                                before anything else, and without calling gh: a pull of main in
+ *                                this clone changed a rules file (pull.mjs) and nobody has read the
+ *                                diff yet. Nothing is picked. <files> is "(unreadable record)" when
+ *                                the record can't be read
+ *   RESUME:<n> PR:<p>           with --clone only, before anything else: an open PR <p> whose body
  *                                says "Closes #<n>", where #<n> is open, carries neither the
  *                                in-progress nor the blocked label, is not skipped, and its newest
  *                                "[executor] Claimed by" comment by the PR's author names <clone>: an issue this
@@ -33,13 +38,17 @@
  * merged PR as MERGED, not CLOSED); only state "closed" counts as done. --skip lists issues this session already turned
  * down (author check failed, claim lost), so a pick never returns them again. Labels default to
  * in-progress and is-blocked. The listing runs fresh on every call: an issue filed while the
- * executor waited is seen at the next pick. No state is kept.
+ * executor waited is seen at the next pick. No state is kept; the clone's pending rules record
+ * (lib/rules.mjs) is read, never written. Run it in the clone (any folder of it).
  *
  * A failed gh call (network, rate limit, auth) prints `pick-next: <message>` on stderr and exits 2
  * with nothing on stdout: the caller retries later and never picks by hand.
  */
 
 import { execFileSync } from 'child_process'
+import { fileURLToPath } from 'url'
+import path from 'path'
+import { recordFile, readPending, pendingFiles, shellWord } from './lib/rules.mjs'
 
 const USAGE =
   'pick-next.mjs --repo owner/repo [--milestone <title>] [--in-progress-label <l>] [--blocked-label <l>] [--skip <n,n,...>] [--clone <clone>]'
@@ -68,6 +77,16 @@ if (skipArg && !/^\d+(,\d+)*$/.test(skipArg)) usageError(`--skip: expected n,n,â
 const skip = new Set(skipArg.split(',').filter(Boolean).map(Number))
 const clone = arg('--clone')
 if (clone !== null && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(clone)) usageError(`--clone: expected a clone name, got "${clone}"`)
+
+// A rules change pulled and not read yet: the session would pick and build under the rules it
+// loaded at its start, so nothing is picked until rules-ack.mjs has printed it.
+const pending = readPending(recordFile())
+if (pending === null || pending.length > 0) {
+  const ack = shellWord(path.join(path.dirname(fileURLToPath(import.meta.url)), 'rules-ack.mjs'))
+  const files = pending === null ? '(unreadable record)' : pendingFiles(pending).join(' ')
+  process.stdout.write(`RULES_PENDING: ${files}: run node ${ack}, then pick again\n`)
+  process.exit(0)
+}
 
 const gh = (...args) => JSON.parse(execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || 'null')
 
@@ -100,6 +119,7 @@ function isOpen(n, openNumbers) {
 }
 
 const hasLabel = (issue, name) => (issue.labels ?? []).some((l) => l.name === name)
+const AUDIT_LABEL = 'auditor-report'
 
 let prCache = null
 const openPrs = () => (prCache ??= gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,body,isCrossRepository,author'))
@@ -138,7 +158,8 @@ function pick(title) {
     const back = resumable()
     if (back) return back
   }
-  const listed = listOpen(title)
+  // An auditor's report (spec: "Auditor") is for the operator, never work to pick.
+  const listed = listOpen(title).filter((i) => !hasLabel(i, AUDIT_LABEL))
   const open = listed.filter((i) => !skip.has(i.number))
   const openNumbers = new Set(open.map((i) => i.number))
   const startable = (i) =>

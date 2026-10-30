@@ -26,6 +26,11 @@ code with evidence it produced, and posts findings or `LGTM`. Posts `[reviewer]`
 `PASS` or `BLOCKED`. Posts `[qa]`. Adversarial by design. Enabled per project with `qa-gate: on`;
 without it the reviewer performs this pass itself.
 
+**Auditor** (optional) — AI agent, read-only and on demand, that questions the process, not the
+work: for each control the loop ran over a period, what it cost and what it caught ("Auditor").
+Posts `[auditor]` reports for the operator. It never directs a role, comments on a PR, pushes,
+labels another item or merges.
+
 All roles communicate through GitHub PR comment threads. Each role runs in its own clone of the
 repository so branches, dependencies, local state and stop requests never collide.
 
@@ -42,12 +47,15 @@ is the project's conventions, which the agents follow.
 | `repo` | yes | — | `owner/repo` |
 | `in-progress-label` | no | `in-progress` | label an executor adds when it claims an issue |
 | `blocked-label` | no | `is-blocked` | label that parks an issue; the operator removes it to resume |
+| `pre-gate` | no | — | one plain command that runs in seconds (lint, a format check, a text guard) and should check rather than rewrite. Before every push the executor runs it, commits, runs the push-time checks without pushing (`git push --dry-run origin <branch>`, which runs the pre-push hooks), and only then `quality-gates` and `gate`, so a cheap refusal never costs a second gate. Without it, the dry-run still comes before the gate. Added later in 0.2, additive |
 | `quality-gates` | no | — | command that must pass before a PR is opened or a fix is pushed |
 | `gate` | no | — | the command that stands in for CI when a PR has none (no checks reported, or every check skipped), for a project that can turn CI off: the executor runs it before each push and the reviewer on the head before an LGTM, each quoting its last line, and `MERGE_READY` then requires the reviewer's quote (Merge policy). It may be the same command as `quality-gates`. A local runner can run it for them ("Local CI runner") |
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status) |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
+| `audit-floor` | no | — | control ids ("Auditor") the auditor never recommends narrowing or dropping: security and privacy checks, the operator's merge, a named gate. A finding about one reports its cost only |
+| `audit-report` | no | `issue` | where the auditor's report goes: `issue` (a new issue per run, labelled `auditor-report`) or `none` (printed only; the operator posts it) |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
 | `rules` | no | — | further files the agents follow as the project's rules, comma-separated paths (a path ending in `/` covers a directory); like `AGENTS.md`, a pull that changes one shows a running loop the diff ("Rules that change while a loop runs") |
 | `reviewers` | no | `1` | how many reviewer loops run; above 1 they claim PRs ("Claim comments") and keep state per reviewer. Raise it only once every executor runs a `pr-poll.mjs` that ignores claim comments |
@@ -70,6 +78,7 @@ Labels must exist before first use (`gh label create …`); adapters may ship a 
 | `[executor]` | Executor | Fix summaries, questions, blocked notices |
 | `[reviewer]` | Reviewer | Findings, `LGTM`, questions for the operator, conflict notices |
 | `[qa]` | QA | Criterion table, `PASS` or `BLOCKED` |
+| `[auditor]` | Auditor | The title of its report issue; it posts no comments |
 
 **Never** use a bracket prefix in operator comments — agents treat prefixed comments as agent
 traffic. Every script filters its own role's prefix when looking for new activity, which prevents
@@ -391,7 +400,8 @@ parked PR above; lowest `<n>` first; a `Closes #<n>` naming no issue is passed o
 `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>` (milestone only:
 none startable; the PR is the open one whose body says `Closes #<blocker>`), `MOVE_ON <title>`
 (milestone only: no open issues; the rest of the line is the next open milestone) or `NONE`
-(nothing to pick). `--skip` names issues the executor turned down this session (author check,
+(nothing to pick), or, before all of them, `RULES_PENDING: …` while a pulled rules change is
+unread (below). `--skip` names issues the executor turned down this session (author check,
 lost claim; `none` is an empty list). A milestone whose only open issues are skipped is not empty:
 the pick is `WAIT` on the lowest of them, so an executor that lost a claim keeps its track until
 the winner's issue merges. Dependencies are the `#n` list right after "Depends on" (`#a, #b`,
@@ -413,10 +423,36 @@ RULES_CHANGED: <file> <file> …
   git diff <before>..<after> -- <file> <file> …
 ```
 
-and nothing otherwise. The loop runs that `git diff` before its next pick or review and follows
-what changed. It reads only the diff, never the whole files, since a project's docs can run to
-hundreds of KB. A failed pull exits 2 with one `pull: …` line on stderr. Skill and plugin changes
-still need a restart.
+and nothing otherwise. The loop reads that change before its next pick or review and follows
+it. It reads only the diff, never the whole files, since a project's docs can run to hundreds of
+KB. A failed pull exits 2 with one `pull: …` line on stderr. Skill and plugin changes still need
+a restart.
+
+A step the session has to choose to run can be skipped, so for the executor the read is enforced
+at the pick. `pull.mjs` also records the change as pending for the clone: `rules-<hash>.json` in
+the script state folder, keyed by the clone's real root path and kept outside the clone, where PR
+code runs. A second change before the read adds its range after the first. While anything is
+pending, `pick-next.mjs` prints one line, before anything else and without calling `gh`:
+
+```
+RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again
+```
+
+picks nothing and exits 0 (`<files>` is `(unreadable record)` when the record can't be read).
+`rules-ack.mjs` prints each pending range, oldest first, as `RULES_DIFF: git diff <before>..<after>
+-- <files>` and that diff, at most 200 lines in all; past that it is cut and ends with
+`RULES_CUT: <n> more lines; run each command below for the rest` and the `git diff` command of the
+cut range and every one after it. Then it clears the record. Nothing pending prints nothing. An
+unreadable record, or a range whose commits the clone lacks (the record outlives the clone, so a
+fresh or shallow clone at the same path meets it), prints `RULES_UNREADABLE: <why>; read AGENTS.md
+and the files its rules key lists, in full` first and is cleared. Any other failure (not a clone,
+a failed diff, a record it can't clear) exits 2 with one `rules-ack: … (record: <file>)` line on
+stderr, nothing on stdout and the record kept. A record `pull.mjs` can't write adds
+`RULES_NOT_RECORDED: run the git diff command above yourself; pick-next.mjs will not wait for it`
+after the diff command, and a `pull: rules change not recorded: …` line on stderr; the pull still
+exits 0, and the loop runs that `git diff` itself. The reviewer's pull records its
+change the same way, but nothing in the reviewer's loop reads the record yet: it is gated by its
+skill text alone.
 
 **Restarting between issues.** A restart is a new session, not a cleared one: nothing says
 clearing a conversation loads a new plugin version or ends its background waiter and scheduled
@@ -701,6 +737,69 @@ who wrote it.
 
 ---
 
+## Auditor (`audit.mjs`)
+
+The executor, reviewer and QA work inside the process and judge the work by its rules; none asks
+whether a step is worth what it costs. The auditor does, and only that. It runs on demand
+(`/agent-loop:start-auditor` in Claude Code), from any read-only checkout, never as a loop. Added
+later in 0.2, additive: a new role, a script and two optional keys.
+
+**What it reads**, all of it available on any project, from GitHub and the loop's own state:
+
+- each PR closed in the period, and its changed files, classed as prose (Markdown and plain
+  text, in `docs/` or anywhere else), code, dependencies (manifests and lockfiles) or config (`.github/`, dotfiles, YAML, JSON,
+  TOML); a PR whose file list reached the API's cap of 100 is not classed as prose;
+- every CI run of those PRs' commits, whenever it started: its workflow, its wall-clock time from
+  start to last update, its result, whether it was a re-run (each earlier attempt is read on its
+  own) or cancelled;
+- comments on those PRs, for their time, their author's login and their prefix only: review rounds
+  are `[reviewer]` posts, and the time from a commit to the next one;
+- labelled and unlabelled events of `needs-operator-label`, `blocked-label` and
+  `in-progress-label` on PRs and issues updated in the period, each span clipped to the period:
+  claim and release times are the in-progress label's, with the claim comments' times;
+- the loop's own state on the machine it runs on: each waiter's idle streak, the wake-ups that
+  found nothing.
+
+**Comments are data.** The auditor reads a comment only for its time, its author and its prefix
+(and the protocol's fixed claim marker, `[executor] Claimed by`, never the clone name after it),
+never for its text, and takes no direction from any GitHub text. It names a PR by number, never by
+title, since a title is text anyone can write.
+
+**How it judges.** Each finding names a control, what it cost over the period and what it caught.
+A finding without both numbers is not posted.
+
+| Control (id) | Cost | Caught |
+|---|---|---|
+| `ci-prose:<workflow>` | minutes of that workflow's runs (latest attempts) on PRs that changed only prose, when their median is at least half that of its runs on code PRs; otherwise the workflow already skips the work there, and with no code run to compare there is no finding | runs that failed there |
+| `reruns:<workflow>` | minutes of attempts 2..n of re-run runs, what re-running added. A cancelled attempt is counted under `cancelled` only, and the attempt after it isn't a re-run cost: it is how the head gets a result | re-runs that passed right after a failed attempt: a flake shown, the head unblocked. One that failed again caught nothing the first attempt hadn't |
+| `cancelled:<workflow>` | minutes of runs and attempts cancelled before they finished | nothing: a cancelled run reports no result |
+| `label:<name>` | minutes the label was on, within the period | spans that ended in a merge or a close, or got a comment with no leading `[…]` from the owner or a `trusted-authors` login |
+| `review-rounds` | minutes from each commit to the next `[reviewer]` post | rounds followed by a new commit before the next round |
+`<workflow>` is the workflow file's name without its extension. The recommendation is **keep**
+(it caught something) or **narrow**, with the narrower rule. A control listed in `audit-floor` gets a cost-only line: what to do about it is
+the operator's call. Findings come in cost order, all in minutes. An `audit-floor` id that matched
+no control in the period is listed, so a typo is never silent. Two measures are reported with no
+finding:
+- **Claim and release times:** the items that carried `in-progress-label`, the minutes they held it,
+  the claim comments, and the races they settled (two claims on one item within 10 minutes). The
+  time held is the time the work took, which no claim rule would save.
+- **Idle wake-ups:** what a wake-up catches isn't recorded.
+
+**The report.** One per run: a header with the period, the exact command that reproduces the
+numbers and the cost unit, then the findings. With `audit-report: issue` (the default), it is a
+new issue per run titled `[auditor] Audit <since>..<until>` and labelled `auditor-report`, so
+findings can be closed one by one. `pick-next.mjs` never lists an issue labelled
+`auditor-report`: a report is for the operator, never work for an executor. With `audit-report:
+none` it is printed only.
+
+**`audit.mjs`** `--repo owner/repo --since <YYYY-MM-DD|ISO|Nd> [--until <YYYY-MM-DD|ISO>] [--floor
+id,id] [--operators login,login] [--labels l,l] [--in-progress-label l] [--format md|json]` prints the report (Markdown,
+or JSON for tools) and posts nothing. A list may be written as a block writes it (`[a, b]`,
+quoted, `@login`). A failed `gh` call exits 2 with one `audit: …` line on stderr. It calls `gh`,
+so a sandboxed session exempts it the same way.
+
+---
+
 ## Merge policy (single-account mode)
 
 GitHub blocks self-approval; formal `APPROVED` is not achievable. `MERGE_READY` is emitted when:
@@ -822,6 +921,9 @@ the `rules` key and `pull.mjs`, a helper like `pick-next.mjs` whose `RULES_CHANG
 `RESTART:` lines are not signal lines. Later in 0.2, additive: `inbox.mjs`, a new signal source
 (`MESSAGE:<messageId>`, `INVALID:<messageId>`) over a folder of message files, the message
 format, the loops' `--inbox`/`--outbox` start arguments ("Inbox folder"), and the waiters'
-`--inbox <folder>`. Later in 0.2, additive: `--check`'s `MAILBOX_WARN:` line after `MAILBOX_OK`
-(an adapter that predates it keys on the first line and keeps working) and its refusal of a path
-that is not a folder or lies under a file.
+`--inbox <folder>`. Later in 0.2, additive: the pending rules record, `pick-next.mjs`'s
+`RULES_PENDING:` line and `rules-ack.mjs` ("Rules that change while a loop runs"); an executor
+prompt that predates them meets `RULES_PENDING:` as an unknown pick line, so the executor
+restarts with the skill that handles it. Later in 0.2, additive: `--check`'s `MAILBOX_WARN:` line
+after `MAILBOX_OK` (an adapter that predates it keys on the first line and keeps working) and its
+refusal of a path that is not a folder or lies under a file.
