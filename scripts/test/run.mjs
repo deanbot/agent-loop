@@ -2620,6 +2620,27 @@ const putMessage = (dir, id, extra, meta) => {
   check('loop texts: with one mailbox folder of the two, every Claude Code loop prints the literal ⚠ line first, without --check, never making up the other', supplies.length === 0, supplies.join('\n'))
 }
 
+// ---------------------------------------------------------------- the RESTART line: the hook's in Claude Code (#105)
+{
+  // The session's own copy of the RESTART line dropped out in live runs however it was asked for;
+  // the restart-line hook shows it regardless. Claude Code relies on the hook; generic and Kiro,
+  // with no hook, keep the text line.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const flat = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+  const cc = flat('claude-code/skills/start-executor/SKILL.md') + flat('claude-code/skills/start-executor/reference/signals.md')
+  check('RESTART line (Claude Code): the executor relies on the hook and asks for no text copy or closing repeat',
+    cc.includes("the plugin's restart-line hook shows it to them as a system message") && !/repeat the `RESTART: …` line/.test(cc) &&
+      !/Write, as your own text, a one-line note to the operator and the `RESTART: …` line/.test(cc) && !/write as your own text a one-line note to the operator, and the `RESTART: …` line/.test(cc), '')
+  const readme = flat('claude-code/README.md')
+  check('RESTART line (Claude Code README): the hook is the operator\'s copy; the executor doesn\'t write the line',
+    readme.includes("It is the operator's copy: the executor doesn't write the line in its own text.") && !readme.includes('The executor still writes the line in its own text'), '')
+  const generic = flat('generic/executor.md')
+  const kiro = flat('kiro/skills/start-executor/SKILL.md')
+  check('RESTART line (generic, Kiro): with no hook, the text line stays, and the text says why',
+    generic.includes('write in your own reply a one-line note and its `RESTART: …` line') && generic.includes('your text is the only copy') &&
+      kiro.includes('write in your own reply a one-line note to the user and its `RESTART: …` line') && kiro.includes('your text is the only copy'), '')
+}
+
 // ---------------------------------------------------------------- resume: the branch first, a PR names its issue (#104)
 {
   // A PR number in the arguments once stood in for the issue number: the claim check ran on the

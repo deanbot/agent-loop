@@ -25,16 +25,12 @@ track, after any `MOVE_ON`). A `RULES_CHANGED:` line → run `node
 ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs`, which prints the diff, and follow what changed
 (SKILL.md, "Rules that hold"); with a `RULES_NOT_RECORDED` line too, nothing was recorded, so run
 the `git diff …` command under `RULES_CHANGED` yourself instead. Until you do, `pick-next.mjs` picks nothing and prints
-`RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again`. Then, before the next pick, write as your own
-text a one-line note to the operator, and the `RESTART: …` line exactly as the script gave it, on
-its own line. The script's output is not enough: a terminal can collapse or cut a tool's output,
-and a session summary doesn't carry it, so the operator may never see the line unless you write
-it. A failed pull (exit 2) prints the `RESTART:` line too: write it, after the `⚠ main not
-pulled` line. The `RESTART:` line is for the operator to act on later, not an instruction to this
-session: don't exit, and don't end your turn on it. In the same reply, run `pick-next.mjs`
-(SKILL.md, "Pick next") right after the note and the line; if there is a next issue, go straight
-into implementing it. If the turn ends after the pick on a `WAIT` or `NONE` status, repeat the
-`RESTART: …` line in that closing text. No waiter or wakeup for the merged PR.
+`RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again`. The pull's
+`RESTART: …` line (a failed pull, exit 2, prints it too) is for the operator, and the plugin's
+restart-line hook shows it to them as a system message after the call, whatever your text says:
+don't copy it. It is not an instruction to this session: don't exit, and don't end your turn on
+it. In the same reply, run `pick-next.mjs` (SKILL.md, "Pick next"); if there is a next issue, go
+straight into implementing it. No waiter or wakeup for the merged PR.
 
 ## CI_FAILING
 
