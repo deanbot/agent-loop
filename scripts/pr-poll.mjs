@@ -23,7 +23,7 @@
  *   NO_LOCAL_CI                 with --local-ci <context>: the head has had no check under that context for the
  *                               window (--local-ci-window, default 300 s from when this script first saw the
  *                               head), so the local runner isn't posting: the PR has no CI after all; emitted
- *                               once per head; no content block
+ *                               once per PR until the runner's check appears on a head again; no content block
  *   MERGED                      PR is merged; executor should stop
  *   IDLE <count>                with --idle-after <n>, last line: <count> runs in a row (n or more) brought no
  *                               new comment, review, commit or CI change and no new signal (lib/wait.mjs)
@@ -52,6 +52,8 @@
  * and none under <context> yet is not "no CI" during the window: the runner posts `pending` within a
  * pass. Until it does, CI counts as pending (MERGE_READY withheld, no gate quote asked for). After
  * the window with still nothing, the head has no CI as without the flag, and NO_LOCAL_CI says so once.
+ * From then on the PR's later heads have no CI at once, with no window, until a check under
+ * <context> appears on one of them, which makes it CI again and the next head unmarked gets a window.
  *
  * A role's verdict is its NEWEST [role] comment posted after the last commit: a later finding revokes
  * an earlier LGTM/PASS without a push. Reviewer comment kinds by prefix: "[reviewer] LGTM" (verdict),
@@ -65,7 +67,7 @@
  *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json across sessions, one file
  * per PR so two executors never write the same file: { comments, reviews, reviewComments,
- * ciFailedKey } last-seen IDs, and with --local-ci { head: { sha, seenAt }, noLocalCi: <sha> }. A PR with no file yet takes its entry from the shared file earlier
+ * ciFailedKey } last-seen IDs, and with --local-ci { head: { sha, seenAt }, localCiDown: true once NO_LOCAL_CI was said }. A PR with no file yet takes its entry from the shared file earlier
  * versions kept (<owner>-<repo>-pr-poll-state.json, keyed by PR number), which is left alone.
  */
 
@@ -173,17 +175,21 @@ function pass({ gh, save, dry, mark }) {
   let noCi = checks !== null && checks.every((c) => c.bucket === 'skipping')
   // With --local-ci, a head the runner hasn't marked yet is waiting for CI, not without it, until
   // the window from when this script first saw the head has passed (the header).
+  // Once NO_LOCAL_CI has been said on this PR, the runner is taken as down for it: later heads with
+  // no check are without CI at once (no new window, no second NO_LOCAL_CI) until the runner's check
+  // shows up on some head again.
   let localCiPending = false
   let noLocalCi = false
   if (localCi && headSha) {
     if (prState.head?.sha !== headSha) prState.head = { sha: headSha, seenAt: Date.now() }
-    if (noCi && !checks.some((c) => c.name === localCi)) {
+    if (checks?.some((c) => c.name === localCi)) delete prState.localCiDown
+    else if (noCi && !prState.localCiDown) {
       if (Date.now() - prState.head.seenAt < LOCAL_CI_WINDOW_MS) {
         localCiPending = true
         noCi = false
-      } else if (prState.noLocalCi !== headSha) {
+      } else {
         noLocalCi = true
-        prState.noLocalCi = headSha
+        prState.localCiDown = true
       }
     }
   }

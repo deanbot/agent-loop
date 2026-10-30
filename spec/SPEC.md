@@ -313,7 +313,7 @@ Script runs once per poll cycle for one PR, emits signals and content blocks, ex
 | `NEW_REVIEW_SUBMISSION` | New formal review (APPROVED / CHANGES_REQUESTED / COMMENTED) |
 | `NEW_INLINE_COMMENT` | New or still-unanswered line-level comment(s), not the executor's own |
 | `CI_FAILING` | A check failed or was cancelled on the current head; emitted once per distinct failure set (a re-run that fails again is reported again; a commit status, which `gh pr checks` gives no completion time, is told apart by its REST status id) |
-| `NO_LOCAL_CI` | With `--local-ci <context>`: the head has had no checks and none under `<context>` for the window (`--local-ci-window`, default 300 s from the poll first seeing the head), so the runner isn't posting and the PR has no CI after all; emitted once per head. Before the window passes, such a head counts as CI pending |
+| `NO_LOCAL_CI` | With `--local-ci <context>`: the head has had no checks and none under `<context>` for the window (`--local-ci-window`, default 300 s from the poll first seeing the head), so the runner isn't posting and the PR has no CI after all. Before the window passes, such a head counts as CI pending. Emitted once per PR: its later heads with no check have no CI at once, with no new window, until the runner's check appears on one of them |
 | `MERGE_CONFLICT` | the PR conflicts with its base (GitHub reports it unmergeable); repeated on every run while it holds, whether or not the head moved |
 | `MERGE_READY` | the reviewer's newest comment after the head commit is an LGTM, CI green, no unanswered inline threads, not in conflict (and QA's newest is a PASS with `--require-qa`; and with `--require-gate` and no CI, the LGTM quotes the gate on the head) |
 | `MERGED` | PR is merged |
@@ -696,7 +696,10 @@ for) until the runner's check appears. The runner posts `pending` within a pass,
 another gate runs. If no check under the context has appeared once the window has passed (300
 seconds from the poll first seeing the head), the poll says `NO_LOCAL_CI` once. The PR then has no
 CI, as without the key: the executor runs the gate and quotes it in an `[executor]` comment, and
-`MERGE_READY` needs the reviewer's quoted run (`--require-gate`). Without the key nothing changes.
+`MERGE_READY` needs the reviewer's quoted run (`--require-gate`). The PR stays without CI for its
+later heads, with no new window and no second `NO_LOCAL_CI`, so a push that the executor gated
+first is not held for five minutes and gated again. Once the runner's check appears on a head,
+the PR has CI again. Without the key nothing changes.
 
 **Agents post `pending` only.** In single-account mode the runner and every role post as one
 login, so `pr-poll` cannot tell the runner's `success` from an agent's. An agent may post

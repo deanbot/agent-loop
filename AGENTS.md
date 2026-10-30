@@ -28,7 +28,8 @@ Three layers. Boundaries are strict.
   blocks, exits. `--require-gate` (the block names a `gate`): on a PR with no CI, `MERGE_READY`
   needs the LGTM's `Gate on <sha>:` line on the head. `--local-ci <context>` (the block's
   `local-ci` key): a head with no checks is CI pending until the runner's check appears, or, after
-  the window (300 s from first seeing the head), `NO_LOCAL_CI` once and no CI as before.
+  the window (300 s from first seeing the head), `NO_LOCAL_CI` once for the PR and no CI as before,
+  later heads included, until the runner's check appears on a head again.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
 - `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
   [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n] [--clone <clone>]`. Prints

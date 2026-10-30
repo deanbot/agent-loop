@@ -163,11 +163,24 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   const runner = (bucket) => ({ checks: [{ name: 'local-ci', state: bucket === 'pass' ? 'SUCCESS' : 'PENDING', bucket, link: '', completedAt: '0001-01-01T00:00:00Z' }] })
   const newHead = 'b2c3d4e5f60718293a4b5c6d7e8f901234567890'
   const moved = (body, more = {}) => noCi(body, { pr: { merged: false, head: { sha: newHead } }, ...more })
+  // The review of #121: after NO_LOCAL_CI the runner is down for the PR; a later head with no check
+  // has no CI at once, without a second window or a second NO_LOCAL_CI.
+  const downHead = 'c3d4e5f60718293a4b5c6d7e8f90123456789012'
+  const down = (body) => noCi(body, { pr: { merged: false, head: { sha: downHead } } })
+  const later = poll(lctx, down('\n\nGate on c3d4e5f: ok'), local)
+  check('poll --local-ci: after NO_LOCAL_CI, a later head with no check has no CI at once: MERGE_READY with its quote, no second NO_LOCAL_CI',
+    ready(later) && !signals(later).includes('NO_LOCAL_CI'), later)
+  const laterUnquoted = poll(lctx, down(''), local)
+  check('poll --local-ci: … and without the quote no MERGE_READY (no CI, so the quote is needed)', !ready(laterUnquoted) && !signals(laterUnquoted).includes('NO_LOCAL_CI'), laterUnquoted)
   const pendingRun = poll(lctx, moved('', runner('pending')), local)
   check('poll --local-ci: the runner\'s pending check on a new head → CI pending as for any check, no NO_LOCAL_CI', !ready(pendingRun) && !signals(pendingRun).includes('NO_LOCAL_CI'), pendingRun)
   age(400)
   const passed = poll(lctx, moved('', runner('pass')), local)
   check('poll --local-ci: the runner\'s check passing → MERGE_READY with no quote (it is CI), never NO_LOCAL_CI', ready(passed) && !signals(passed).includes('NO_LOCAL_CI'), passed)
+  const backHead = 'd4e5f60718293a4b5c6d7e8f9012345678901234'
+  const back = poll(lctx, noCi(`\n\nGate on d4e5f60: ok`, { pr: { merged: false, head: { sha: backHead } } }), local)
+  check('poll --local-ci: once the runner\'s check has shown up again, the next unmarked head gets a window again (CI pending)',
+    !ready(back) && !signals(back).includes('NO_LOCAL_CI'), back)
   const window = run(lctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--local-ci-window', '60'], BASE)
   check('poll: --local-ci-window without --local-ci → usage error, exit 1', window.startsWith('EXIT 1'), window)
   rmSync(lctx.home, { recursive: true, force: true })
