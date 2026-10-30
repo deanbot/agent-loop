@@ -79,7 +79,9 @@ open.
 The skill never reads the waiter's output (the notification carries only an output-file path,
 outside the project), and a session that dies before handling a wake loses nothing: the state was
 never written. A waiter that finds another alive exits with code 3, which the notification shows
-("failed with exit code 3"); that wake only re-schedules the fallback. Any other failed waiter
+("failed with exit code 3"); that wake only re-schedules the fallback, and only that one: the
+next wake of any other kind (the surviving waiter's own exit included) runs a full cycle that
+starts a waiter of its own, since a waiter that has notified its exit is gone. Any other failed waiter
 (a usage error, a broken install) makes the next cycle end with a 300-second `ScheduleWakeup`
 instead of a waiter, so a persistent failure cannot spin the session.
 
@@ -158,7 +160,10 @@ grant covers the invoking turn. Unattended wakeups rely on the rules `setup-proj
 the executor, so re-run setup after adding `gate` or `pre-gate`. Every
 loop role also gets `Bash(git grep *)` and `Bash(git ls-files *)`: the skills search and list
 files with those where a session has no Grep and Glob tools. Skill text gives Bash as one plain command per call — `$(…)`, `;`
-and pipes are not statically matchable and would prompt every cycle. `find` is not
+and pipes are not statically matchable and would prompt every cycle. Claude Code's safety check
+also prompts on a `--jq` filter ending in `]]` and on braces in a command, whatever the allow
+rules, so the skills emit one array per row (`.[] | [ … ]`) and keep braces out of `git grep`
+patterns; files are changed with Edit and Write, since a heredoc or `sed -i` matches no rule. `find` is not
 prefix-approvable either, which is one reason the stop-sentinel mechanism was dropped in favour
 of `ScheduleWakeup({ stop: true })`.
 
