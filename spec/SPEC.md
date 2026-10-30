@@ -552,6 +552,23 @@ one-shot runs, or chain the two:
 node pr-watch.mjs --repo R --wait && node pr-watch.mjs --repo R
 ```
 
+**No cycle ends without a waiter or a short timer.** With a waiter, the loop learns of news (a
+merge, a finding) within an interval; with only the fallback timer, as late as the timer, 30 or
+60 minutes. So an adapter that runs waiters keeps these rules, in this order:
+
+1. Before a cycle ends, the loop checks that the cycle started its waiter (in the background, by
+   the tool's own way of starting one). If it didn't, and the cycle is not one of those below, it
+   starts it then and says so in its status line.
+2. A waiter that fails (exit 3, `WATCHER_RUNNING`, or any other non-zero exit) is not restarted
+   on the wake its failure causes: that cycle ends with a short timer (300 seconds). An exit 3's
+   live waiter may be another session's, whose exit wakes that session. The next wake runs a full
+   cycle that starts a waiter again: the one restart.
+3. A second failure in a row is reported to the operator (the status line, and the outbox with a
+   mailbox), not retried: the loop starts no more waiters (the executor for that PR) and ends every
+   cycle with the short timer, each cycle still running its one-shot script. A waiter that exits 0
+   ends the count.
+4. While no waiter runs, the timer is the short one, never the 30- or 60-minute fallback.
+
 ### Idle count (`--idle-after <n>`)
 
 Each one-shot run also counts how many runs in a row brought nothing new, in the same file as the
@@ -959,4 +976,5 @@ restarts with the skill that handles it. Later in 0.2, additive: `--check`'s `MA
 after `MAILBOX_OK` (an adapter that predates it keys on the first line and keeps working) and its
 refusal of a path that is not a folder or lies under a file. Later in 0.2, additive:
 `local-ci.mjs --install` and `--lockfiles`, and its install record; without them the runner
-behaves as before.
+behaves as before. Later in 0.2, adapter rules only, no script or signal change: no cycle ends
+without a waiter or a short timer ("Waiting for events").

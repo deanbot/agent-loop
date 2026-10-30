@@ -262,17 +262,28 @@ output and continue the work it belongs to.
 
 A waiter's notification that says **`failed with exit code 3`** is the exception: another waiter
 is still alive (it printed `WATCHER_RUNNING`). Beat, then run nothing else and start no waiter;
-only call the `ScheduleWakeup` from step 5, with the last cycle's delay (1800, or 3600 when it was
-idle), or `delaySeconds: 300` when this session's start printed `TOOK_OVER` (the live waiter is
-likely the old session's, which ends within 55 minutes). This covers only the cycle this exit-3
+only call `ScheduleWakeup({ delaySeconds: 300, … })`, step 5's call with the short delay: the live
+waiter may be another session's (an old one's after a restart, which ends within 55 minutes), and
+its exit wakes that session, not you. This covers only the cycle this exit-3
 notification starts. The next wake of any other kind (the surviving waiter's own exit, a message,
 the fallback wakeup) runs a full cycle, ended as usual with a new waiter unless the cycle itself
 is an exit: a waiter whose exit has notified you is gone, so never assume one is still running
 because an earlier cycle saw it. A waiter started while another is in fact alive exits 3 again,
 and this rule then covers that wake alone. Any **other failed exit** means the waiter itself broke (a usage error, a
 broken install): name it in the status line, run the cycle, but end it with
-`ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
-again, so a failure that repeats costs one turn per five minutes, not one per second.
+`ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter.
+
+**A failed waiter gets one restart.** Exit 3 and any other failed exit are both a failed waiter.
+The next wake after one (the 300-second fallback, or any other) runs a full cycle ended with a
+waiter as usual: that is the restart. When that waiter fails too, the second failure in a row,
+start no more waiters for this PR: print `⚠ No waiter: <the exit code and the waiter's first
+line>; checking every 5 minutes instead.` in the status line, with a mailbox send that line once
+to your outbox (`node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --send --dir <outbox> --role
+ROLE_AGENT --from <clone> --to operator --context <repo>#<PR> --text "<the line in plain
+words>"`), and end every later cycle for this PR with `ScheduleWakeup({ delaySeconds: 300, …
+})` alone. Each of those cycles still polls, so a merge or a finding is seen within five minutes.
+A waiter that exits 0 (`PENDING` or `NONE`) ends the count, and a new PR starts with a waiter
+again.
 
 Below, `<poll>` is `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR>`, plus
 `--require-qa` when `qa-gate` is `on`, plus `--require-gate` when the block has `gate`.
@@ -370,9 +381,17 @@ minutes; 60 when idle) fires only if no waiter woke you. Each `ScheduleWakeup` r
 scheduling it every cycle never stacks wakeups. A standing `MERGE_READY` does not wake you again
 by itself: the waiter returns when it appears, or with new activity.
 
+**Before the turn ends, check the waiter.** This cycle ran a Bash call with `run_in_background:
+true` that started `<poll> … --wait`, and its result says it runs in the background; or this is a
+cycle that starts none (an exit-3 wake, a failed waiter, no more waiters for this PR) and called
+`ScheduleWakeup` with 300 seconds. Neither → start the waiter now, and add `↻ waiter started at
+the end of the cycle` to the status line.
+
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
 call, after any posting.** "A waiter running" means one this cycle started or, on an exit-3 wake
-only, the one that refused a second; never one an earlier cycle saw. The only exits are `MERGED` (then pick next; the `RESTART:` text
+only, the one that refused a second; never one an earlier cycle saw. A cycle that may start no
+waiter (above) ends with the 300-second `ScheduleWakeup` instead, never a longer one, while the
+PR is open. The only exits are `MERGED` (then pick next; the `RESTART:` text
 is not an exit), BLOCKED (then pick next), nothing to pick (with `<milestone>`: no open issue left in it or a later milestone; a track that
 waits on a blocker schedules its 600- or 1800-second wakeup instead), the operator's stop, and
 being superseded. If an iteration forgets, Claude Code fires one fallback
