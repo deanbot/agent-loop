@@ -68,7 +68,8 @@ exempt them the same way: `scripts/pick-next.mjs`, `scripts/pr-poll.mjs`, `scrip
 `scripts/pull.mjs` runs `git pull`, so it needs the same exemption: without it every loop pull
 fails, and the loop says so in a `⚠` line each time. `scripts/rules-ack.mjs` clears a record in
 the scripts' state folder, outside the clone, so exempt it too: a sandboxed run can't clear it, and
-`pick-next.mjs` then refuses every pick (`RULES_PENDING`).
+`pick-next.mjs` then refuses every pick (`RULES_PENDING`). `scripts/inbox.mjs` writes its record to
+the same state folder, so a loop with a mailbox needs it exempt too.
 
 ---
 
@@ -181,7 +182,8 @@ Anything you check by hand is listed in the LGTM under "Before you merge"; you c
 comment or by merging. Add `--inbox <folder> --outbox <folder>` to a start (both outside the
 clone) to give that loop a mailbox: direction arrives as message files, and replies go out the
 same way (spec: "Inbox folder"). The clone's own settings must name both folders, the inbox
-read-only, or every mailbox command prompts (Claude Code README, "Mailbox").
+read-only, or every mailbox command prompts (Claude Code README, "Mailbox"); the inbox is
+read-only only with the sandbox on, and with it off PR code can write direction into it.
 Details: [`adapters/claude-code/README.md`](adapters/claude-code/README.md).
 
 > **Updating:** `claude plugin update agent-loop@agent-loop`, then restart loop sessions. A

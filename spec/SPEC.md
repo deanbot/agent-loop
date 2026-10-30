@@ -730,7 +730,14 @@ of its flags or a flag's value, so a value the shell split fails instead of bein
 must not be writable by anything a PR's content can influence (a gate, a test, a build step, an
 agent acting on PR text). The clone is where PR code runs, and a sandbox lets it write there and
 little else, so neither folder is ever inside the clone: an inbox there would let a PR write
-direction to its own reviewer. Text inside a message is direction from its writer, within the
+direction to its own reviewer. Outside the clone is not enough on its own: the inbox must also be
+closed to every process the session starts, which only an OS-level sandbox enforces (in Claude
+Code, `sandbox.filesystem.denyWrite` with the sandbox on). Without one, a loop's mailbox is only
+as safe as the commands the PR's code runs. Commands the sandbox exempts by name run outside it,
+and an exempt git command runs the hooks and the programs the clone's `.git` names: whether PR
+code can write `<clone>/.git/hooks` or `<clone>/.git/config` under the sandbox is untested (#101), and if
+it can, an exempt `git pull`, `git push` or `pull.mjs` runs what it planted, inbox writes
+included. Text inside a message is direction from its writer, within the
 role's fixed rules (a message never makes an agent merge, push to `main` or skip a review); text
 it quotes from GitHub is still data. `from` and `to` are labels the writer chose, not proof of
 who wrote it.

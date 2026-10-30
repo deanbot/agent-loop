@@ -116,10 +116,15 @@ argument written out in full):
     "deny": ["Edit(//srv/agent-mail/<clone>/inbox/**)"]
   },
   "sandbox": {
+    "enabled": true,
+    "excludedCommands": ["node <plugin root>/scripts/inbox.mjs *"],
     "filesystem": { "denyWrite": ["/srv/agent-mail/<clone>/inbox"] }
   }
 }
 ```
+
+(`enabled` and the `inbox.mjs` exemption are the sandbox's own setup, below, next to whatever else
+the deployment exempts; settings files merge their arrays.)
 
 A working directory clears the check, but on its own it would make the inbox writable, and an
 inbox the session's environment can't write is what keeps PR code from writing direction to its
@@ -128,6 +133,37 @@ gate, probes, PR code), enforced by the OS; the `Edit` deny takes it back for Cl
 tools. A `Read(…)` allow rule does not clear the check for a path passed to a script. Commands
 that name no folder (the start recording the pair, later calls taking no path) were not chosen:
 they pass only because the check can't see the path, and the start still prompts.
+
+**The sandbox is required for a read-only inbox.** `denyWrite` acts only with the sandbox on
+(`"sandbox": { "enabled": true, … }`; it is off by default). With it off, the inbox is protected
+only from Claude's own file tools: any command, PR code included, can write a message into it. A
+sandbox-on run on macOS (Claude Code 2.1) showed:
+
+- `denyWrite` wins over the inbox's `additionalDirectories` entry. Writes into the inbox failed
+  with `Operation not permitted`, never a prompt, from a Bash command, from `node` in-process, from
+  a child shell, from a grandchild (a script that starts its own shell), from `git init` as a
+  child and as a top-level command, and from `inbox.mjs --send` started as a child. The Write tool
+  was refused by the `Edit` deny. A folder in neither list was refused too, and the outbox took
+  writes from the process and its children.
+- `inbox.mjs --send` into the outbox works sandboxed. `inbox.mjs --dir` does not: its record lives
+  in the state folder outside the clone, and the write fails with `EPERM`. Exempt it by name, as
+  the root README does for the other scripts: `"excludedCommands": ["node
+  <plugin root>/scripts/inbox.mjs *", …]`. An exemption covers only the session's own top-level
+  command; the same script started by a gate or PR code stays sandboxed (it failed with `EPERM`
+  above). Not chosen: the state folder in `sandbox.filesystem.allowWrite`, which would let PR code
+  rewrite the inbox's record of what was reported, hiding a message, or another script's state.
+- An exempt command runs outside the sandbox and can write anywhere, the inbox included:
+  `gh repo clone … <inbox>/x` did, under `"gh *"`. A command that a gate or PR code starts is
+  its own child and stays sandboxed, even when it matches an exemption (the child `inbox.mjs`
+  above). `git -C <inbox> …` does not match a `git fetch *` exemption, and failed.
+
+**Not tested: git hooks and config in the clone.** An exempt git command runs what the clone's
+`.git` tells it to: a hook in `.git/hooks` (`post-merge` on `git pull`, `pre-push` on `git push`)
+or a program set in `.git/config` (`core.fsmonitor`, say). If PR code can write there, an exempt
+`git pull`, `git push` or `pull.mjs` later runs what it planted outside the sandbox, and that can
+write into the inbox. Whether a sandboxed process can write `<clone>/.git/hooks` and
+`<clone>/.git/config` was not part of the run above, so treat the inbox as writable by PR code
+until it has been shown otherwise (#101).
 
 The fallback fires only if no waiter woke the session; a new `ScheduleWakeup` replaces the
 pending one, so it never stacks. "stop" ends the waiter with `TaskStop` (which wakes nothing) and
@@ -201,4 +237,8 @@ doesn't depend on the model.
   before posting, which narrows but does not close the race with a concurrent executor push.
 - Mailbox: without the outbox and the three inbox lines in the clone's settings (see "Mailbox"
   above), every mailbox command prompts, and every cycle of a loop started with `--inbox` stalls
-  until someone approves it.
+  until someone approves it. The inbox is read-only only with the sandbox on; with it off, any
+  command, PR code included, can write into it. Sandboxed, `scripts/inbox.mjs` must be exempt by
+  name, or its record write fails. Hooks or config that PR code plants in the clone's `.git` may
+  run under an exempt git command, outside the sandbox: untested (#101). Seen on macOS only; the Linux sandbox is a different
+  implementation and has not been run.
