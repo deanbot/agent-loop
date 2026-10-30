@@ -85,9 +85,11 @@ next wake of any other kind (the surviving waiter's own exit included) runs a fu
 starts a waiter of its own, since a waiter that has notified its exit is gone. Any other failed waiter
 (a usage error, a broken install) makes the next cycle end with a 300-second `ScheduleWakeup`
 instead of a waiter, so a persistent failure cannot spin the session. A failed waiter, exit 3
-included, gets one restart at the next wake; a second failure in a row is reported (`⚠ No
-waiter: …`, and once to the outbox with a mailbox), and the loop then runs on 300-second wakeups
-without a waiter (the executor until its PR merges). Before a turn ends, each loop checks that
+included, gets one restart at the next wake; a second failure in a row is reported once (`⚠ No
+waiter: …`, and to the outbox with a mailbox). After exit 3 the loop keeps alternating a
+300-second wakeup and a new waiter until the other waiter's lock ends (57 minutes at most); after
+any other failure it runs on 300-second wakeups without a waiter (the executor until its PR
+merges). Before a turn ends, each loop checks that
 this cycle started its waiter or scheduled that short wakeup, and starts the waiter if neither, so
 no cycle ends on the 30- or 60-minute fallback alone.
 
@@ -193,8 +195,8 @@ stops without unclaiming or posting, since the claims belong to the clone. The h
 `session_id` and the skill's `${CLAUDE_SESSION_ID}` were checked to be the same string, subagents
 included. One leftover: the old session's background waiter may still hold the PR's waiter lock,
 so the new session's waiters exit 3 until it ends (at most 25 minutes, 55 if it was idle); that
-wake re-schedules in 300 seconds, and a second exit 3 in a row leaves the loop on 300-second
-wakeups without a waiter, as above.
+wake re-schedules in 300 seconds, and the loop tries a waiter again at each next wake until one
+starts.
 
 ## Permissions
 

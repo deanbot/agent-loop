@@ -563,10 +563,13 @@ merge, a finding) within an interval; with only the fallback timer, as late as t
    on the wake its failure causes: that cycle ends with a short timer (300 seconds). An exit 3's
    live waiter may be another session's, whose exit wakes that session. The next wake runs a full
    cycle that starts a waiter again: the one restart.
-3. A second failure in a row is reported to the operator (the status line, and the outbox with a
-   mailbox), not retried: the loop starts no more waiters (the executor for that PR) and ends every
-   cycle with the short timer, each cycle still running its one-shot script. A waiter that exits 0
-   ends the count.
+3. A second failure in a row is reported to the operator once (the status line, and the outbox
+   with a mailbox). After exit 3, the loop goes on as in 2, a short timer and then a waiter: the
+   live waiter's lock ends within its `--max` plus 120 seconds (57 minutes at most), so the
+   failures end by themselves. After any other failure the waiter itself is broken, so it is not
+   retried: the loop starts no more waiters (the executor for that PR) and ends every cycle with
+   the short timer, each cycle still running its one-shot script. A waiter that exits 0 ends the
+   count.
 4. While no waiter runs, the timer is the short one, never the 30- or 60-minute fallback.
 
 ### Idle count (`--idle-after <n>`)

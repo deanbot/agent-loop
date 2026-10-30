@@ -276,14 +276,18 @@ broken install): name it in the status line, run the cycle, but end it with
 **A failed waiter gets one restart.** Exit 3 and any other failed exit are both a failed waiter.
 The next wake after one (the 300-second fallback, or any other) runs a full cycle ended with a
 waiter as usual: that is the restart. When that waiter fails too, the second failure in a row,
-start no more waiters for this PR: print `⚠ No waiter: <the exit code and the waiter's first
-line>; checking every 5 minutes instead.` in the status line, with a mailbox send that line once
-to your outbox (`node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --send --dir <outbox> --role
-ROLE_AGENT --from <clone> --to operator --context <repo>#<PR> --text "<the line in plain
-words>"`), and end every later cycle for this PR with `ScheduleWakeup({ delaySeconds: 300, …
-})` alone. Each of those cycles still polls, so a merge or a finding is seen within five minutes.
-A waiter that exits 0 (`PENDING` or `NONE`) ends the count, and a new PR starts with a waiter
-again.
+print `⚠ No waiter: <the exit code and the waiter's first line>; checking every 5 minutes
+instead.` in the status line, and with a mailbox send that line once to your outbox (`node
+${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --send --dir <outbox> --role ROLE_AGENT --from <clone>
+--to operator --context <repo>#<PR> --text "<the line in plain words>"`). Then, by the failure:
+after exit 3, go on as above: each wake the failure causes ends with the 300-second
+`ScheduleWakeup`, and the next wake runs a full cycle that starts a waiter again. The live
+waiter's lock ends within 57 minutes (its `--max` plus 2), so this stops by itself; the report is
+not repeated. After any other failure, the waiter itself is broken: start no more waiters for this
+PR and end every later cycle for it with `ScheduleWakeup({ delaySeconds: 300, … })` alone. Each
+of those cycles still polls, so a merge or a finding is seen within five minutes. A waiter that
+exits 0 (`PENDING` or `NONE`) ends the count and the 5-minute rhythm, and a new PR starts with a
+waiter again.
 
 Below, `<poll>` is `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR>`, plus
 `--require-qa` when `qa-gate` is `on`, plus `--require-gate` when the block has `gate`.
