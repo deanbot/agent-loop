@@ -79,7 +79,8 @@ open.
 The skill never reads the waiter's output (the notification carries only an output-file path,
 outside the project), and a session that dies before handling a wake loses nothing: the state was
 never written. A waiter that finds another live waiter for the same state, one it can verify
-(the lock's script and state file, the same user, its command line and start time), takes the
+(the lock's state file and script name, so another plugin version's waiter counts; the same
+user; its command line and start time), takes the
 lock over: the old one prints `TAKEN_OVER` and exits 4 ("failed with exit code 4"). That wake
 starts no waiter, since the newer one is alive and would only be taken over in turn, and
 schedules the fallback in 3600 seconds, past any waiter's `--max`. So an orphan from an ended or
@@ -201,8 +202,8 @@ stops without unclaiming or posting, since the claims belong to the clone. The h
 `session_id` and the skill's `${CLAUDE_SESSION_ID}` were checked to be the same string, subagents
 included. One leftover: the old session's background waiter may still hold the PR's waiter lock.
 The new session's first waiter takes it over (the old one exits 4, waking the superseded session,
-which stops on its beat). Only when that waiter can't verify the holder, as with one started by a
-plugin version before the lock named its script, does it exit 3 until the holder ends (at most 25
+which stops on its beat), also after a plugin update. Only when that waiter can't verify the
+holder, as with one started by a plugin version before the lock named its script, does it exit 3 until the holder ends (at most 25
 minutes, 55 if it was idle): that wake re-schedules in 300 seconds, and the loop tries a waiter
 again at each next wake until one starts.
 

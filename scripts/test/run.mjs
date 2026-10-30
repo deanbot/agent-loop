@@ -846,9 +846,34 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   const stubborn = await tryWith(standIn([script, '--wait'], true))
   check('wait: a verified holder that ignores the request → exit 3 after the grace period, still alive (no SIGKILL)',
     stubborn.code === 3 && stubborn.stillAlive && stubborn.ms >= 4500, `${stubborn.code} ${stubborn.ms}ms ${stubborn.out}${stubborn.err} alive ${stubborn.stillAlive}`)
+  // The review of #118: a waiter from another plugin version runs the same script from another
+  // folder; it is still this state file's waiter.
+  const elsewhere = '/elsewhere/agent-loop/9.9.9/scripts/pr-watch.mjs'
+  const otherVersion = await tryWith(standIn([elsewhere, '--wait']), { script: elsewhere })
+  check('wait: a waiter running the script from another plugin folder (same name, same state file) is taken over',
+    otherVersion.code === 0 && !otherVersion.stillAlive, `${otherVersion.code} ${otherVersion.out}${otherVersion.err} alive ${otherVersion.stillAlive}`)
+  check('wait: … and no takeover request is left behind', !existsSync(`${lockFile}.takeover`), '')
   const verified = await tryWith(standIn([script, '--wait']))
   check('wait: … while the same stand-in that does leave on the request is taken over (the checks above are the only difference)',
     verified.code === 0 && !verified.stillAlive, `${verified.code} ${verified.out}${verified.err} alive ${verified.stillAlive}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // The review of #118: a real waiter whose pass (slow gh calls) outlasts the taker's grace period
+  // handles the signal only after the taker gave up and withdrew. It must keep waiting, never exit 4,
+  // so one waiter is always left.
+  const ctx = makeEnv()
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
+  setFixture(ctx, { ...watchReviewed, delayMs: 2500 })
+  const holder = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '12'))
+  await pause(1500)
+  const taker = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
+  const h = await holder.done
+  check('wait: a takeover that lands during the holder\'s slow pass → the taker exits 3 after its grace, and the holder keeps waiting (never exit 4)',
+    taker.code === 3 && h.code === 0 && signals(h.out).join() === 'NONE', `taker ${taker.code} ${taker.out} | holder ${h.code} ${h.out}${h.err}`)
+  check('wait: … and the withdrawn request is gone',
+    !existsSync(path.join(ctx.home, '.agent-loop', 'state', WATCH_STATE.replace(/\.json$/, '-wait.lock.takeover'))), '')
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {

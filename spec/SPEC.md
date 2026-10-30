@@ -537,13 +537,18 @@ the waiter's exit and its next run.
 - **One waiter per state file** (so per PR for `pr-poll`), held by a pid lock. A new waiter that
   finds a live holder takes the lock over when it can verify the holder is a waiter for the same
   state file. Verified means all of the following:
-  - the lock names this script and state file;
+  - the lock names this state file and a script of this name (another plugin version's folder is
+    the same waiter);
   - the holder runs as the same user;
   - its command line runs the script with `--wait`;
   - its start time matches the lock's, so a reused pid fails.
 
-  The holder then gets SIGUSR2, prints `TAKEN_OVER` and exits 4, releasing the lock, and the new
-  waiter waits as usual. Otherwise the new waiter prints `WATCHER_RUNNING <pid>` and exits 3: an
+  The new waiter then writes a request, `<lock>.takeover` holding its pid, and sends SIGUSR2. The
+  holder claims the request by renaming it, prints `TAKEN_OVER` and exits 4, releasing the lock,
+  and the new waiter waits as usual. A holder in the middle of a pass handles the signal only when
+  the pass ends. If that is after the new waiter's grace period, the new waiter has withdrawn the
+  request by removing it, so the holder finds none and keeps waiting. Whichever acts first wins,
+  so one waiter is always left. Otherwise the new waiter prints `WATCHER_RUNNING <pid>` and exits 3: an
   unverifiable holder (any doubt, a lock from an older version, a platform whose command lines
   can't be read), or one still alive a few seconds after the request. It tries a takeover once,
   so two new waiters never trade the lock, and it never sends SIGKILL. A waiter stopped another

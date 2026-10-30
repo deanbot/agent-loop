@@ -35,10 +35,13 @@
 // news. One-shot runs accept the flag and ignore it: the agent runs inbox.mjs itself.
 //
 // One waiter per state file: a pid lock (`<state>-wait.lock`). A new waiter that finds the lock held
-// by a live waiter it can verify takes it over (#116): the holder gets SIGUSR2, prints `TAKEN_OVER`
-// and exits 4, releasing the lock, and the new one waits as usual. Verified means all of: the lock
-// names this script and this state file (a lock without them, from an older version, is never
-// verified); the holder runs as this user; its command line runs this script with --wait; and it
+// by a live waiter it can verify takes it over (#116): it writes a request (`<lock>.takeover`, its
+// pid) and sends SIGUSR2; the holder claims the request, prints `TAKEN_OVER` and exits 4,
+// releasing the lock, and the new one waits as usual. A request the taker withdrew (the holder's
+// pass held the handler past the grace period) is ignored, so the holder keeps waiting. Verified
+// means all of: the lock names this state file and a script of this name (another plugin version's
+// folder is fine; a lock without them, from an older version, is never verified); the holder runs
+// as this user; its command line runs this script with --wait; and it
 // started when the lock says (a reused pid did not). Anything else, a platform where a command line
 // can't be read, or a holder still alive after a few seconds, and the new waiter prints
 // `WATCHER_RUNNING <pid>` and exits 3, as before; it never sends SIGKILL, and it tries a takeover
@@ -161,7 +164,10 @@ function elapsedSecs(text) {
 // Every doubt is a no.
 function verifiedWaiter(held, self) {
   if (process.platform === 'win32') return false
-  if (!Number.isInteger(held.pid) || held.script !== self.script || held.stateFile !== self.stateFile) return false
+  // The script by name: after a plugin update the holder runs the same script from another
+  // (versioned) folder. The state file is the waiter's identity, and must match exactly.
+  if (!Number.isInteger(held.pid) || typeof held.script !== 'string' || path.basename(held.script) !== path.basename(self.script)) return false
+  if (held.stateFile !== self.stateFile) return false
   if (!signallable(held.pid)) return false
   let line
   try {
@@ -185,19 +191,57 @@ function verifiedWaiter(held, self) {
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// Asks a verified holder to give the lock up; true once it has exited, false if it is still alive
-// after the grace period (it is then left alone).
-async function takeOver(pid) {
-  try {
-    process.kill(pid, 'SIGUSR2')
-  } catch {
-    return !signallable(pid)
-  }
-  for (let waited = 0; waited < 5000; waited += 100) {
+const waitGone = async (pid, ms) => {
+  for (let waited = 0; waited < ms; waited += 100) {
     if (!signallable(pid)) return true
     await pause(100)
   }
   return !signallable(pid)
+}
+
+// Asks a verified holder to give the lock up; true once it has exited, false if it is still alive
+// (it is then left alone). The request is a file, `<lock>.takeover`, holding the taker's pid. The
+// holder acts on SIGUSR2 only by claiming that file (an atomic rename), and a pass in progress
+// delays its handler, so the taker withdraws by removing the file. Whichever comes first wins: a
+// file the holder claimed means it is on its way out, so the taker waits for it; a file the taker
+// removed means the holder finds no request and keeps waiting. Never are both waiters gone.
+async function takeOver(pid, requestFile, retried = false) {
+  try {
+    const fd = openSync(requestFile, 'wx')
+    writeFileSync(fd, String(process.pid))
+    closeSync(fd)
+  } catch (e) {
+    if (e.code !== 'EEXIST' || retried) return false
+    // Another taker's request: live, it is that taker's turn; left by a dead one, it is stale.
+    const other = Number(readOr(requestFile, ''))
+    if (Number.isInteger(other) && other > 0 && signallable(other)) return false
+    rmQuiet(requestFile)
+    return takeOver(pid, requestFile, true)
+  }
+  try {
+    process.kill(pid, 'SIGUSR2')
+  } catch {
+    // gone already
+  }
+  if (await waitGone(pid, 5000)) {
+    rmQuiet(requestFile)
+    return true
+  }
+  try {
+    unlinkSync(requestFile)
+    return false // withdrawn before the holder claimed it: it keeps waiting
+  } catch {
+    // The holder claimed it: it is exiting now.
+    return waitGone(pid, 5000)
+  }
+}
+
+function rmQuiet(file) {
+  try {
+    unlinkSync(file)
+  } catch {
+    // gone
+  }
 }
 
 async function acquireLock(lockFile, max, self) {
@@ -220,7 +264,7 @@ async function acquireLock(lockFile, max, self) {
       if (held.pid && held.pid !== process.pid && pidAlive(held.pid) && !expired) {
         if (triedTakeover || !verifiedWaiter(held, self)) return held.pid
         triedTakeover = true
-        if (!(await takeOver(held.pid))) return held.pid
+        if (!(await takeOver(held.pid, `${lockFile}.takeover`))) return held.pid
         // It released the lock on its way out; if it couldn't, the lock is stale now.
       }
       // Remove the stale lock, unless another waiter has written its own since it was read.
@@ -274,9 +318,18 @@ export async function runSignalScript({ argv, usage, stateFile, pass }) {
     process.stdout.write(`WATCHER_RUNNING ${holder}\n`)
     process.exit(3)
   }
-  // A newer waiter took the lock over: say so and leave, releasing it on the way out ('exit').
-  // Written synchronously, so the line is out before the process ends.
+  // A newer waiter asks for the lock: leave only by claiming its request (see takeOver), so a
+  // request it has withdrawn, because this pass held the handler past its grace, is ignored.
+  // Written synchronously, so the line is out before the process ends; the lock goes on 'exit'.
+  const requestFile = `${lockFile}.takeover`
   process.on('SIGUSR2', () => {
+    const claimed = `${requestFile}.${process.pid}`
+    try {
+      renameSync(requestFile, claimed)
+    } catch {
+      return // no request, or withdrawn: keep waiting
+    }
+    rmQuiet(claimed)
     writeSync(1, 'TAKEN_OVER\n')
     process.exit(4)
   })
