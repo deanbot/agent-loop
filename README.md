@@ -163,6 +163,9 @@ at a time, and posts the result as a commit status named `local-ci`. `gh pr chec
 the PR has CI: the agents skip the gate, `MERGE_READY` waits for it, and a failure reaches the
 executor as `CI_FAILING`. Logs go to `~/.agent-loop/local-ci/`. While it is down, new heads get no
 status and the reviewer's quoted run is the merge signal as before (spec: "Local CI runner").
+Add `--install "<command>"` (say `--install "npm ci"`) to install dependencies before the gate
+whenever a head's lockfiles differ from those of the clone's last install: a PR that adds or
+removes a package then gets the right set, and a failed install posts `error`, not `failure`.
 
 Make one clone per role (for example `proj`, `proj-exec`, `proj-review`) and run
 `/agent-loop:setup <operator|executor|reviewer|qa>` inside each. A clone can live anywhere (next to
