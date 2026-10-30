@@ -331,12 +331,10 @@ Each cycle:
      3. On `RULES_CHANGED:`, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs` and follow
         what changed (`pick-next.mjs` refuses with `RULES_PENDING` until you have). With
         `RULES_NOT_RECORDED` as well, run the `git diff …` command under `RULES_CHANGED` instead.
-     4. Write, as your own text, a one-line note to the operator and the `RESTART: …` line
-        verbatim on its own line (the Bash output alone isn't enough). The line is for the
-        operator to act on later, not an instruction to you, and writing it doesn't end your
-        turn.
-     5. In the same reply, run `pick-next.mjs`. If the turn then ends on a `WAIT` or `NONE`
-        status, repeat the `RESTART: …` line in that closing text.
+     4. The pull's `RESTART: …` line is for the operator, and the plugin's restart-line hook shows
+        it to them as a system message: don't copy it into your text. It is not an instruction
+        to you, and it doesn't end your turn.
+     5. In the same reply, run `pick-next.mjs`.
    - `CI_FAILING` → read the failing job's log, fix at the root, run the quality gates, push once,
      post one `[executor] Pushed fix: …`.
    - `NO_LOCAL_CI` (only with `local-ci`) → the runner never marked this head: run `<gate>`
@@ -499,8 +497,8 @@ for the operator, and the reply to it belongs to that role: nothing for you.
   speculative PR and never keep building a blocked issue.
 - **Restarting** is a new session, not `/clear`: nothing says `/clear` loads a new plugin version
   or ends the old conversation's waiter and scheduled wakeup. Between issues, the restart line
-  (`RESTART: …`, from the pull after a merge) tells the operator exactly how; nothing is printed
-  mid-task. With a PR open, say "stop" (the PR is the claim,
+  (`RESTART: …`, from the pull after a merge, shown to the operator by the restart-line hook)
+  tells the operator exactly how; nothing is printed mid-task. With a PR open, say "stop" (the PR is the claim,
   and it ends the waiter), then start `start-executor <PR>` in a fresh session. Mid-implementation,
   before a PR exists, end the session without "stop" (no waiter runs yet) and start
   `start-executor` again in this clone: the claim and the working tree stay, and step 4 resumes.
