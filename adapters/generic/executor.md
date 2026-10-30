@@ -17,7 +17,9 @@ search tool, search with `git grep -n '<pattern>' -- '<pathspec>'` and list with
 `{…,…}` in a pattern or a pathspec: write alternatives as `-E '(a|b)'` and give each pathspec
 separately (`'*.ts' '*.tsx'`). No `;`, `&&`,
 pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. `--jq` filters never end in
-`]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`. Change files with your
+`]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`. A `--jq` filter also holds
+no `$` inside a double-quoted string (a regex such as `test("…$")`, which drew the same prompt): a
+lookup that needs one goes through a plugin script. Change files with your
 tool's file-edit tools, never through the shell: no heredoc, `python3 -`, `node -e`, `sed -i`,
 `tee` or `>` redirect (a long commit message or PR body goes to a file, then `-F <file>` or
 `--body-file <file>`). The project's own generators and formatters, run as one plain command, are
@@ -114,9 +116,10 @@ auth) → stop and say `Could not tell whether <n> is a PR: <the error>. Restart
 - PR number → orient (read the description and the whole thread; you are resuming, so remove a
   lingering `blocked-label` or `needs-operator-label` from the issue and the PR), enter the poll
   loop.
-- Issue number → look for an open PR whose body has `Closes #N` (`gh pr list --state open
-  --limit 100 --json number,body`; treat a missing body as empty); found → orient and poll; not
-  found → implement.
+- Issue number → look for an open PR that closes it: `node scripts/pr-for-issue.mjs --repo
+  <repo> --closes <N>`. `PR:<n> <branch>` → orient on PR #<n> and poll; `NONE` → implement. A
+  failed lookup (exit 2, a `pr-for-issue:` line) is neither: never claim on it. Stop and say
+  `Could not look up open PRs for #<N>: <the pr-for-issue: line>. Restart when gh works.`
 - Nothing → pick next with `node scripts/pick-next.mjs --repo <repo> --in-progress-label <l>
   --blocked-label <l>` (plus `--milestone "<title>"`, plus `--skip <n,n>` for issues this run
   turned down: author check failed, claim lost). Run it every time, after a wait too; never pick

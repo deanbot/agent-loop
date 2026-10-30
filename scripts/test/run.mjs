@@ -2684,6 +2684,55 @@ const putMessage = (dir, id, extra, meta) => {
   check('start: … and no executor still reads any failure as "an issue"', loose.length === 0, loose.join('\n'))
 }
 
+// ---------------------------------------------------------------- pr-for-issue.mjs, the open-PR lookup (#110)
+{
+  const ctx = makeEnv()
+  const pr = (number, body, headRefName, isCrossRepository = false) => ({ number, body, headRefName, isCrossRepository })
+  const prs = [
+    pr(9, 'Fixes it.\n\nCloses #42', 'issue-42-later'),
+    pr(3, 'Closes #420', 'issue-420'),
+    pr(7, 'closes #42', 'from-a-fork', true),
+    pr(5, 'Body.\n\nCLOSES #42.', 'issue-42-first'),
+    pr(2, null, 'no-body'),
+  ]
+  const look = (args, fixture = { prs }) => run(ctx, 'pr-for-issue.mjs', ['--repo', REPO, ...args], fixture)
+  // The fixture lists PRs out of order, so a pick by list position (first or last) fails too.
+  check('pr-for-issue: the newest (highest-numbered) open same-repo PR closing #42 (any case) → PR:<n> <branch>, as the old filter and pick-next took',
+    look(['--closes', '42']) === 'PR:9 issue-42-later\n', look(['--closes', '42']))
+  check('pr-for-issue: … "#42" as the argument works too', look(['--closes', '#42']) === 'PR:9 issue-42-later\n', look(['--closes', '#42']))
+  check('pr-for-issue: … whatever the list order (the higher number listed last)',
+    look(['--closes', '42'], { prs: [pr(5, 'Closes #42', 'issue-42-first'), pr(1, 'x', 'other'), pr(9, 'Closes #42', 'issue-42-later')] }) === 'PR:9 issue-42-later\n')
+  check('pr-for-issue: "Closes #420" is not #42, and a fork\'s PR is never returned', look(['--closes', '4']) === 'NONE\n' &&
+    look(['--closes', '42'], { prs: [pr(7, 'Closes #42', 'from-a-fork', true), pr(3, 'Closes #420', 'issue-420')] }) === 'NONE\n', look(['--closes', '4']))
+  check('pr-for-issue: no open PR closes it (a null body included) → NONE', look(['--closes', '99']) === 'NONE\n', look(['--closes', '99']))
+  const failed = look(['--closes', '42'], { fail: true })
+  check('pr-for-issue: a failed gh call → exit 2 with a pr-for-issue: line', failed.startsWith('EXIT 2') && /pr-for-issue: HTTP 502/.test(failed), failed)
+  const usage = [look([]), look(['--closes', 'x']), look(['--closes', '42', 'extra'])]
+  check('pr-for-issue: no --closes, a --closes that is no number, or a stray argument → exit 1', usage.every((o) => o.startsWith('EXIT 1')), usage.join('\n'))
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // The adapters: the lookup goes through the script, and no --jq filter holds a $ inside a
+  // double-quoted string, the likely trigger of the prompt the old filter drew.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const texts = readdirSync(adapters, { recursive: true }).filter((f) => /\.(md|sh)$/.test(f))
+  const flatOf = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+  const sigilInQuotes = texts.flatMap((f) => [...flatOf(f).matchAll(/--jq '([^']*)'/g)].filter((m) => /"[^"]*\$[^"]*"/.test(m[1])).map((m) => `${f}: ${m[1]}`))
+  check('loop texts: no --jq filter holds a $ inside a double-quoted string', sigilInQuotes.length === 0, sigilInQuotes.join('\n'))
+  const executors = ['claude-code/skills/start-executor/SKILL.md', 'kiro/skills/start-executor/SKILL.md', 'generic/executor.md']
+  const noScript = executors.filter((f) => !/scripts\/pr-for-issue\.mjs --repo <repo> --closes <N>/.test(flatOf(f)))
+  check('open-PR lookup: every executor uses pr-for-issue.mjs', noScript.length === 0, noScript.join('\n'))
+  // A failed lookup read as "no PR" would claim an issue whose PR is open (#130 review).
+  const noStop = executors.filter((f) => !flatOf(f).includes('A failed lookup (exit 2, a `pr-for-issue:` line) is neither: never claim on it.') ||
+    !flatOf(f).includes('say `Could not look up open PRs for #<N>: <the pr-for-issue: line>. Restart when gh works.`'))
+  check('open-PR lookup: every executor stops on a failed lookup, never claims on it', noStop.length === 0, noStop.join('\n'))
+  const clause = 'holds no `$` inside a double-quoted string (a regex such as `test("…$")`, which drew the same prompt): a lookup that needs one goes through a plugin script'
+  const clauseTexts = ['claude-code/skills/start-executor/SKILL.md', 'claude-code/skills/start-reviewer/SKILL.md', 'generic/executor.md', 'generic/qa.md', 'generic/reviewer.md',
+    'kiro/skills/start-executor/SKILL.md', 'kiro/skills/start-qa/SKILL.md', 'kiro/skills/start-reviewer/SKILL.md']
+  const noClause = [...clauseTexts.filter((f) => !flatOf(f).includes(clause)),
+    ...(flatOf('claude-code/skills/start-qa/SKILL.md').includes('holds no `$` inside a double-quoted string, a regex such as `test("…$")`, which drew the same prompt: a lookup that needs one goes through a plugin script') ? [] : ['claude-code/skills/start-qa/SKILL.md'])]
+  check('loop texts: beside every ]] clause, a --jq filter holds no $ inside a double-quoted string', noClause.length === 0, noClause.join('\n'))
+}
+
 // ---------------------------------------------------------------- the local-ci key (#107)
 {
   // With `local-ci: <context>` every executor leaves the gate to the runner before the PR, passes

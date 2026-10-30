@@ -153,7 +153,9 @@ Rules that hold for the whole session:
   source or run checks (reference/implement.md §3): no `$(…)`, no `;`, no pipes. Compound forms
   defeat the permission allowlist and prompt, and an unattended loop stops at the prompt. `--jq`
   filters never end in `]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`
-  (Claude Code's safety check prompts on it, likely read as shell `[[ … ]]`).
+  (Claude Code's safety check prompts on it, likely read as shell `[[ … ]]`). A `--jq` filter
+  also holds no `$` inside a double-quoted string (a regex such as `test("…$")`, which drew the
+  same prompt): a lookup that needs one goes through a plugin script.
 - **`gh` and `git push|fetch|pull` run on their own**, from the clone's root: `gh … --repo
   <repo>`, never `cd <dir> && gh …`. A sandbox exempts these commands by name (in Claude Code,
   `sandbox.excludedCommands`), and a chained command doesn't match, so it runs sandboxed, fails
@@ -189,13 +191,14 @@ number.
   If it fails with `Could not resolve to a PullRequest`, `<arg>` is an issue number (next
   bullet). Any other failure (network, auth) → **stop** and say `Could not tell whether <arg> is
   a PR: <the error>. Restart when gh works.`
-- With an issue number: `gh pr list --repo <repo> --state open --limit 100 --json
-  number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first |
-  .number'`. A PR found → orient on it (below: it claims the issue again when it was parked) and
-  enter the loop. None → claim and
+- With an issue number: `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-for-issue.mjs --repo <repo>
+  --closes <N>`. `PR:<n> <branch>` → orient on PR #<n> (below: it claims the issue again when it
+  was parked) and enter the loop. `NONE` → claim and
   implement
   (read [reference/implement.md](reference/implement.md) now; it covers the author check, the
-  claim, dependencies, tests-first, the pre-PR self-check and the PR body).
+  claim, dependencies, tests-first, the pre-PR self-check and the PR body). A failed lookup (exit
+  2, a `pr-for-issue:` line) is neither: never claim on it. **Stop** and say `Could not look up
+  open PRs for #<N>: <the pr-for-issue: line>. Restart when gh works.`
 
 **Pick next** with the script, every time, a wake included. Never pick from a list you
 remember: issues are filed while you wait, and only a fresh listing sees them.

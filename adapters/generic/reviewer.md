@@ -19,7 +19,9 @@ no search tool, search with `git grep -n '<pattern>' -- '<pathspec>'` and list w
 `{…,…}` in a pattern or a pathspec: write alternatives as `-E '(a|b)'` and give each pathspec
 separately (`'*.ts' '*.tsx'`). No `;`, `&&`,
 pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. `--jq` filters never end in
-`]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`. Change files (a probe, a
+`]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`. A `--jq` filter also holds
+no `$` inside a double-quoted string (a regex such as `test("…$")`, which drew the same prompt): a
+lookup that needs one goes through a plugin script. Change files (a probe, a
 scratch test) with your tool's file-edit tools, never through the shell: no heredoc, `python3 -`,
 `node -e`, `sed -i`, `tee` or `>` redirect (a long comment body goes to a file, then `--body-file
 <file>`). The project's own generators and formatters, run as one plain command, are build steps,
