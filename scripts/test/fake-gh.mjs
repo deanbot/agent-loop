@@ -25,6 +25,9 @@
 //   attempts  → gh api repos/o/r/actions/runs/ID/attempts/K     (object: "ID/K" → run)
 //   items     → gh api repos/o/r/issues?…                       (array: issues and PRs, as the list endpoint)
 //   events    → gh api repos/o/r/issues/N/events                (object: N → array)
+//   agents    → gh api repos/o/r/contents/AGENTS.md             (string: the default branch's file, served
+//               base64 as the contents API does; absent → 404; 'error' → HTTP 502;
+//               'too-large' → encoding "none" and no content, as for a file over 1 MB)
 //   A query string (`?per_page=100`) on a path is ignored.
 //   fail      → every call fails like a network error         (true)
 //   delayMs   → every call takes this long before answering    (number)
@@ -72,6 +75,20 @@ if (args[0] === 'api') {
       process.exit(1)
     }
     out(run)
+  }
+  if (/\/contents\/AGENTS\.md$/.test(target)) {
+    if (fixture.agents === undefined) {
+      process.stderr.write('gh: Not Found (HTTP 404)\n')
+      process.exit(1)
+    }
+    if (fixture.agents === 'too-large') out({ name: 'AGENTS.md', encoding: 'none', content: '' })
+    if (fixture.agents === 'error') {
+      process.stderr.write('HTTP 502: Bad Gateway (https://api.github.com/)\n')
+      process.exit(1)
+    }
+    // The API wraps base64 at 60 characters.
+    const content = Buffer.from(fixture.agents).toString('base64').replace(/(.{60})/g, '$1\n')
+    out({ name: 'AGENTS.md', encoding: 'base64', content })
   }
   if (/\/issues$/.test(target)) out(args.includes('--slurp') ? [fixture.items ?? []] : (fixture.items ?? []))
   if (/\/issues\/\d+\/events$/.test(target)) {

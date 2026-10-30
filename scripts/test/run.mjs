@@ -181,9 +181,96 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   const back = poll(lctx, noCi(`\n\nGate on d4e5f60: ok`, { pr: { merged: false, head: { sha: backHead } } }), local)
   check('poll --local-ci: once the runner\'s check has shown up again, the next unmarked head gets a window again (CI pending)',
     !ready(back) && !signals(back).includes('NO_LOCAL_CI'), back)
-  const window = run(lctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--local-ci-window', '60'], BASE)
-  check('poll: --local-ci-window without --local-ci → usage error, exit 1', window.startsWith('EXIT 1'), window)
+  const window = run(lctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--local-ci-window', 'soon'], BASE)
+  check('poll: --local-ci-window that is not seconds → usage error, exit 1', window.startsWith('EXIT 1'), window)
   rmSync(lctx.home, { recursive: true, force: true })
+
+  // #129: the block on the default branch turns the flags on by itself; a flag given still wins.
+  const block = (lines) => `# Project\n\n## Agent loop\n\nrepo: acme/widgets\n${lines}\n\n## Other\n\ngate: not-the-block\n`
+  const bctx = makeEnv()
+  const withBlock = (lines, fx) => ({ ...fx, agents: block(lines) })
+  check('poll, block has gate (no flag): no CI, LGTM without a gate line → no MERGE_READY; quoting it → MERGE_READY',
+    !ready(poll(bctx, withBlock('gate: just gate', noCi('')))) && ready(poll(bctx, withBlock('gate: `just gate`', noCi(quoted)))))
+  check('poll: a gate key under another heading is not the block\'s → MERGE_READY without a quote',
+    ready(poll(bctx, withBlock('', noCi('')))))
+  check('poll, block has qa-gate: on (no flag): LGTM without [qa] PASS → no MERGE_READY; with it → MERGE_READY',
+    !ready(poll(bctx, withBlock('qa-gate: on', { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }))) &&
+    ready(poll(bctx, withBlock('qa-gate: on', { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z')), comment('[qa] PASS', T('2026-01-01T12:05:00Z'))] }))))
+  check('poll, block has qa-gate: off → no PASS needed',
+    ready(poll(bctx, withBlock('qa-gate: off', { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }))))
+  rmSync(bctx.home, { recursive: true, force: true })
+
+  // local-ci from the block behaves as --local-ci: pending in the window, then NO_LOCAL_CI.
+  const kctx = makeEnv()
+  const kstate = path.join(kctx.home, '.agent-loop', 'state', 'acme-widgets-pr-poll-7.json')
+  const kage = (secs) => {
+    const s = JSON.parse(readFileSync(kstate, 'utf8'))
+    s.head.seenAt = Date.now() - secs * 1000
+    writeFileSync(kstate, JSON.stringify(s))
+  }
+  const lblock = 'gate: just gate\nlocal-ci: local-ci'
+  const kfresh = poll(kctx, withBlock(lblock, noCi(quoted)))
+  check('poll, block has local-ci (no flags): a head with no checks first seen now → CI pending, as with --local-ci',
+    !ready(kfresh) && !signals(kfresh).includes('NO_LOCAL_CI'), kfresh)
+  kage(301)
+  const kafter = poll(kctx, withBlock(lblock, noCi('')))
+  check('poll, block has local-ci (no flags): after the window → NO_LOCAL_CI, and the gate quote is needed',
+    signals(kafter).includes('NO_LOCAL_CI') && !ready(kafter), kafter)
+  rmSync(kctx.home, { recursive: true, force: true })
+  const wctx = makeEnv()
+  const wnow = poll(wctx, withBlock(lblock, noCi('')), ['--local-ci-window', '0'])
+  check('poll: --local-ci-window applies to the block\'s context', signals(wnow).includes('NO_LOCAL_CI'), wnow)
+  rmSync(wctx.home, { recursive: true, force: true })
+
+  // The flag's context wins: block "local-ci: other", flag --local-ci local-ci. After NO_LOCAL_CI,
+  // the runner's check under local-ci clears "down" only when local-ci is the context in use, so the
+  // next unmarked head gets a window again (no MERGE_READY even quoted) rather than no CI at once.
+  const fctx = makeEnv()
+  const fstate = path.join(fctx.home, '.agent-loop', 'state', 'acme-widgets-pr-poll-7.json')
+  const flagCi = ['--local-ci', 'local-ci']
+  const oblock = 'gate: just gate\nlocal-ci: other'
+  poll(fctx, withBlock(oblock, noCi('')), flagCi)
+  const fs0 = JSON.parse(readFileSync(fstate, 'utf8'))
+  fs0.head.seenAt = Date.now() - 301 * 1000
+  writeFileSync(fstate, JSON.stringify(fs0))
+  poll(fctx, withBlock(oblock, noCi('')), flagCi)
+  poll(fctx, withBlock(oblock, moved('', runner('pass'))), flagCi)
+  const fback = poll(fctx, withBlock(oblock, noCi('\n\nGate on d4e5f60: ok', { pr: { merged: false, head: { sha: backHead } } })), flagCi)
+  check('poll: --local-ci on the command line wins over the block\'s local-ci', !ready(fback) && !signals(fback).includes('NO_LOCAL_CI'), fback)
+  rmSync(fctx.home, { recursive: true, force: true })
+
+  // Fail closed: an unreadable block may hold a gate the flags don't, so MERGE_READY waits.
+  const ectx = makeEnv()
+  const lgtmFx = { ...BASE, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))], agents: 'error' }
+  writeFileSync(ectx.fixture, JSON.stringify({ ...BASE, agents: 'error' }))
+  spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env })
+  writeFileSync(ectx.fixture, JSON.stringify(lgtmFx))
+  const unread = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
+  check('poll: the block can\'t be read → no MERGE_READY, a pr-poll: line on stderr, exit 0 and the other signals as usual (NEW_COMMENT)',
+    unread.status === 0 && !ready(unread.stdout) && signals(unread.stdout).includes('NEW_COMMENT') && /^pr-poll: could not read the Agent loop block \(MERGE_READY withheld\): HTTP 502/m.test(unread.stderr),
+    `${unread.status}\n${unread.stdout}\n${unread.stderr}`)
+  writeFileSync(ectx.fixture, JSON.stringify({ ...lgtmFx, agents: block('') }))
+  const reread = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
+  check('poll: … the next run reads it again (a failure is not kept) → MERGE_READY', ready(reread.stdout), reread.stdout + reread.stderr)
+  writeFileSync(ectx.fixture, JSON.stringify({ ...lgtmFx, agents: 'too-large' }))
+  const large = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
+  check('poll: an AGENTS.md the API sends without content (over 1 MB) is unreadable, not an empty block → no MERGE_READY',
+    !ready(large.stdout) && /could not read the Agent loop block/.test(large.stderr), large.stdout + large.stderr)
+  rmSync(ectx.home, { recursive: true, force: true })
+
+  // The block comes from the default branch through the API, never from the clone's AGENTS.md (a PR's
+  // head could change its own gate): a clone whose AGENTS.md has gate and qa-gate changes nothing.
+  const cctx = makeEnv()
+  const clone = path.join(cctx.home, 'clone')
+  mkdirSync(clone)
+  writeFileSync(path.join(clone, 'AGENTS.md'), block('gate: just gate\nqa-gate: on\nlocal-ci: local-ci'))
+  writeFileSync(cctx.fixture, JSON.stringify(withBlock('', noCi(''))))
+  const inClone = execFileSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: cctx.env, cwd: clone, encoding: 'utf8' })
+  const asked = readFileSync(cctx.log, 'utf8').split('\n').filter((l) => l.includes('contents/AGENTS.md'))
+  check('poll: the clone\'s own AGENTS.md is never read: no CI, LGTM → MERGE_READY when the default branch\'s block has no gate',
+    ready(inClone), inClone)
+  check('poll: … the block is read once per run, from the default branch (no ref)', asked.length === 1 && !/ref=/.test(asked[0]), asked.join('\n'))
+  rmSync(cctx.home, { recursive: true, force: true })
 }
 {
   const ctx = makeEnv()
@@ -2603,11 +2690,25 @@ const putMessage = (dir, id, extra, meta) => {
   const unbroken = (f) => read(f).split('startswith("[executor] Claimed by "))').length - 1
   const cc = flat(read('claude-code/skills/start-executor/SKILL.md'))
   const listings = ['claude-code/skills/start-executor/SKILL.md', 'claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
-  check('loop texts: every executor\'s resume lists the claims inline, the same command as its claim step, never wrapped inside a string',
-    count('claude-code/skills/start-executor/SKILL.md') === 1 && count('claude-code/skills/start-executor/reference/implement.md') === 1 &&
-      !cc.includes('list them with the command in') && count('generic/executor.md') === 2 && count('kiro/skills/start-executor/SKILL.md') === 2 &&
+  // #129: the resume's check is claims.mjs; the listing is left only in the claim step's race.
+  check('loop texts: every executor lists claims only in its claim step, never wrapped inside a string',
+    count('claude-code/skills/start-executor/SKILL.md') === 0 && count('claude-code/skills/start-executor/reference/implement.md') === 1 &&
+      !cc.includes('list them with the command in') && count('generic/executor.md') === 1 && count('kiro/skills/start-executor/SKILL.md') === 1 &&
       listings.every((f) => unbroken(f) === count(f)),
     listings.map((f) => `${f}: ${count(f)} flat, ${unbroken(f)} unbroken`).join('\n'))
+  const claimCmd = (prefix) => `${prefix}claims.mjs --repo <repo> --issue <N> --clone <clone> --in-progress-label <`
+  const resumes = [['claude-code/skills/start-executor/SKILL.md', claimCmd('node ${CLAUDE_PLUGIN_ROOT}/scripts/')], ['generic/executor.md', claimCmd('node scripts/')],
+    ['kiro/skills/start-executor/SKILL.md', claimCmd('node scripts/')]]
+  const noCheck = resumes.filter(([f, cmd]) => {
+    const t = flat(read(f))
+    return !t.includes(cmd) || !t.includes('run it before deciding anything, every start') ||
+      !t.includes('`Could not check the claim on #<N>: <the claims: line>. Restart when gh works.`') ||
+      !['`CLAIM_HELD`', '`CLAIM_NONE`', '`CLAIM_LOST <clone>`', '`CLAIM_RELEASED`', '`CLAIM_CLOSED`', '`CLAIM_BLOCKED`'].every((s) => t.includes(s))
+  }).map(([f]) => f)
+  check('claim check (#129): every executor\'s resume runs claims.mjs every start, branches on each of its lines, and stops on a failed run', noCheck.length === 0, noCheck.join('\n'))
+  const heldOnly = ['claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
+    .filter((f) => !/unless (`node \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/claims\.mjs [^`]*`|the claim check \(`claims\.mjs`, above\)) prints `CLAIM_HELD`/.test(flat(read(f))))
+  check('claim check (#129): the claim step\'s "in progress, unless it is yours" also asks claims.mjs', heldOnly.length === 0, heldOnly.join('\n'))
 
   // The first branch of the mailbox step, with the literal line: a live run that read a pointer to
   // "the ⚠ No mailbox line" printed none.
@@ -2657,7 +2758,7 @@ const putMessage = (dir, id, extra, meta) => {
       // The review of #122: only "not a PR" means an issue; a blip must not send a PR's number down the issue path.
       !t.includes('It fails with `Could not resolve to a PullRequest` → `<N>` is the number. Any other failure (network, auth) →') ||
       !t.includes('`Could not tell whether <n> is a PR: <the error>. Restart when gh works.`') ||
-      !t.includes("The issue checks and the claim listing never run on a PR's number") && !t.includes("The issue checks and the claim listing below never run on a PR's number") ||
+      !t.includes("The claim check never runs on a PR's number") && !t.includes("The claim check below never runs on a PR's number") ||
       !t.includes('by its own number or by a PR whose `Closes #<N>` names it')
   })
   check('resume: every executor takes <N> from the branch first, and resolves a PR argument through Closes #N (never checking a PR as an issue)', missing.length === 0, missing.join('\n'))
@@ -2733,10 +2834,50 @@ const putMessage = (dir, id, extra, meta) => {
   check('loop texts: beside every ]] clause, a --jq filter holds no $ inside a double-quoted string', noClause.length === 0, noClause.join('\n'))
 }
 
+// ---------------------------------------------------------------- claims.mjs, the resume claim check (#129)
+{
+  const ctx = makeEnv()
+  const claimed = (clone, id, login = 'acme') => ({ id, body: `[executor] Claimed by ${clone}`, created_at: '2026-01-01T10:00:00Z', user: user(login) })
+  const held = (labels, comments, state = 'OPEN') => ({ issues: [{ number: 42, labels: labels.map((name) => ({ name })), state }], issueComments: { 42: comments } })
+  const ask = (fixture, extra = []) => run(ctx, 'claims.mjs', ['--repo', REPO, '--issue', '42', '--clone', 'exec-a', ...extra], fixture).trim()
+  const other = { id: 9, body: 'Looks good', created_at: '2026-01-01T09:00:00Z', user: user('acme') }
+  check('claims: open, in progress, the newest claim names this clone → CLAIM_HELD',
+    ask(held(['in-progress'], [claimed('exec-b', 1), other, claimed('exec-a', 12)])) === 'CLAIM_HELD')
+  check('claims: … the newest names another clone → CLAIM_LOST <clone>',
+    ask(held(['in-progress'], [claimed('exec-a', 1), claimed('exec-b', 12)])) === 'CLAIM_LOST exec-b')
+  check('claims: … newest by id, whatever the list order',
+    ask(held(['in-progress'], [claimed('exec-a', 12), claimed('exec-b', 1)])) === 'CLAIM_HELD')
+  check('claims: a clone name that only starts the same ("exec-a2") is another clone → CLAIM_LOST exec-a2',
+    ask(held(['in-progress'], [claimed('exec-a2', 5)])) === 'CLAIM_LOST exec-a2')
+  check('claims: "Claimed by exec-a and more" names no clone exactly → CLAIM_LOST, never HELD',
+    ask(held(['in-progress'], [claimed('exec-a and more', 5)])).startsWith('CLAIM_LOST '))
+  check('claims: open, in progress, no claim comment → CLAIM_NONE', ask(held(['in-progress'], [other])) === 'CLAIM_NONE')
+  check('claims: open without the in-progress label → CLAIM_RELEASED (a claim of ours on it is old)',
+    ask(held([], [claimed('exec-a', 5)])) === 'CLAIM_RELEASED')
+  check('claims: blocked (with or without in-progress) → CLAIM_BLOCKED',
+    ask(held(['is-blocked'], [])) === 'CLAIM_BLOCKED' && ask(held(['in-progress', 'is-blocked'], [claimed('exec-a', 5)])) === 'CLAIM_BLOCKED')
+  check('claims: closed → CLAIM_CLOSED', ask(held(['in-progress'], [claimed('exec-a', 5)], 'CLOSED')) === 'CLAIM_CLOSED')
+  check('claims: the project\'s own labels are used',
+    ask(held(['wip'], [claimed('exec-a', 5)]), ['--in-progress-label', 'wip', '--blocked-label', 'parked']) === 'CLAIM_HELD' &&
+    ask(held(['parked', 'wip'], []), ['--in-progress-label', 'wip', '--blocked-label', 'parked']) === 'CLAIM_BLOCKED' &&
+    ask(held(['in-progress'], [claimed('exec-a', 5)]), ['--in-progress-label', 'wip']) === 'CLAIM_RELEASED')
+  check('claims: claims across pages are all read',
+    ask({ ...held(['in-progress'], []), issueComments: undefined, comments_pages: [[claimed('exec-a', 1)], [claimed('exec-b', 2)]] }) === 'CLAIM_LOST exec-b')
+  const failed = ask({ fail: true })
+  check('claims: a failed gh call → exit 2 with a claims: line, nothing on stdout', /^EXIT 2\n\nclaims: HTTP 502/.test(failed), failed)
+  const missing = ask({ issues: [] })
+  check('claims: no such issue → exit 2 (never a claim line)', /^EXIT 2\n\nclaims: /.test(missing), missing)
+  const usage = [run(ctx, 'claims.mjs', ['--repo', REPO, '--issue', '42'], {}), run(ctx, 'claims.mjs', ['--repo', REPO, '--issue', 'x', '--clone', 'exec-a'], {}),
+    run(ctx, 'claims.mjs', ['--repo', REPO, '--issue', '42', '--clone', '../x'], {}), run(ctx, 'claims.mjs', ['--repo', REPO, '--issue', '42', '--clone', 'exec-a', 'extra'], {})]
+  check('claims: no --clone, an --issue that is no number, a --clone that is not a clone name, or a stray argument → exit 1',
+    usage.every((o) => o.startsWith('EXIT 1')), usage.join('\n'))
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- the local-ci key (#107)
 {
-  // With `local-ci: <context>` every executor leaves the gate to the runner before the PR, passes
-  // --local-ci to its poll, and runs the gate only on NO_LOCAL_CI.
+  // With `local-ci: <context>` every executor leaves the gate to the runner before the PR, runs its
+  // poll as is (pr-poll reads the key from the block, #129), and runs the gate only on NO_LOCAL_CI.
   const adapters = path.resolve(scripts, '..', 'adapters')
   const flat = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
   const texts = {
@@ -2745,14 +2886,18 @@ const putMessage = (dir, id, extra, meta) => {
     kiro: flat('kiro/skills/start-executor/SKILL.md'),
   }
   const missing = Object.entries(texts).filter(([, t]) =>
-    !(t.includes('`--local-ci <context>` when') && t.includes('Gate: runs as the <context> check.') &&
+    !(t.includes('reads `qa-gate`, `gate` and `local-ci` from the block on the default branch itself') && t.includes('Gate: runs as the <context> check.') &&
       t.includes('`[executor] No <context> check on <short sha>: Gate on <short sha>:') && /never run the gate before opening the PR|the gate is never yours before opening the PR/.test(t))
   ).map(([k]) => k)
-  check('local-ci key: every executor skips the gate before the PR, passes --local-ci to the poll, and runs the gate on NO_LOCAL_CI', missing.length === 0, missing.join('\n'))
+  check('local-ci key: every executor skips the gate before the PR, leaves the key to the poll, and runs the gate on NO_LOCAL_CI', missing.length === 0, missing.join('\n'))
   const cc = flat('claude-code/skills/start-executor/SKILL.md')
-  check('local-ci key: the Claude Code executor reads the key from the block, and handles NO_LOCAL_CI in its signal order',
+  check('local-ci key: the Claude Code executor reads the key from the block, and handles NO_LOCAL_CI in its signal order; both waiters run the poll with no flags',
     cc.includes('`local-ci` (optional: the context a local runner posts the gate\'s result under') && cc.includes('`MERGED`, `CI_FAILING`, `NO_LOCAL_CI`,') &&
-      (cc.match(/\[--local-ci <context>\] --wait 30/g) ?? []).length === 2, '')
+      (cc.match(/scripts\/pr-poll\.mjs --repo <repo> --pr <PR> --wait 30 --max (1500|3300) <inbox-flag>/g) ?? []).length === 2, '')
+  // #129: a Sonnet executor dropped --local-ci; no text asks for the flags any more.
+  const all = readdirSync(adapters, { recursive: true }).filter((f) => /\.md$/.test(f))
+  const asks = all.filter((f) => /(--require-qa|--require-gate|--local-ci <context>)`? (when|to pr-poll)|[Pp]ass `--require|\[--require-(qa|gate)\]|\[--local-ci/.test(flat(f)))
+  check('block keys (#129): no adapter text asks the caller to pass --require-qa, --require-gate or --local-ci to pr-poll', asks.length === 0, asks.join('\n'))
 }
 
 // ---------------------------------------------------------------- the executor's author check (#81)

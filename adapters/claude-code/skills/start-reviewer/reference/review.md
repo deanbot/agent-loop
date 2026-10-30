@@ -100,8 +100,8 @@ you reviewed and a clean tree, after your probe files are deleted:
 
 A non-zero exit is a finding: quote the failing step and its last lines, and post findings, not an
 LGTM. A pass goes into the LGTM as its own line, `Gate on <short sha>: <the gate's last line>`,
-with the sha of the head you ran it on. `pr-poll --require-gate` withholds `MERGE_READY` from an
-LGTM without that line on the head commit. A gate the executor quoted is a pointer, not proof:
+with the sha of the head you ran it on. With `gate` in the block on the default branch, `pr-poll` withholds `MERGE_READY`
+from an LGTM without that line on the head commit. A gate the executor quoted is a pointer, not proof:
 run it yourself.
 
 ## 5. Post one comment

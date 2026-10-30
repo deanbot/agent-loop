@@ -58,6 +58,7 @@ import { openSync, closeSync, writeFileSync, readFileSync, unlinkSync, renameSyn
 import { homedir } from 'os'
 import { createHash } from 'crypto'
 import path from 'path'
+import { blockLine } from './lib/block.mjs'
 
 const USAGE =
   'local-ci.mjs --repo owner/repo --gate "<command>" [--context <name>] [--install "<command>" [--lockfiles a,b]] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]'
@@ -240,8 +241,7 @@ function trustedAuthors() {
   defaultBranch ??= gh('api', `repos/${repo}`).default_branch
   git('fetch', '--quiet', 'origin', defaultBranch)
   const agents = git('show', 'FETCH_HEAD:AGENTS.md')
-  const block = agents.split(/^## /m).find((s) => s.startsWith('Agent loop')) ?? ''
-  const line = /^trusted-authors:[ \t]*(.*)$/m.exec(block)?.[1] ?? ''
+  const line = blockLine(agents, 'trusted-authors') ?? ''
   return line
     .replace(/^\[|\]$/g, '')
     .split(',')

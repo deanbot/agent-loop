@@ -61,13 +61,14 @@ PR number names its issue:** `gh pr view <n> --repo <repo> --json number,body` s
 number is a PR, and `<N>` is the first issue its body closes (`Closes #<N>`, as `pick-next.mjs`
 reads it); no `Closes #N` → there is no `<N>`. It fails with `Could not resolve to a
 PullRequest` → `<N>` is the number. Any other failure (network, auth) → stop and say `Could not
-tell whether <n> is a PR: <the error>. Restart when gh works.` The issue checks
-and the claim listing never run on a PR's number. Then list its claim comments: `gh api --paginate
-"repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "")
-| startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`.
-- You hold #<N> (open, carries `in-progress-label`, newest `[executor] Claimed by` comment names
-  your clone exactly; with no claim comment at all, only when the input names it, by its own
-  number or by a PR whose `Closes #<N>` names it), and you are on
+tell whether <n> is a PR: <the error>. Restart when gh works.` The claim check never runs on a
+PR's number. With a `<N>`, run it before deciding anything, every start: `node scripts/claims.mjs
+--repo <repo> --issue <N> --clone <clone> --in-progress-label <l> --blocked-label <l>` (`<clone>`
+is the base name of your working directory). Its one line decides, never the branch or the labels
+you remember. A failed run (exit 2, a `claims:` line) → stop and say `Could not check the claim
+on #<N>: <the claims: line>. Restart when gh works.`
+- You hold #<N> (`CLAIM_HELD`, or `CLAIM_NONE`, claimed before claim comments existed, only when
+  the input names it, by its own number or by a PR whose `Closes #<N>` names it), and you are on
   its branch → resume: stay on the
   branch, keep the working tree, read the issue, see what is done (`git log --oneline
   main..HEAD`, `git diff HEAD`), continue (or orient and poll if a PR has `Closes #<N>`). Do not
@@ -75,9 +76,10 @@ and the claim listing never run on a PR's number. Then list its claim comments: 
 - You hold #<N> but are on another branch → clean tree: switch to its branch (`git branch --list
   "issue-<N>-*"`) and resume; uncommitted changes: stop and say so. Never resume on a branch
   that is not the issue's.
-- Open with neither `in-progress-label` nor `blocked-label` → claim it; win → you hold it, so as
-  the two bullets above; lose → as below.
-- Anything else → clean tree: `git checkout main`, `node scripts/pull.mjs`; uncommitted
+- `CLAIM_RELEASED` (open with neither `in-progress-label` nor `blocked-label`) → claim it; win →
+  you hold it, so as the two bullets above; lose → as below.
+- Anything else (`CLAIM_LOST <clone>`, `CLAIM_CLOSED`, `CLAIM_BLOCKED`, `CLAIM_NONE` the input
+  doesn't name, or no `<N>`) → clean tree: `git checkout main`, `node scripts/pull.mjs`; uncommitted
   changes: stop and say so. Never switch branches over uncommitted work.
 
 Pull `main` with `node scripts/pull.mjs`, never a bare `git pull`: you read `AGENTS.md` once, so a
@@ -148,8 +150,8 @@ their association, the labels, the title and the body (`gh issue view --json` ha
 field; an array, since some tools' permission checks refuse a jq object with a comma, and a
 filter that doesn't end in `]]`, which some read as shell `[[ … ]]`). A failed re-fetch, or one whose first or
 second element is null or empty, is no author check: never claim on it. `in-progress-label` present → another executor has it (the
-label is authoritative; no PR is not evidence it is stale) → pick next, unless the newest
-`[executor] Claimed by` comment names your clone exactly: then it is yours, so resume (above). `blocked-label` → pick
+label is authoritative; no PR is not evidence it is stale) → pick next, unless the claim check
+(`claims.mjs`, above) prints `CLAIM_HELD`: then it is yours, so resume (above). `blocked-label` → pick
 next. Author not in `trusted-authors` (or association not allowed) → post `[executor] Skipped:
 @<login> is not in trusted-authors.` and pick next. Otherwise claim with a comment, then the label
 (two executors that pick at the same moment both see no label; `<clone>` is the base name of your
@@ -202,9 +204,8 @@ Input needed with no PR yet and no safe default: park.
 
 ## Poll loop
 
-`node scripts/pr-poll.mjs --repo <repo> --pr <PR>` once per cycle (add `--require-qa` when
-`qa-gate: on`, `--require-gate` when the block has `gate`, and `--local-ci <context>` when it
-has `local-ci: <context>`). Wait ~60s between cycles. Own `[executor]` posts are already filtered
+`node scripts/pr-poll.mjs --repo <repo> --pr <PR>` once per cycle, as is: it reads `qa-gate`,
+`gate` and `local-ci` from the block on the default branch itself. Wait ~60s between cycles. Own `[executor]` posts are already filtered
 out.
 
 - `NO_LOCAL_CI` (only with `local-ci`) → no check under `<context>` on the head after the poll's

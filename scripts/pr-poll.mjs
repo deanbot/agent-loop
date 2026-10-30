@@ -40,6 +40,15 @@
  *   check: <name>  state: <state>
  *   <link>
  *
+ * The project's settings come from the `## Agent loop` block of AGENTS.md on the default branch, read
+ * through the API (never the clone's copy, which is the PR head's: a PR must not change its own
+ * gate): `qa-gate: on` turns on --require-qa, a `gate` key --require-gate, and `local-ci: <context>`
+ * gives --local-ci <context>, so none of them depends on the caller passing it. A flag given on the
+ * command line still wins (its context over the block's); the block only adds. No AGENTS.md there
+ * (404) is a block with no keys. A block that can't be read (network, auth) withholds MERGE_READY
+ * for that run, with the error on stderr, and the run goes on with the flags alone. A successful
+ * read lasts for the process.
+ *
  * --require-qa: MERGE_READY additionally requires the QA verdict to be PASS. Without it the QA role is
  * optional: a live [qa] BLOCKED is still surfaced as NEW_COMMENT, but no [qa] PASS is needed.
  *
@@ -54,6 +63,7 @@
  * the window with still nothing, the head has no CI as without the flag, and NO_LOCAL_CI says so once.
  * From then on the PR's later heads have no CI at once, with no window, until a check under
  * <context> appears on one of them, which makes it CI again and the next head unmarked gets a window.
+ * --local-ci-window applies to a context from either the flag or the block.
  *
  * A role's verdict is its NEWEST [role] comment posted after the last commit: a later finding revokes
  * an earlier LGTM/PASS without a push. Reviewer comment kinds by prefix: "[reviewer] LGTM" (verdict),
@@ -75,8 +85,9 @@ import { readFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
+import { blockValue } from './lib/block.mjs'
 
-const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--local-ci <context> [--local-ci-window <secs>]] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
+const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--local-ci <context>] [--local-ci-window <secs>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -88,15 +99,15 @@ function flag(name) {
 
 const repo = arg('--repo')
 const prNumber = arg('--pr')
-const requireQa = flag('--require-qa')
-const requireGate = flag('--require-gate')
+const requireQaFlag = flag('--require-qa')
+const requireGateFlag = flag('--require-gate')
 
 if (!repo || !prNumber) usageError(USAGE)
 if (!/^\d+$/.test(prNumber)) usageError(USAGE, `--pr: expected a PR number, got "${prNumber}"`)
-const localCi = arg('--local-ci')
-if (flag('--local-ci') && (!localCi || localCi.startsWith('--'))) usageError(USAGE, '--local-ci: expected the check\'s context')
+const localCiFlag = arg('--local-ci')
+if (flag('--local-ci') && (!localCiFlag || localCiFlag.startsWith('--'))) usageError(USAGE, '--local-ci: expected the check\'s context')
 const windowArg = arg('--local-ci-window')
-if (flag('--local-ci-window') && (!localCi || !/^\d+$/.test(windowArg ?? ''))) usageError(USAGE, '--local-ci-window: expected seconds, with --local-ci')
+if (flag('--local-ci-window') && !/^\d+$/.test(windowArg ?? '')) usageError(USAGE, '--local-ci-window: expected seconds')
 const LOCAL_CI_WINDOW_MS = Number(windowArg ?? 300) * 1000
 
 // `gh api --paginate` prints one JSON document per page; `--slurp` wraps them in one array (gh ≥ 2.43).
@@ -120,7 +131,32 @@ function readJson(file) {
   }
 }
 
+// The default branch's AGENTS.md text ('' when it has none), or null when it can't be read. Kept once
+// read: the block changes rarely, and a waiter would otherwise fetch it every interval.
+let agentsText
+function readAgents(gh, dry) {
+  if (agentsText !== undefined) return agentsText
+  try {
+    const file = JSON.parse(gh(`gh api "repos/${repo}/contents/AGENTS.md"`, { stdio: ['ignore', 'pipe', 'pipe'] }))
+    // Over 1 MB the API sends no content (encoding "none"): unreadable, never an empty block.
+    if (file.encoding !== 'base64') throw new Error(`AGENTS.md came back with encoding "${file.encoding}"`)
+    agentsText = Buffer.from(file.content ?? '', 'base64').toString('utf8')
+  } catch (e) {
+    const stderr = String(e?.stderr ?? '')
+    if (/HTTP 404|Not Found/.test(stderr)) return (agentsText = '')
+    if (!dry) process.stderr.write(`pr-poll: could not read the Agent loop block (MERGE_READY withheld): ${stderr.trim() || e?.message}\n`)
+    return null
+  }
+  return agentsText
+}
+
 function pass({ gh, save, dry, mark }) {
+  // Flags first; the block adds what the caller left out (the header).
+  const agents = readAgents(gh, dry)
+  const requireQa = requireQaFlag || blockValue(agents, 'qa-gate')?.toLowerCase() === 'on'
+  const requireGate = requireGateFlag || blockValue(agents, 'gate') !== null
+  const localCi = localCiFlag ?? blockValue(agents, 'local-ci')
+
   let prState = readJson(STATE_FILE)
   if (prState === undefined) prState = readJson(SHARED_STATE_FILE)?.[prNumber]
 
@@ -381,7 +417,7 @@ function pass({ gh, save, dry, mark }) {
   const gateSha = /^[\s>*_`-]*Gate on `?([0-9a-f]{7,40})\b/im.exec(reviewerVerdict ?? '')?.[1]?.toLowerCase()
   const gateQuoted = Boolean(gateSha && headSha && headSha.toLowerCase().startsWith(gateSha))
   const gateSatisfied = requireGate && noCi ? gateQuoted : true
-  if (hasReviewerLgtm && qaSatisfied && gateSatisfied && unansweredInline.length === 0 && ciPassed && !conflicting) {
+  if (hasReviewerLgtm && qaSatisfied && gateSatisfied && unansweredInline.length === 0 && ciPassed && !conflicting && agents !== null) {
     out.push('MERGE_READY')
   }
 

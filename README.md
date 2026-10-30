@@ -64,7 +64,7 @@ A sandbox can let named commands out (in Claude Code, `sandbox.excludedCommands`
 the network. The skills run `gh` and `git push|fetch|pull` as commands on their own, with `--repo
 owner/repo` instead of `cd … && gh …`, so an entry for them matches. These scripts call `gh`, so
 exempt them the same way: `scripts/pick-next.mjs`, `scripts/pr-poll.mjs`, `scripts/pr-watch.mjs`,
-`scripts/pr-qa.mjs` (through `scripts/lib/wait.mjs`), `scripts/pr-for-issue.mjs` and
+`scripts/pr-qa.mjs` (through `scripts/lib/wait.mjs`), `scripts/pr-for-issue.mjs`, `scripts/claims.mjs` and
 `adapters/claude-code/setup-project.sh`.
 `scripts/pull.mjs` runs `git pull`, so it needs the same exemption: without it every loop pull
 fails, and the loop says so in a `⚠` line each time. `scripts/rules-ack.mjs` clears a record in

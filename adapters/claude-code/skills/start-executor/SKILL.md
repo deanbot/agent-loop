@@ -81,25 +81,27 @@ bare start that ran before the intended command) is then seen at once.
    `pick-next.mjs` reads it); no `Closes #N` → there is no `<N>`. It fails with `Could not
    resolve to a PullRequest` → `<N>` is the number. Any other failure (network, auth) → **stop**
    and say `Could not tell whether <n> is a PR: <the error>. Restart when gh works.`
-   The issue checks and the claim listing below never run on a PR's number. Then decide (`<clone>`
-   is the base name of your working directory):
-   - **You hold #<N>**: it is open, carries `<in-progress-label>`, and the newest `[executor]
-     Claimed by` comment on it names `<clone>` exactly (list them with `gh api --paginate
-     "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "") |
-     startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`; a losing claim is deleted, so the newest
-     one left is the holder's). An issue claimed before claim comments existed has none: it is
-     yours only when `$ARGUMENTS` names it, by its own number or by a PR whose `Closes #<N>`
-     names it. On its branch (`issue-<N>-…`) → **Resume** (below),
+   The claim check below never runs on a PR's number. With a `<N>`, run it before deciding
+   anything, every start: `node ${CLAUDE_PLUGIN_ROOT}/scripts/claims.mjs --repo <repo> --issue <N>
+   --clone <clone> --in-progress-label <in-progress-label> --blocked-label <blocked-label>`
+   (`<clone>` is the base name of your working directory). Its one line decides, never the
+   branch, the labels you remember or the tree. A failed run (exit 2, a `claims:` line) decides
+   nothing: **stop** and say `Could not check the claim on #<N>: <the claims: line>. Restart when
+   gh works.` Then:
+   - **You hold #<N>**: `CLAIM_HELD`, or `CLAIM_NONE` (claimed before claim comments existed)
+     when `$ARGUMENTS` names it, by its own number or by a PR whose `Closes #<N>` names it.
+     On its branch (`issue-<N>-…`) → **Resume** (below),
      with no `git checkout main` and no `git pull`. On another branch (including `main` with
      uncommitted changes): with a clean tree, find its branch (`git branch --list
      "issue-<N>-*"`), `git switch <branch>` and resume; with uncommitted changes, **stop** and say
      `<branch> has uncommitted changes, and #<N>'s work is on <its branch>: commit, stash or
      discard them, then restart.` Never resume on a branch that is not the issue's.
-   - **Open, without `<in-progress-label>` or `<blocked-label>`** (you released it, say on a
-     "stop") → read [reference/implement.md](reference/implement.md) §1 now, then claim it again
-     as it says. You win → you hold it: go on as in the first
+   - **`CLAIM_RELEASED`** (open, without `<in-progress-label>` or `<blocked-label>`: you released
+     it, say on a "stop") → read [reference/implement.md](reference/implement.md) §1 now, then
+     claim it again as it says. You win → you hold it: go on as in the first
      bullet. You lose → as the next bullet.
-   - **Anything else** (another clone holds it, it is closed or blocked, or there is no `<N>`):
+   - **Anything else** (`CLAIM_LOST <clone>`: another clone holds it; `CLAIM_CLOSED`,
+     `CLAIM_BLOCKED`; `CLAIM_NONE` when `$ARGUMENTS` doesn't name it; or there is no `<N>`):
      with a clean tree, `git checkout main` then pull (committed work stays on its
      branch); with uncommitted changes, **stop** and say `<branch> has uncommitted changes and
      this clone does not hold #<N>: commit, stash or discard them, then restart.` Never switch
@@ -312,9 +314,8 @@ of those cycles still polls, so a merge or a finding is seen within five minutes
 exits 0 (`PENDING` or `NONE`) ends the count and the 5-minute rhythm, and a new PR starts with a
 waiter again.
 
-Below, `<poll>` is `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR>`, plus
-`--require-qa` when `qa-gate` is `on`, plus `--require-gate` when the block has `gate`, plus
-`--local-ci <context>` when the block has `local-ci: <context>`.
+Below, `<poll>` is `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR>`, as
+is: the script reads `qa-gate`, `gate` and `local-ci` from the block on the default branch itself.
 
 Each cycle:
 
@@ -384,7 +385,7 @@ Each cycle:
    schedule the fallback:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> [--require-qa] [--require-gate] [--local-ci <context>] --wait 30 --max 1500 <inbox-flag>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> --wait 30 --max 1500 <inbox-flag>
 ```
 
 ```
@@ -399,7 +400,7 @@ this cycle, and no question of yours is open: the same waiter with `--max 3300` 
 `--max 600` wait stays, idle or not. The first poll without `IDLE` goes back to the normal wait.
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> [--require-qa] [--require-gate] [--local-ci <context>] --wait 30 --max 3300 <inbox-flag>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> --wait 30 --max 3300 <inbox-flag>
 ```
 
 With a mailbox, `<inbox-flag>` goes on every waiter (the `--max 600` one too) and makes it end on
