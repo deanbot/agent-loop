@@ -984,6 +984,152 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   rmSync(migrated.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- audit.mjs, the auditor's numbers (#85)
+{
+  // One month: a prose-only PR gated in full (#10), a code PR with a run cancelled, a re-run after a
+  // cancelled attempt, a re-run after a failure and two review rounds (#11), and an issue left blocked
+  // for a day (#20). An in-progress lint run has no cost yet, so no lint finding may appear.
+  const ctx = makeEnv()
+  const at = (d) => `2026-03-${d}Z`
+  const wfRun = (id, sha, start, end, extra = {}) => ({ id, path: '.github/workflows/ci.yml', head_sha: sha, status: 'completed', conclusion: 'success', run_attempt: 1, run_started_at: at(start), updated_at: at(end), ...extra })
+  const fx = {
+    prs: [
+      { number: 10, createdAt: at('02T09:00:00'), closedAt: at('03T09:00:00'), mergedAt: at('03T09:00:00'), files: [{ path: 'README.md' }, { path: 'docs/guide.md' }] },
+      { number: 11, createdAt: at('05T08:00:00'), closedAt: at('07T00:00:00'), mergedAt: at('07T00:00:00'), files: [{ path: 'src/a.js' }, { path: 'README.md' }] },
+    ],
+    prCommits: {
+      10: [{ sha: 'a10', commit: { committer: { date: at('02T10:00:00') } } }],
+      11: [{ sha: 'b11', commit: { committer: { date: at('05T09:00:00') } } }, { sha: 'c11', commit: { committer: { date: at('06T09:00:00') } } }],
+    },
+    runs: [
+      wfRun(1001, 'a10', '02T10:01:00', '02T10:12:00'),
+      wfRun(1101, 'b11', '05T09:01:00', '05T09:03:00', { conclusion: 'cancelled' }),
+      wfRun(1102, 'b11', '05T09:05:00', '05T09:15:00', { run_attempt: 2 }),
+      wfRun(1103, 'c11', '06T09:10:00', '06T09:15:00', { run_attempt: 2 }),
+      wfRun(1201, 'a10', '02T10:01:00', '02T10:02:00', { path: '.github/workflows/lint.yml', status: 'in_progress', conclusion: null }),
+      wfRun(9999, 'zzz', '05T09:00:00', '05T10:00:00'),
+      wfRun(1301, 'a10', '02T10:05:00', '02T10:05:00', { path: '.github/workflows/docs.yml' }),
+      wfRun(1302, 'b11', '05T09:05:00', '05T09:05:00', { path: '.github/workflows/docs.yml' }),
+      wfRun(1401, 'a10', '02T10:01:00', '02T10:02:00', { path: '.github/workflows/build.yml' }),
+      wfRun(1402, 'b11', '05T09:01:00', '05T09:11:00', { path: '.github/workflows/build.yml' }),
+      wfRun(1403, 'c11', '06T09:01:00', '06T09:11:00', { path: '.github/workflows/build.yml' }),
+      wfRun(1501, 'a10', '02T10:01:00', '02T10:03:00', { path: '.github/workflows/pages.yml' }),
+    ],
+    attempts: {
+      '1102/1': wfRun(1102, 'b11', '05T09:03:00', '05T09:04:00', { conclusion: 'cancelled' }),
+      '1103/1': wfRun(1103, 'c11', '06T09:01:00', '06T09:06:00', { conclusion: 'failure' }),
+    },
+    issueComments: {
+      10: [],
+      11: [comment('[reviewer] Review of b11.', at('05T12:00:00'), 'acme'), comment('[reviewer] LGTM', at('06T12:00:00'), 'acme'), comment('merging', at('06T20:00:00'), 'acme')],
+      20: [comment('[executor] BLOCKED: waiting.', at('10T00:05:00'), 'acme'), comment('[dev] noted', at('10T01:00:00'), 'acme'), comment('ping', at('10T06:00:00'), 'stranger')],
+      21: [],
+      // Two executors claimed #22 three minutes apart: the claim comment settled a race.
+      22: [comment('[executor] Claimed by exec-a', at('15T10:00:00'), 'acme'), comment('[executor] Claimed by exec-b', at('15T10:03:00'), 'acme')],
+    },
+    items: [{ number: 20, state: 'open', closed_at: null, labels: [] }, { number: 11, state: 'closed', closed_at: at('07T00:00:00') }, { number: 21, state: 'open', closed_at: null },
+      { number: 22, state: 'open', closed_at: null }],
+    events: {
+      11: [{ event: 'labeled', label: { name: 'needs-operator' }, created_at: at('06T13:00:00') }],
+      // A span wholly before the period, then the day-long one inside it.
+      20: [{ event: 'labeled', label: { name: 'needs-operator' }, created_at: '2026-02-01T00:00:00Z' }, { event: 'unlabeled', label: { name: 'needs-operator' }, created_at: '2026-02-02T00:00:00Z' },
+        { event: 'labeled', label: { name: 'is-blocked' }, created_at: at('10T00:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: at('11T00:00:00') }],
+      // A span that crosses the period's end: cut at --until (the end of 2026-03-31).
+      21: [{ event: 'labeled', label: { name: 'is-blocked' }, created_at: at('31T12:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: '2026-04-01T12:00:00Z' }],
+      22: [{ event: 'labeled', label: { name: 'in-progress' }, created_at: at('15T10:00:00') }, { event: 'unlabeled', label: { name: 'in-progress' }, created_at: at('16T10:00:00') }],
+    },
+  }
+  const audit = (extra = []) => run_(['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json', ...extra])
+  const run_ = (args) => {
+    const out = run(ctx, 'audit.mjs', args, fx)
+    try {
+      return JSON.parse(out)
+    } catch {
+      return { error: out }
+    }
+  }
+  const r = audit()
+  const f = (id) => (r.findings ?? []).find((x) => x.id === id)
+  const brief = JSON.stringify((r.findings ?? []).map((x) => [x.id, x.cost, x.caught, x.recommendation]))
+  check('audit: a prose-only PR gated in full → ci-prose finding, its run\'s minutes, caught 0, narrow with the narrower rule',
+    f('ci-prose:ci')?.cost === 11 && f('ci-prose:ci').caught === 0 && f('ci-prose:ci').recommendation === 'narrow' && /prose/.test(f('ci-prose:ci').rule) &&
+      JSON.stringify(f('ci-prose:ci').prs) === '[10]', brief + (r.error ?? ''))
+  check('audit: a cancelled run and a cancelled first attempt → cancelled cost 3 min over 2 runs, caught 0; the attempt after the cancel is no re-run cost (re-runs: 5 min, one attempt)',
+    f('cancelled:ci')?.cost === 3 && f('cancelled:ci').runs === 2 && f('reruns:ci')?.cost === 5 && f('reruns:ci').runs === 1, brief)
+  check('audit: a re-run that passed after a failed attempt (a flake) → caught 1, keep', f('reruns:ci')?.caught === 1 && f('reruns:ci').recommendation === 'keep', brief)
+  check('audit: claim and release times are measured with no finding: the time held, the claim comments and a race settled within 10 minutes',
+    !(r.findings ?? []).some((x) => x.id === 'claims') && JSON.stringify(r.claims) === JSON.stringify({ items: [22], minutes: 1440, claims: 2, races: 1 }) &&
+      (r.notes ?? []).some((n) => n.startsWith('Claims: 1 item (#22) held `in-progress` for 1440 min')), JSON.stringify([r.claims, r.notes]))
+  check('audit: an issue left blocked for a day with no operator comment (a stranger\'s, a role-prefixed and a [dev] one by the owner don\'t count) → caught 0, narrow',
+    f('label:is-blocked')?.caught === 0 && f('label:is-blocked').recommendation === 'narrow', brief)
+  check('audit: label time is clipped to the period: a span before it adds nothing, one crossing its end is cut there (1440 + 720 min)',
+    f('label:is-blocked')?.cost === 2160 && f('label:is-blocked').spans === 2 && f('label:needs-operator')?.spans === 1, brief)
+  check('audit: a workflow whose prose runs cost under half its code runs gets no ci-prose finding (it already skips the work)',
+    !(r.findings ?? []).some((x) => x.id === 'ci-prose:build'), brief)
+  check('audit: prose runs with no code run to compare → no finding, and a note says so',
+    !(r.findings ?? []).some((x) => x.id === 'ci-prose:pages') && (r.notes ?? []).some((n) => n.startsWith('`ci-prose:pages`: no run on a code PR')), JSON.stringify(r.notes))
+  const listed = audit(['--operators', '[@stranger, other]', '--floor', '[ci-prose:ci]'])
+  const lf = (id) => (listed.findings ?? []).find((x) => x.id === id)
+  check('audit: lists written as a block writes them ([a, b], @login) parse: a --operators login\'s comment catches; a bracketed --floor id is honoured',
+    lf('label:is-blocked')?.caught === 1 && lf('label:is-blocked').recommendation === 'keep' && lf('ci-prose:ci')?.floor === true, JSON.stringify(listed))
+  check('audit: a label that stayed on until the merge → caught, keep', f('label:needs-operator')?.cost === 660 && f('label:needs-operator').caught === 1 && f('label:needs-operator').recommendation === 'keep', brief)
+  check('audit: review rounds → 2 rounds, 1 followed by a commit, 360 min from commit to review, keep',
+    f('review-rounds')?.rounds === 2 && f('review-rounds').caught === 1 && f('review-rounds').cost === 360 && f('review-rounds').recommendation === 'keep', brief)
+  check('audit: a run with no cost yet (in progress) gives no finding, and a run of no PR in the period is not counted',
+    !(r.findings ?? []).some((x) => x.id.endsWith(':lint')) && !brief.includes('9999') && f('ci-prose:ci')?.runs === 1, brief)
+  check('audit: a finding with a zero cost (a run that took no time) is not posted: both numbers or nothing',
+    !(r.findings ?? []).some((x) => x.id.endsWith(':docs')), brief)
+  check('audit: findings come in cost order', JSON.stringify((r.findings ?? []).map((x) => x.id)) ===
+    JSON.stringify(['label:is-blocked', 'label:needs-operator', 'review-rounds', 'ci-prose:ci', 'reruns:ci', 'cancelled:ci']), brief)
+  // #103 review: a re-run of a real failure caught nothing (the first attempt found it); one claim
+  // per item settles no race.
+  const rerunFx = (runs, attempts, extra = {}) => ({
+    prs: [{ number: 31, createdAt: at('04T08:00:00'), closedAt: at('04T20:00:00'), mergedAt: null, files: [{ path: 'src/b.js' }] }],
+    prCommits: { 31: [{ sha: 'd31', commit: { committer: { date: at('04T09:00:00') } } }] },
+    runs, attempts, issueComments: { 31: [], ...(extra.comments ?? {}) }, items: extra.items ?? [], events: extra.events ?? {},
+  })
+  const det = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
+    [wfRun(3101, 'd31', '04T10:20:00', '04T10:30:00', { run_attempt: 3, conclusion: 'failure' })],
+    { '3101/1': wfRun(3101, 'd31', '04T10:00:00', '04T10:10:00', { conclusion: 'failure' }), '3101/2': wfRun(3101, 'd31', '04T10:10:00', '04T10:20:00', { run_attempt: 2, conclusion: 'failure' }) },
+    { comments: { 33: [comment('[executor] Claimed by exec-a', at('20T10:00:00'), 'acme')] }, items: [{ number: 33, state: 'open', closed_at: null }],
+      events: { 33: [{ event: 'labeled', label: { name: 'in-progress' }, created_at: at('20T10:00:00') }, { event: 'unlabeled', label: { name: 'in-progress' }, created_at: at('20T12:00:00') }] } }))
+  const detF = (id) => (JSON.parse(det.startsWith('{') ? det : '{}').findings ?? []).find((x) => x.id === id)
+  check('audit: a deterministic failure re-run twice → cost of attempts 2 and 3 (20 min), caught 0, narrow with the never-again rule',
+    detF('reruns:ci')?.cost === 20 && detF('reruns:ci').runs === 2 && detF('reruns:ci').caught === 0 && detF('reruns:ci').recommendation === 'narrow' &&
+      /never again after it fails a second time/.test(detF('reruns:ci').rule), det)
+  const detJ = JSON.parse(det.startsWith('{') ? det : '{}')
+  check('audit: a single long claim gives no claims finding; it is measured (120 min held, one claim, no race)',
+    !detF('claims') && JSON.stringify(detJ.claims) === JSON.stringify({ items: [33], minutes: 120, claims: 1, races: 0 }), det)
+  const resumed = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
+    [wfRun(3301, 'd31', '04T10:02:00', '04T10:12:00', { run_attempt: 2 })], { '3301/1': wfRun(3301, 'd31', '04T10:00:00', '04T10:02:00', { conclusion: 'cancelled' }) }))
+  const resumedJ = JSON.parse(resumed.startsWith('{') ? resumed : '{}')
+  check('audit: a cancelled attempt re-run to a pass → no reruns finding (the head needed a result); cancelled:ci costs the 2 cancelled minutes',
+    !(resumedJ.findings ?? []).some((x) => x.id === 'reruns:ci') && (resumedJ.findings ?? []).find((x) => x.id === 'cancelled:ci')?.cost === 2, resumed)
+  const flake = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
+    [wfRun(3201, 'd31', '04T10:10:00', '04T10:20:00', { run_attempt: 2 })], { '3201/1': wfRun(3201, 'd31', '04T10:00:00', '04T10:10:00', { conclusion: 'failure' }) }))
+  const flakeF = (JSON.parse(flake.startsWith('{') ? flake : '{}').findings ?? []).find((x) => x.id === 'reruns:ci')
+  check('audit: a flake (failure, then a pass on re-run) → cost of the re-run alone (10 min), caught 1, keep',
+    flakeF?.cost === 10 && flakeF.caught === 1 && flakeF.recommendation === 'keep', flake)
+  const fl = audit(['--floor', 'ci-prose:ci,label:typo'])
+  const flp = (fl.findings ?? []).find((x) => x.id === 'ci-prose:ci')
+  check('audit: a floor control keeps its cost but gets no recommendation; a floor id that matched nothing is listed',
+    flp?.cost === 11 && flp.floor === true && flp.recommendation === null && flp.rule === null && JSON.stringify(fl.unmatchedFloor) === '["label:typo"]', JSON.stringify(fl))
+  const md = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--floor', 'ci-prose:ci'], fx)
+  const section = md.split('\n### ').find((s) => s.startsWith('`ci-prose:ci`')) ?? ''
+  check('audit md: the header names the period and the exact arguments to reproduce it; a floor line is cost only; PRs by number',
+    md.startsWith('# [auditor] Audit 2026-03-01..2026-03-31\n') && md.includes('Reproduce: `node scripts/audit.mjs --repo acme/widgets --since 2026-03-01T00:00:00Z --until 2026-03-31T23:59:59Z --floor ci-prose:ci`') &&
+      section.includes('In `audit-floor`: cost only') && !section.includes('Recommendation') && section.includes('#10'), md)
+  const bad = run(ctx, 'audit.mjs', ['--repo', REPO], fx)
+  check('audit: no --since → usage error, exit 1', /^EXIT 1/.test(bad) && /--since is required/.test(bad), bad)
+  const failed = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '7d'], { fail: true })
+  check('audit: a failed gh call → one audit: line, exit 2', /^EXIT 2\n\naudit: HTTP 502/.test(failed), failed)
+  // An auditor's report is an issue for the operator: no executor may pick it as work.
+  const picked = run(ctx, 'pick-next.mjs', ['--repo', REPO], { issues: [{ number: 5, title: 'a', body: '', labels: [{ name: 'auditor-report' }] }, { number: 6, title: 'b', body: '', labels: [] }] }).trim()
+  const own = run(ctx, 'pick-next.mjs', ['--repo', REPO], { issues: [{ number: 5, title: 'a', body: '', labels: [{ name: 'audit' }] }, { number: 6, title: 'b', body: '', labels: [] }] }).trim()
+  check('pick: an issue labelled auditor-report is never picked; a project\'s own audit label is not that label', picked === 'ISSUE:6' && own === 'ISSUE:5', `${picked} ${own}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+
 // ---------------------------------------------------------------- already read before the role's own post (#28)
 // A consumer's case: the executor pushes, the reviewer's one-shot run prints REVIEW, the executor's comment
 // lands after that run, and the reviewer re-reads the thread and posts LGTM. The executor comment

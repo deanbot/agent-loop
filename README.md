@@ -97,6 +97,10 @@ pull changed, so a running loop reads their diff, and records the change: `pick-
 `RULES_PENDING` and picks nothing until `rules-ack.mjs` has printed that diff. `local-ci.mjs` is no agent's: a local CI
 runner for a project with a `gate` (below).
 
+`audit.mjs` is the optional auditor's (`/agent-loop:start-auditor`, on demand): for each control
+the loop ran over a period, what it cost against what it caught, as one report for the operator
+(spec: "Auditor").
+
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green + no conflict with `main` (+
 `[qa] PASS` with `qa-gate: on`). A project that can turn CI off names a `gate` command: on a PR
 with no CI, the reviewer runs it on the head and quotes its last line in the LGTM, and

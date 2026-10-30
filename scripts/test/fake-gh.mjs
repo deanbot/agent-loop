@@ -20,6 +20,12 @@
 //   statuses  → commit statuses by sha, oldest first           (object: sha → [{ state, context, description, target_url? }])
 //               gh api repos/o/r/commits/SHA/status serves the newest per context; gh api -X POST
 //               repos/o/r/statuses/SHA -f k=v … appends one and writes the fixture back
+//   prCommits → gh api repos/o/r/pulls/N/commits, per PR        (object: N → array; else `commits`)
+//   runs      → gh api repos/o/r/actions/runs?…                 (array of workflow runs, served as one page)
+//   attempts  → gh api repos/o/r/actions/runs/ID/attempts/K     (object: "ID/K" → run)
+//   items     → gh api repos/o/r/issues?…                       (array: issues and PRs, as the list endpoint)
+//   events    → gh api repos/o/r/issues/N/events                (object: N → array)
+//   A query string (`?per_page=100`) on a path is ignored.
 //   fail      → every call fails like a network error         (true)
 //   delayMs   → every call takes this long before answering    (number)
 import { readFileSync, appendFileSync, writeFileSync, renameSync } from 'fs'
@@ -51,8 +57,31 @@ function outList(key) {
 const joined = args.join(' ')
 if (args[0] === 'api') {
   // The path: the argument naming repos/…, or else the last one that is not a flag.
-  const target = args.find((a) => a.startsWith('repos/')) ?? args.filter((a) => !a.startsWith('--')).at(-1)
+  const full = args.find((a) => a.startsWith('repos/')) ?? args.filter((a) => !a.startsWith('--')).at(-1)
+  const target = full.split('?')[0]
   if (/^repos\/[^/]+\/[^/]+$/.test(target)) out(fixture.repo ?? { default_branch: 'main' })
+  if (/\/actions\/runs$/.test(target)) {
+    const page = { total_count: (fixture.runs ?? []).length, workflow_runs: fixture.runs ?? [] }
+    out(args.includes('--slurp') ? [page] : page)
+  }
+  if (/\/actions\/runs\/\d+\/attempts\/\d+$/.test(target)) {
+    const key = target.split('/').slice(-3).filter((_, i) => i !== 1).join('/')
+    const run = fixture.attempts?.[key]
+    if (!run) {
+      process.stderr.write('gh: Not Found (HTTP 404)\n')
+      process.exit(1)
+    }
+    out(run)
+  }
+  if (/\/issues$/.test(target)) out(args.includes('--slurp') ? [fixture.items ?? []] : (fixture.items ?? []))
+  if (/\/issues\/\d+\/events$/.test(target)) {
+    const own = fixture.events?.[target.split('/').at(-2)] ?? []
+    out(args.includes('--slurp') ? [own] : own)
+  }
+  if (/\/pulls\/\d+\/commits$/.test(target) && fixture.prCommits) {
+    const own = fixture.prCommits[target.split('/').at(-2)] ?? []
+    out(args.includes('--slurp') ? [own] : own)
+  }
   if (/\/commits\/[0-9a-f]+\/status$/.test(target)) {
     const list = fixture.statuses?.[target.split('/').at(-2)] ?? []
     const newest = [...list].reverse().filter((s, i, all) => all.findIndex((t) => t.context === s.context) === i)

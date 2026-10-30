@@ -119,6 +119,7 @@ function isOpen(n, openNumbers) {
 }
 
 const hasLabel = (issue, name) => (issue.labels ?? []).some((l) => l.name === name)
+const AUDIT_LABEL = 'auditor-report'
 
 let prCache = null
 const openPrs = () => (prCache ??= gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,body,isCrossRepository,author'))
@@ -157,7 +158,8 @@ function pick(title) {
     const back = resumable()
     if (back) return back
   }
-  const listed = listOpen(title)
+  // An auditor's report (spec: "Auditor") is for the operator, never work to pick.
+  const listed = listOpen(title).filter((i) => !hasLabel(i, AUDIT_LABEL))
   const open = listed.filter((i) => !skip.has(i.number))
   const openNumbers = new Set(open.map((i) => i.number))
   const startable = (i) =>
