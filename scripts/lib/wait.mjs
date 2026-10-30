@@ -329,7 +329,10 @@ export async function runSignalScript({ argv, usage, stateFile, pass }) {
     } catch {
       return // no request, or withdrawn: keep waiting
     }
+    // A taker stopped after its request and before withdrawing it is not there to take the lock.
+    const taker = Number(readOr(claimed, ''))
     rmQuiet(claimed)
+    if (!(Number.isInteger(taker) && taker > 0 && signallable(taker))) return
     writeSync(1, 'TAKEN_OVER\n')
     process.exit(4)
   })
