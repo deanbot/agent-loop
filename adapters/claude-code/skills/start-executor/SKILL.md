@@ -186,7 +186,10 @@ number.
 - `<arg>` empty → pick the next issue (below), then treat it as an issue number.
 - Run `gh pr view <arg> --repo <repo> --json number,body,headRefName`. If it succeeds,
   this is a PR: note its linked issue (`Closes #N` in the body), orient (below), enter the loop.
-- Otherwise, with an issue number: `gh pr list --repo <repo> --state open --limit 100 --json
+  If it fails with `Could not resolve to a PullRequest`, `<arg>` is an issue number (next
+  bullet). Any other failure (network, auth) → **stop** and say `Could not tell whether <arg> is
+  a PR: <the error>. Restart when gh works.`
+- With an issue number: `gh pr list --repo <repo> --state open --limit 100 --json
   number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first |
   .number'`. A PR found → orient on it (below: it claims the issue again when it was parked) and
   enter the loop. None → claim and

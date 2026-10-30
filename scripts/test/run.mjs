@@ -2642,6 +2642,27 @@ const putMessage = (dir, id, extra, meta) => {
   check('resume: every executor takes <N> from the branch first, and resolves a PR argument through Closes #N (never checking a PR as an issue)', missing.length === 0, missing.join('\n'))
 }
 
+// ---------------------------------------------------------------- start: telling a PR from an issue (#126)
+{
+  // As on resume (#123): only "not a PR" makes a start argument an issue number; a blip on a real
+  // PR number must not claim the PR's number as an issue.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const flat = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+  const startStep = {
+    'claude-code/skills/start-executor/SKILL.md': 'If it fails with `Could not resolve to a PullRequest`, `<arg>` is an issue number',
+    'kiro/skills/start-executor/SKILL.md': '- If it fails with `Could not resolve to a PullRequest`, or $ARGUMENTS is empty: treat as issue number or pick next.',
+    'generic/executor.md': 'Tell a PR from an issue with `gh pr view <n> --repo <repo> --json number,body`. It succeeds → a PR. It fails with `Could not resolve to a PullRequest` → an issue.',
+  }
+  const missing = Object.entries(startStep).filter(([f, s]) => {
+    const t = flat(f)
+    const at = t.indexOf(s)
+    return at === -1 || !t.slice(at, at + 600).includes('Restart when gh works.`')
+  }).map(([f]) => f)
+  check('start: every executor takes a start argument as an issue only on "not a PR", and stops on any other gh pr view failure', missing.length === 0, missing.join('\n'))
+  const loose = ['claude-code/skills/start-executor/SKILL.md', 'kiro/skills/start-executor/SKILL.md'].filter((f) => /Otherwise, with an issue number|If it fails or \$ARGUMENTS is empty/.test(flat(f)))
+  check('start: … and no executor still reads any failure as "an issue"', loose.length === 0, loose.join('\n'))
+}
+
 // ---------------------------------------------------------------- the local-ci key (#107)
 {
   // With `local-ci: <context>` every executor leaves the gate to the runner before the PR, passes
