@@ -2620,6 +2620,25 @@ const putMessage = (dir, id, extra, meta) => {
   check('loop texts: with one mailbox folder of the two, every Claude Code loop prints the literal ⚠ line first, without --check, never making up the other', supplies.length === 0, supplies.join('\n'))
 }
 
+// ---------------------------------------------------------------- resume: the branch first, a PR names its issue (#104)
+{
+  // A PR number in the arguments once stood in for the issue number: the claim check ran on the
+  // PR's comments, found no claim, and "yours only when $ARGUMENTS names it" looked satisfied.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const flat = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+  const files = ['claude-code/skills/start-executor/SKILL.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
+  const missing = files.filter((f) => {
+    const t = flat(f)
+    return !(t.includes('**the branch name comes first:** on a branch whose name carries an issue number') || t.includes('**The branch name comes first:** on a branch whose name carries an issue number')) ||
+      !/never decides it\. Only on `main` with uncommitted changes, or on a branch whose name carries no issue number, take the number from/.test(t) ||
+      !t.includes('`gh pr view <n> --repo <repo> --json number,body` succeeds → the number is a PR, and `<N>` is the first issue its body closes (`Closes #<N>`') ||
+      !t.includes('no `Closes #N` → there is no `<N>`') ||
+      !t.includes("The issue checks and the claim listing never run on a PR's number") && !t.includes("The issue checks and the claim listing below never run on a PR's number") ||
+      !t.includes('by its own number or by a PR whose `Closes #<N>` names it')
+  })
+  check('resume: every executor takes <N> from the branch first, and resolves a PR argument through Closes #N (never checking a PR as an issue)', missing.length === 0, missing.join('\n'))
+}
+
 // ---------------------------------------------------------------- the local-ci key (#107)
 {
   // With `local-ci: <context>` every executor leaves the gate to the runner before the PR, passes

@@ -68,19 +68,26 @@ bare start that ran before the intended command) is then seen at once.
    an issue you hold that
    `$ARGUMENTS` names is resumed later, from reference/implement.md §1). Otherwise (another branch, or
    uncommitted changes anywhere) you may have stopped mid-implementation, for example for a plugin
-   update. Take `<N>` from the branch name (`issue-<N>-…`, or the project's issue-branch
-   convention), else from the PR or issue number in `$ARGUMENTS`: an argument of its own that is
-   a bare number or `#N`, never digits inside a flag's value (`--milestone`, `--inbox` and
-   `--outbox` take titles and folder paths, which may hold digits). For example, `42 --inbox
-   /srv/mail/app-exec2/inbox --outbox /srv/mail/app-exec2/outbox` names #42, `--milestone "M3"
+   update. **The branch name comes first:** on a branch whose name carries an issue number
+   (`issue-<N>-…`, or the project's issue-branch convention), that is `<N>`, and `$ARGUMENTS`
+   never decides it. Only on `main` with uncommitted changes, or on a branch whose name carries
+   no issue number, take the number from `$ARGUMENTS`: an argument of its own that is a bare
+   number or `#N`, never digits inside a flag's value (`--milestone`, `--inbox` and `--outbox`
+   take titles and folder paths, which may hold digits). For example, `42 --inbox
+   /srv/mail/app-exec2/inbox --outbox /srv/mail/app-exec2/outbox` names 42, `--milestone "M3"
    --inbox /srv/mail/app-exec2/inbox --outbox /srv/mail/app-exec2/outbox` names none (not 3, not
-   2). Then decide (`<clone>` is the base name of your working directory):
+   2). **A PR number names its issue:** `gh pr view <n> --repo <repo> --json number,body` succeeds
+   → the number is a PR, and `<N>` is the first issue its body closes (`Closes #<N>`, as
+   `pick-next.mjs` reads it); no `Closes #N` → there is no `<N>`. It fails → `<N>` is the number.
+   The issue checks and the claim listing below never run on a PR's number. Then decide (`<clone>`
+   is the base name of your working directory):
    - **You hold #<N>**: it is open, carries `<in-progress-label>`, and the newest `[executor]
      Claimed by` comment on it names `<clone>` exactly (list them with `gh api --paginate
      "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "") |
      startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`; a losing claim is deleted, so the newest
      one left is the holder's). An issue claimed before claim comments existed has none: it is
-     yours only when `$ARGUMENTS` names it. On its branch (`issue-<N>-…`) → **Resume** (below),
+     yours only when `$ARGUMENTS` names it, by its own number or by a PR whose `Closes #<N>`
+     names it. On its branch (`issue-<N>-…`) → **Resume** (below),
      with no `git checkout main` and no `git pull`. On another branch (including `main` with
      uncommitted changes): with a clean tree, find its branch (`git branch --list
      "issue-<N>-*"`), `git switch <branch>` and resume; with uncommitted changes, **stop** and say

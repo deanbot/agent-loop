@@ -51,12 +51,19 @@ removed on `MERGED`, but a loop stopped after `MERGE_READY` never sees the merge
 has no claim to protect, so this is safe while other executors run, and safe to repeat.
 
 **Resume your own issue on start, before touching `main`.** `git branch --show-current` and `git
-status --porcelain`. On `main` with a clean tree, carry on. Otherwise take `<N>` from the branch
-name (`issue-<N>-…` or the project's convention), else from the input, and list its claim
-comments: `gh api --paginate "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "")
+status --porcelain`. On `main` with a clean tree, carry on. Otherwise **the branch name comes
+first:** on a branch whose name carries an issue number (`issue-<N>-…` or the project's
+convention), that is `<N>`, and the input never decides it. Only on `main` with uncommitted
+changes, or on a branch whose name carries no issue number, take the number from the input. **A
+PR number names its issue:** `gh pr view <n> --repo <repo> --json number,body` succeeds → the
+number is a PR, and `<N>` is the first issue its body closes (`Closes #<N>`, as `pick-next.mjs`
+reads it); no `Closes #N` → there is no `<N>`. It fails → `<N>` is the number. The issue checks
+and the claim listing never run on a PR's number. Then list its claim comments: `gh api --paginate
+"repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "")
 | startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`.
 - You hold #<N> (open, carries `in-progress-label`, newest `[executor] Claimed by` comment names
-  your clone exactly; with no claim comment at all, only when the input names it), and you are on
+  your clone exactly; with no claim comment at all, only when the input names it, by its own
+  number or by a PR whose `Closes #<N>` names it), and you are on
   its branch → resume: stay on the
   branch, keep the working tree, read the issue, see what is done (`git log --oneline
   main..HEAD`, `git diff HEAD`), continue (or orient and poll if a PR has `Closes #<N>`). Do not
