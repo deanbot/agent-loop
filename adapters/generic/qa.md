@@ -19,7 +19,7 @@ quoted, not `grep` or `find`. Options go before the pattern (`git grep -n -A<n> 
 '<pathspec>'`): after it, git reads them as a revision. No `{…,…}` in a pattern or a pathspec:
 write alternatives as `-E '(a|b)'` and give each pathspec separately (`'*.ts' '*.tsx'`). No `;`,
 `&&`, pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. `--jq` filters never
-end in `]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`. A project allows commands one by one, and anything else waits for an approval nobody is
+end in `]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`. A `--jq` filter also holds no `$` inside a double-quoted string (a regex such as `test("…$")`, which drew the same prompt): a lookup that needs one goes through a plugin script. A project allows commands one by one, and anything else waits for an approval nobody is
 there to give: the loop stops.
 
 **First line you print, on every start** (including one that resumes work or stops at a check),

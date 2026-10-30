@@ -92,7 +92,9 @@ Rules that hold for the whole session:
   (reference/review.md §3): no `$(…)`, `;` or pipes (they defeat the permission allowlist and
   prompt, and an unattended loop stops at the prompt). `--jq` filters never end in `]]`: emit one
   array per row with `.[] | [ … ]`, not `[.[] | [ … ]]` (Claude Code's safety check prompts on it,
-  likely read as shell `[[ … ]]`).
+  likely read as shell `[[ … ]]`). A `--jq` filter also holds no `$` inside a double-quoted
+  string (a regex such as `test("…$")`, which drew the same prompt): a lookup that needs one goes
+  through a plugin script.
 - **`gh` and `git fetch` run on their own**, from the clone's root: `gh … --repo <repo>`, never
   `cd <dir> && gh …`. A sandbox exempts these commands by name (in Claude Code,
   `sandbox.excludedCommands`), and a chained command doesn't match, so it runs sandboxed, fails
