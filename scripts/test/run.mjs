@@ -2,11 +2,12 @@
 // Contract tests for the signal scripts, run against a fake `gh` (fake-gh.mjs).
 //   node scripts/test/run.mjs
 // No dependencies. Each case gets a fresh HOME (so state files start empty) and a fixture.
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync, symlinkSync } from 'fs'
+import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync, symlinkSync, realpathSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { execFileSync, spawn, spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
+import { createHash } from 'crypto'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const scripts = path.resolve(here, '..')
@@ -1716,12 +1717,31 @@ const putMessage = (dir, id, extra, meta) => {
   land({ 'AGENTS.md': block(''), 'src/a.js': '1\n' })
   g(home, 'clone', '-q', '--branch', 'main', origin, loop)
   const pull = (...args) => spawnSync('node', [path.join(scripts, 'pull.mjs'), ...args], { cwd: loop, env, encoding: 'utf8' })
+  // The pending rules record (#89): keyed by the clone's real path, in the state folder.
+  const record = path.join(home, '.agent-loop', 'state', `rules-${createHash('sha256').update(realpathSync(loop)).digest('hex').slice(0, 16)}.json`)
+  const bin = path.join(home, 'bin')
+  mkdirSync(bin)
+  writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\nexec node "${path.join(here, 'fake-gh.mjs')}" "$@"\n`)
+  chmodSync(path.join(bin, 'gh'), 0o755)
+  const fixture = path.join(home, 'fixture.json')
+  writeFileSync(fixture, JSON.stringify({ issues: [{ number: 11, title: '#11', body: '', labels: [] }] }))
+  const ghLog = path.join(home, 'gh.log')
+  const pickEnv = { ...env, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_FIXTURE: fixture, FAKE_GH_LOG: ghLog }
+  // --clone as the executor runs it: the refusal comes before the RESUME lookup, which calls gh.
+  const pickIn = (cwd = loop) => spawnSync('node', [path.join(scripts, 'pick-next.mjs'), '--repo', REPO, '--clone', 'loop'], { cwd, env: pickEnv, encoding: 'utf8' })
+  const ack = (cwd = loop) => spawnSync('node', [path.join(scripts, 'rules-ack.mjs')], { cwd, env, encoding: 'utf8' })
+  const pendingLine = (files) => `RULES_PENDING: ${files}: run node ${path.join(scripts, 'rules-ack.mjs')}, then pick again\n`
 
   const head0 = g(loop, 'rev-parse', 'HEAD')
   land({ 'src/a.js': '2\n' })
   const code = pull()
   check('pull: a pull that changes no rules file → nothing printed, exit 0, the clone is at the new head',
     code.status === 0 && code.stdout === '' && g(loop, 'rev-parse', 'HEAD') !== head0, `${code.status} ${code.stdout}${code.stderr}`)
+  const plain = pickIn()
+  check('rules record: no rules change → no record, and pick-next picks as before',
+    !existsSync(record) && plain.status === 0 && plain.stdout === 'ISSUE:11\n', `${existsSync(record)} ${plain.stdout}${plain.stderr}`)
+  const quiet = ack()
+  check('rules-ack: nothing pending → nothing printed, exit 0', quiet.status === 0 && quiet.stdout === '' && quiet.stderr === '', `${quiet.status} ${quiet.stdout}${quiet.stderr}`)
   const idle = pull()
   check('pull: nothing new to pull → nothing printed', idle.status === 0 && idle.stdout === '', `${idle.stdout}${idle.stderr}`)
 
@@ -1730,6 +1750,14 @@ const putMessage = (dir, id, extra, meta) => {
   const agents = pull()
   check('pull: AGENTS.md changed → RULES_CHANGED: AGENTS.md, and the diff command for exactly that range',
     agents.stdout === `RULES_CHANGED: AGENTS.md\n  git diff ${before.slice(0, 12)}..${after.slice(0, 12)} -- AGENTS.md\n`, agents.stdout)
+  writeFileSync(ghLog, '')
+  const refused = pickIn()
+  check('rules record: a pull with a rules change → pick-next prints RULES_PENDING and the ack command, picks nothing, calls no gh, exit 0',
+    refused.status === 0 && refused.stdout === pendingLine('AGENTS.md') && readFileSync(ghLog, 'utf8') === '', `${refused.status} ${refused.stdout}${refused.stderr}`)
+  mkdirSync(path.join(loop, 'src', 'deep'), { recursive: true })
+  const fromSub = pickIn(path.join(loop, 'src', 'deep'))
+  check('rules record: pick-next run from a folder inside the clone → the same record, still refused, no gh call',
+    fromSub.stdout === pendingLine('AGENTS.md') && readFileSync(ghLog, 'utf8') === '', fromSub.stdout + fromSub.stderr)
 
   land({ 'docs/b.md': 'b\n', 'not-this.md': 'x\n', 'src/a.js': '4\n' })
   const one = pull()
@@ -1738,6 +1766,18 @@ const putMessage = (dir, id, extra, meta) => {
   check('pull: a rules key with two paths → each listed file that changed, and nothing outside the block\'s list',
     /^RULES_CHANGED: docs\/b\.md\n/.test(one.stdout) && /^RULES_CHANGED: docs\/a\.md docs\/b\.md\n {2}git diff \w+\.\.\w+ -- docs\/a\.md docs\/b\.md\n$/.test(two.stdout),
     `${one.stdout}---\n${two.stdout}`)
+  const kept = JSON.parse(readFileSync(record, 'utf8')).pending
+  check('rules record: more changes before an ack → every range kept, oldest first, and pick-next names each file once',
+    kept.length === 3 && kept[0].from === before && kept[0].to === after && kept[1].files.join() === 'docs/b.md' && kept[2].files.join() === 'docs/a.md,docs/b.md' &&
+      kept[0].to === kept[1].from && pickIn().stdout === pendingLine('AGENTS.md docs/b.md docs/a.md'), JSON.stringify(kept))
+  const acked = ack()
+  const heads = acked.stdout.split('\n').filter((l) => l.startsWith('RULES_DIFF: '))
+  check('rules-ack: prints each pending range\'s diff command and diff, oldest first, then clears the record',
+    acked.status === 0 && heads.length === 3 && heads[0] === `RULES_DIFF: git diff ${before.slice(0, 12)}..${after.slice(0, 12)} -- AGENTS.md` &&
+      acked.stdout.includes('+rules: docs/a.md, ./docs/b.md') && acked.stdout.includes('+b2') && !acked.stdout.includes('RULES_CUT') && !existsSync(record),
+    `${acked.status} ${acked.stdout}${acked.stderr}`)
+  const after2 = pickIn()
+  check('rules record: after the ack, pick-next picks again', after2.stdout === 'ISSUE:11\n', after2.stdout + after2.stderr)
   land({ 'AGENTS.md': block('docs/'), 'docs/c.md': 'c\n' })
   const dir = pull()
   check('pull: a rules path ending in "/" covers the directory', /^RULES_CHANGED: AGENTS\.md docs\/c\.md\n/.test(dir.stdout), dir.stdout)
@@ -1764,6 +1804,101 @@ const putMessage = (dir, id, extra, meta) => {
   check('pull --start: a start with --inbox and --outbox → the restart line keeps both, exactly, before --milestone',
     mailed.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor --inbox /srv/agent-mail/<clone>/inbox --outbox /srv/agent-mail/<clone>/outbox --milestone "M3"\n',
     mailed.stdout)
+
+  const spacedAck = ack()
+  check('rules-ack: a path with a space or a quote is one shell word in the RULES_DIFF line',
+    spacedAck.stdout.includes(`-- 'docs/my rules.md' 'docs/it'\\''s.md'\n`) && !existsSync(record), spacedAck.stdout)
+
+  // The clone's .git/config is writable by PR code, and a sandbox may exempt rules-ack.mjs: an
+  // external diff or a textconv driver configured there must never run under it.
+  const marker = path.join(home, 'driver-ran')
+  const driver = path.join(home, 'driver.sh')
+  writeFileSync(driver, `#!/bin/sh\ntouch '${marker}'\ncat "$1" 2>/dev/null\n`)
+  chmodSync(driver, 0o755)
+  g(loop, 'config', 'diff.external', driver)
+  g(loop, 'config', 'diff.planted.textconv', driver)
+  writeFileSync(path.join(loop, '.git', 'info', 'attributes'), '* diff=planted\n')
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nplanted drivers\n` })
+  pull()
+  const drivers = ack()
+  check('rules-ack: a diff.external or textconv driver set in the clone\'s config never runs; the plain diff is printed',
+    drivers.status === 0 && !existsSync(marker) && drivers.stdout.includes('+planted drivers') && !existsSync(record), `${drivers.status} ${existsSync(marker)} ${drivers.stdout}${drivers.stderr}`)
+  g(loop, 'config', '--unset', 'diff.external')
+  g(loop, 'config', '--unset', 'diff.planted.textconv')
+  rmSync(path.join(loop, '.git', 'info', 'attributes'))
+
+  const long =Array.from({ length: 300 }, (_, i) => `line ${i}`).join('\n')
+  const bigFrom = g(loop, 'rev-parse', 'HEAD')
+  const bigTo = land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\n${long}\n` })
+  pull()
+  const nextTo = land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\n${long}\nmore\n` })
+  pull()
+  const capped = ack()
+  const out = capped.stdout.split('\n').filter(Boolean)
+  const cut = out.findIndex((l) => l.startsWith('RULES_CUT: '))
+  check('rules-ack: an over-cap diff → 200 lines, then RULES_CUT and the command for the cut range and every one after it; the record cleared',
+    capped.status === 0 && cut === 200 && /^RULES_CUT: \d+ more lines; run each command below for the rest$/.test(out[cut]) &&
+      out[cut + 1] === `  git diff ${bigFrom.slice(0, 12)}..${bigTo.slice(0, 12)} -- AGENTS.md` &&
+      out[cut + 2] === `  git diff ${bigTo.slice(0, 12)}..${nextTo.slice(0, 12)} -- AGENTS.md` && out.length === cut + 3 && !existsSync(record),
+    `${capped.status} ${out.length} ${cut} ${out.slice(195).join('\n')}${capped.stderr}`)
+
+  mkdirSync(path.dirname(record), { recursive: true })
+  writeFileSync(record, '{not json')
+  const unreadable = pickIn()
+  const unreadAck = ack()
+  check('rules record: an unreadable record → pick-next refuses; rules-ack says to read the rules in full and clears it',
+    unreadable.stdout === pendingLine('(unreadable record)') && unreadAck.status === 0 &&
+      unreadAck.stdout.startsWith('RULES_UNREADABLE: ') && !existsSync(record) && pickIn().stdout === 'ISSUE:11\n',
+    `${unreadable.stdout}${unreadAck.stdout}${unreadAck.stderr}`)
+  const headNow = g(loop, 'rev-parse', 'HEAD')
+  writeFileSync(record, JSON.stringify({ pending: [{ from: 'deadbeef0000', to: headNow, files: ['AGENTS.md'] }, { from: bigFrom, to: bigTo, files: ['AGENTS.md'] }] }))
+  const lost = ack()
+  check('rules-ack: a range whose commits the clone lacks → RULES_UNREADABLE first, naming it, the other range still diffed, the record cleared',
+    lost.status === 0 && lost.stdout.startsWith(`RULES_UNREADABLE: this clone lacks the commits of deadbeef0000..${headNow.slice(0, 12)}; read AGENTS.md`) &&
+      lost.stdout.includes(`RULES_DIFF: git diff ${bigFrom.slice(0, 12)}..${bigTo.slice(0, 12)} -- AGENTS.md`) && !existsSync(record),
+    `${lost.status} ${lost.stdout.slice(0, 400)}${lost.stderr}`)
+
+  // #93 review: the record outlives the clone; a shallow clone at the same path lacks the range.
+  const again = path.join(home, 'again')
+  g(home, 'clone', '-q', '--branch', 'main', origin, again)
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nshallow\n` })
+  spawnSync('node', [path.join(scripts, 'pull.mjs')], { cwd: again, env, encoding: 'utf8' })
+  const againRecord = path.join(home, '.agent-loop', 'state', `rules-${createHash('sha256').update(realpathSync(again)).digest('hex').slice(0, 16)}.json`)
+  const recorded = existsSync(againRecord)
+  rmSync(again, { recursive: true, force: true })
+  g(home, 'clone', '-q', '--depth', '1', '--branch', 'main', `file://${origin}`, again)
+  const shallowAck = ack(again)
+  const shallowPick = pickIn(again)
+  check('rules-ack: a shallow re-clone at the same path → RULES_UNREADABLE, exit 0, the record cleared, and the next pick proceeds',
+    recorded && shallowAck.status === 0 && shallowAck.stdout.startsWith('RULES_UNREADABLE: this clone lacks the commits of ') &&
+      !existsSync(againRecord) && shallowPick.stdout === 'ISSUE:11\n', `${recorded} ${shallowAck.status} ${shallowAck.stdout}${shallowAck.stderr}${shallowPick.stdout}`)
+
+  writeFileSync(record, JSON.stringify({ pending: [{ from: bigFrom, to: bigTo, files: ['AGENTS.md'] }] }))
+  chmodSync(path.dirname(record), 0o555)
+  const stuck = ack()
+  chmodSync(path.dirname(record), 0o755)
+  check('rules-ack: a record it can\'t clear → exit 2, one rules-ack: line naming the record, nothing on stdout, the record kept',
+    stuck.status === 2 && stuck.stdout === '' && stuck.stderr.startsWith('rules-ack: ') && stuck.stderr.trimEnd().endsWith(`(record: ${record})`) &&
+      stuck.stderr.split('\n').filter(Boolean).length === 1 && existsSync(record), `${stuck.status} ${stuck.stdout}${stuck.stderr}`)
+  rmSync(record)
+
+  chmodSync(path.dirname(record), 0o555)
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nunwritable\n` })
+  const noState = pull()
+  const noStatePick = pickIn()
+  chmodSync(path.dirname(record), 0o755)
+  check('pull: an unwritable state folder → RULES_NOT_RECORDED after the diff command (run it yourself), exit 0, no record, the pick not held',
+    noState.status === 0 && /^RULES_CHANGED: AGENTS\.md\n {2}git diff \w+\.\.\w+ -- AGENTS\.md\nRULES_NOT_RECORDED: run the git diff command above yourself; pick-next\.mjs will not wait for it\n$/.test(noState.stdout) &&
+      /^pull: rules change not recorded: /.test(noState.stderr) && !existsSync(record) && noStatePick.stdout === 'ISSUE:11\n',
+    `${noState.status} ${noState.stdout}${noState.stderr}${noStatePick.stdout}`)
+
+  mkdirSync(record)
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nlast\n` })
+  const unrecorded = pull()
+  check('pull: a record it can\'t write → a pull: warning on stderr, exit 0, RULES_CHANGED still printed',
+    unrecorded.status === 0 && unrecorded.stdout.startsWith('RULES_CHANGED: AGENTS.md\n') && /^pull: rules change not recorded: /.test(unrecorded.stderr),
+    `${unrecorded.status} ${unrecorded.stdout}${unrecorded.stderr}`)
+  rmSync(record, { recursive: true })
 
   writeFileSync(path.join(loop, 'local.txt'), 'x\n')
   g(loop, 'add', 'local.txt')
