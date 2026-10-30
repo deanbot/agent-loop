@@ -79,7 +79,9 @@ open.
 The skill never reads the waiter's output (the notification carries only an output-file path,
 outside the project), and a session that dies before handling a wake loses nothing: the state was
 never written. A waiter that finds another alive exits with code 3, which the notification shows
-("failed with exit code 3"); that wake only re-schedules the fallback. Any other failed waiter
+("failed with exit code 3"); that wake only re-schedules the fallback, and only that one: the
+next wake of any other kind (the surviving waiter's own exit included) runs a full cycle that
+starts a waiter of its own, since a waiter that has notified its exit is gone. Any other failed waiter
 (a usage error, a broken install) makes the next cycle end with a 300-second `ScheduleWakeup`
 instead of a waiter, so a persistent failure cannot spin the session.
 
