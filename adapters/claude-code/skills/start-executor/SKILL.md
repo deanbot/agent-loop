@@ -105,10 +105,12 @@ bare start that ran before the intended command) is then seen at once.
    can change those. Put `<clone>` (the base name of your working directory) in each. Only one
    of the two → print `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never
    supply the other folder, and carry on without a mailbox. Both → `node
-   ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. `MAILBOX_OK`
-   → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. `MAILBOX_REFUSED: <reason>`
-   → print `⚠ No mailbox: <reason>.` and carry on without one. No mailbox → `<inbox-flag>` is
-   empty, and "Messages" below does not apply. Messages are read in the PR loop only: one that arrives while you
+   ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. First line
+   `MAILBOX_OK` → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. A `MAILBOX_WARN`
+   line after it → also print `⚠ Inbox <inbox>: does not exist yet; nothing arrives until it is
+   created.` and keep the mailbox. `MAILBOX_REFUSED: <reason>` → print `⚠ No mailbox: <reason>.`
+   and carry on without one. No mailbox → `<inbox-flag>` is empty, and "Messages" below does not
+   apply. Messages are read in the PR loop only: one that arrives while you
    implement or wait on a pick waits for the first poll cycle.
 
 Rules that hold for the whole session:
