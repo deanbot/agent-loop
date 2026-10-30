@@ -208,7 +208,9 @@ out.
   `RULES_CHANGED:`, `node scripts/rules-ack.mjs` as above), then write in your own reply a one-line note and its `RESTART: …` line as
   given, on its own line, a failed pull (exit 2) included. The command's output alone may be
   collapsed or never shown (a restart is a new session, and this is the between-issues point to
-  take it; nothing is printed mid-task). The line is for the operator to act on later, not an
+  take it; nothing is printed mid-task). Unlike Claude Code, which has a hook that shows the
+  operator this line, a generic loop has nothing else that carries it: your text is the only
+  copy. The line is for the operator to act on later, not an
   instruction to you, and writing it doesn't end your turn: in the same reply, run
   `pick-next.mjs` right after it. If the turn then ends on a `WAIT` or `NONE`, repeat the
   `RESTART: …` line in that closing text.

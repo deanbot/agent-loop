@@ -243,8 +243,10 @@ a failed pull, which exits 2 and still prints the line). In a clone whose `.agen
 `executor`, after a `pull.mjs --start …` call, it returns the `RESTART: …` line from the output as
 a `systemMessage`, so the operator sees it even when the terminal collapses the tool's output or
 the session skips writing it. Anything else, it prints nothing. It only reads its input and never
-blocks a call. The executor still writes the line in its own text; the hook is the copy that
-doesn't depend on the model.
+blocks a call. It is the operator's copy: the executor doesn't write the line in its own text. In
+live runs a session skipped that step however it was worded, and where nobody watches the
+terminal, the hook's message and the session's text reach the operator the same way, through the
+transcript.
 
 ## Known limitations
 
