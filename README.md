@@ -66,8 +66,10 @@ owner/repo` instead of `cd … && gh …`, so an entry for them matches. These s
 exempt them the same way: `scripts/pick-next.mjs`, `scripts/pr-poll.mjs`, `scripts/pr-watch.mjs`,
 `scripts/pr-qa.mjs` (through `scripts/lib/wait.mjs`) and `adapters/claude-code/setup-project.sh`.
 `scripts/pull.mjs` runs `git pull`, so it needs the same exemption: without it every loop pull
-fails, and the loop says so in a `⚠` line each time. `scripts/inbox.mjs` writes its record to
-the state folder outside the clone, so a loop with a mailbox needs it exempt too.
+fails, and the loop says so in a `⚠` line each time. `scripts/rules-ack.mjs` clears a record in
+the scripts' state folder, outside the clone, so exempt it too: a sandboxed run can't clear it, and
+`pick-next.mjs` then refuses every pick (`RULES_PENDING`). `scripts/inbox.mjs` writes its record to
+the same state folder, so a loop with a mailbox needs it exempt too.
 
 ---
 
@@ -92,8 +94,13 @@ parked and the operator unblocked, `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>`, `M
 <milestone>`, `NONE`), so a pick always starts from a fresh listing. A
 fifth, `session.mjs`, keeps one loop session per clone: the newest start wins, and an old session
 left running stops. `pull.mjs` is every pull of `main` in a loop: it names the rules files the
-pull changed, so a running loop reads their diff. `local-ci.mjs` is no agent's: a local CI
+pull changed, so a running loop reads their diff, and records the change: `pick-next.mjs` prints
+`RULES_PENDING` and picks nothing until `rules-ack.mjs` has printed that diff. `local-ci.mjs` is no agent's: a local CI
 runner for a project with a `gate` (below).
+
+`audit.mjs` is the optional auditor's (`/agent-loop:start-auditor`, on demand): for each control
+the loop ran over a period, what it cost against what it caught, as one report for the operator
+(spec: "Auditor").
 
 `MERGE_READY` = `[reviewer] LGTM` after the last commit + CI green + no conflict with `main` (+
 `[qa] PASS` with `qa-gate: on`). A project that can turn CI off names a `gate` command: on a PR

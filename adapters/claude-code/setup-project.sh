@@ -9,7 +9,8 @@
 #   - writes the role marker .agent-loop/role (removed for --role operator)
 #   - adds the role's permission allow rules to .claude/settings.local.json (agent roles only;
 #     --plugin-root names the installed plugin so its scripts are allowed wherever they live;
-#     the block's `gate` command for the executor and the reviewer)
+#     the block's `gate` command for the executor and the reviewer, its `pre-gate` command for the
+#     executor)
 #   - enables .githooks if the project ships one
 #   - installs second-read's git hooks when second-read is installed, and warns about each of its
 #     guards that's missing (the git hooks, the gh shim or Claude Code plugin); never fails on them
@@ -52,6 +53,7 @@ IN_PROGRESS="$(agent_loop_value in-progress-label)"; IN_PROGRESS="${IN_PROGRESS:
 BLOCKED="$(agent_loop_value blocked-label)"; BLOCKED="${BLOCKED:-is-blocked}"
 NEEDS_OP="$(agent_loop_value needs-operator-label)"; NEEDS_OP="${NEEDS_OP:-needs-operator}"
 GATE="$(agent_loop_value gate)"
+PRE_GATE="$(agent_loop_value pre-gate)"
 
 echo "agent-loop setup: repo=$REPO role=$ROLE"
 
@@ -109,9 +111,9 @@ if [ "$ROLE" = operator ]; then
 else
   PLUGIN_CACHE="$HOME/.claude/plugins/cache/agent-loop/agent-loop"
   mkdir -p .claude
-  node - "$ROLE" "$PLUGIN_CACHE" "$PLUGIN_ROOT" "$GATE" <<'NODE'
+  node - "$ROLE" "$PLUGIN_CACHE" "$PLUGIN_ROOT" "$GATE" "$PRE_GATE" <<'NODE'
 const fs = require('fs')
-const [role, cache, pluginRoot, gate] = process.argv.slice(2)
+const [role, cache, pluginRoot, gate, preGate] = process.argv.slice(2)
 const file = '.claude/settings.local.json'
 const common = ['Bash(gh *)', `Bash(node ${cache}/*)`]
 if (pluginRoot && !pluginRoot.startsWith(cache)) common.push(`Bash(node ${pluginRoot.replace(/\/$/, '')}/scripts/*)`)
@@ -127,6 +129,9 @@ const byRole = {
 // reviewer on the head before an LGTM, so an unattended loop must not stop on its prompt.
 const gateCmd = (gate ?? '').trim()
 if (gateCmd && role !== 'qa') byRole[role].push(`Bash(${gateCmd})`, `Bash(${gateCmd} *)`)
+// The block's `pre-gate` (the cheap check before the gate): the executor runs it before every push.
+const preGateCmd = (preGate ?? '').trim()
+if (preGateCmd && role === 'executor') byRole[role].push(`Bash(${preGateCmd})`, `Bash(${preGateCmd} *)`)
 let settings = {}
 try { settings = JSON.parse(fs.readFileSync(file, 'utf8')) } catch {}
 settings.permissions ??= {}

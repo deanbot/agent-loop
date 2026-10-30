@@ -32,6 +32,8 @@ Three layers. Boundaries are strict.
   `RESUME:<n> PR:<p>` (with `--clone`: a PR this clone parked, unblocked since, before anything
   else), `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE`, exits. No state
   and no `--wait`: it lists fresh every call, so an issue filed while the executor waited is seen.
+  While the clone's pending rules record holds a change (`pull.mjs`), it prints `RULES_PENDING:
+  <files>: run node <scripts>/rules-ack.mjs, then pick again` instead, picks nothing and exits 0.
 - `scripts/session.mjs` — one loop session per clone. `--start <id>` (`NEW`, `MINE`, `TOOK_OVER
   <id> <secs>`), `--beat <id>` (`MINE`, `SUPERSEDED <id|none>`), `--release <id>`. The newest
   start wins; the old session is recorded as superseded in `.agent-loop/session` and stops (the
@@ -39,12 +41,26 @@ Three layers. Boundaries are strict.
 - `scripts/pull.mjs` — every pull of `main` in a loop. `[--start <command> [--milestone
   <title>]]`. `git pull --ff-only`, then `RULES_CHANGED: <files>` plus the `git diff` command
   that shows it when `AGENTS.md` or a block `rules` file changed, nothing otherwise; with
-  `--start`, the operator's `RESTART:` line. Run in the clone's root.
+  `--start`, the operator's `RESTART:` line. A rules change is also recorded as pending for the
+  clone (`scripts/lib/rules.mjs`). Run in the clone's root.
+- `scripts/rules-ack.mjs` — no arguments. Prints each pending rules change (`RULES_DIFF: git diff
+  …`, then the diff; at most 200 lines, then `RULES_CUT:` and the commands for the rest) and
+  clears the record, so the change is in the session's context before `pick-next.mjs` picks again.
+  Nothing pending → nothing. A range the clone has no commits for → `RULES_UNREADABLE:` (read the
+  rules in full), cleared too. When `pull.mjs` can't write the record it adds `RULES_NOT_RECORDED`,
+  and the loop runs the printed `git diff` itself.
 - `scripts/local-ci.mjs` — a local CI runner, no agent's. `--repo owner/repo --gate "<command>"
   [--context local-ci] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]`, from the
   root of a clone of its own (it refuses one with a role marker). Runs the gate once per trusted,
   same-repository PR head, one at a time, and posts the result as a commit status, which
   `gh pr checks` and `pr-poll.mjs` read as CI. One runner per repo and context (pid lock).
+- `scripts/audit.mjs` — the auditor's numbers, read-only. `--repo owner/repo --since <date|Nd>
+  [--until <date>] [--floor id,id] [--operators l,l] [--labels l,l] [--format md|json]`. For each
+  control the loop ran over the period (a workflow on prose-only PRs, re-runs, cancelled runs, a
+  label, review rounds), what it cost and what it caught, and keep or narrow, plus claim and
+  release times as measured; prints a
+  report and posts nothing (spec: "Auditor"). Reads comments for their time, author and prefix,
+  never their text. `pick-next.mjs` never lists an issue labelled `auditor-report`.
 - `scripts/inbox.mjs` — a folder of message files as a signal source. `--dir <folder>` (no default:
   the loop's `--inbox` start argument names it, outside the clone) prints `MESSAGE:<messageId>` per message not
   reported before (`INVALID:<id>` for a file that is not one), or `NONE`; `--show <id>` prints one
@@ -100,9 +116,12 @@ An adapter is valid if:
    local runner posts as the same login); adapters enforce both structurally where the tool allows
 7. Executor prompt includes the pre-PR self-check: each criterion mapped to a test CI runs, or
    given the exact steps the operator runs by hand. A hand check never blocks an approval; the
-   operator confirms by a comment or by merging
+   operator confirms by a comment or by merging. Before every push it runs the cheap checks
+   first: the block's `pre-gate`, then the push-time checks without pushing (`git push --dry-run`),
+   then `quality-gates` and the gate, then the push
 8. Prompts give shell commands as single plain commands (no `$(…)`, `;`, pipes) so permission
-   allowlists can match them
+   allowlists can match them: `git grep` options before the pattern and no braces, no `--jq`
+   filter with `]]`, and files changed with the tool's edit tools, never through the shell
 
 ## Known design constraints
 
@@ -150,7 +169,9 @@ record of what it reported is `inbox-<hash>.json` with the script state below).
 (reviewer), `<slug>-pr-poll-<pr>.json` (executor, one per PR, so two executors never share a file;
 the older shared `<slug>-pr-poll-state.json` is read once per PR as a migration source; delete it
 once every executor runs per-PR files, or deleting a PR's file restores that PR's old cursors),
-`<slug>-pr-qa-state.json` (QA). Next to each, one-shot runs keep `<state>-wait.json`: the
+`<slug>-pr-qa-state.json` (QA), `rules-<hash>.json` (a clone's pending rules change, keyed by its
+real root path: `pull.mjs` adds, `pick-next.mjs` reads, `rules-ack.mjs` clears; outside the clone,
+where PR code could clear it). Next to each, one-shot runs keep `<state>-wait.json`: the
 waiter's baseline, the idle count and (pr-poll) the head-and-CI activity key. Safe to delete. `local-ci.mjs` keeps no state (the commit
 statuses are its record): only its pid lock, `<slug>-local-ci-<context>.lock`, and its run logs
 under `~/.agent-loop/local-ci/<slug>/`.

@@ -2,11 +2,12 @@
 // Contract tests for the signal scripts, run against a fake `gh` (fake-gh.mjs).
 //   node scripts/test/run.mjs
 // No dependencies. Each case gets a fresh HOME (so state files start empty) and a fixture.
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync, symlinkSync } from 'fs'
+import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, readFileSync, renameSync, readdirSync, existsSync, symlinkSync, realpathSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { execFileSync, spawn, spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
+import { createHash } from 'crypto'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const scripts = path.resolve(here, '..')
@@ -616,6 +617,26 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- the executor's check order (#87)
+{
+  // The checks that take seconds run before the one that takes minutes, so a refusal at push time
+  // never costs a second gate. Every executor text, and the fix rounds, name the same order.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const order = [
+    '**Before every push, in this order:** `pre-gate` when the block has it, fixed and run again until it passes (commit what a formatter changed); commit;',
+    'the push-time checks without pushing: `git push --dry-run origin <branch>`, which runs the project\'s pre-push hooks on the commits it would send,',
+    'then `quality-gates` and the gate on the committed, clean tree; then the push.',
+  ]
+  const texts = ['claude-code/skills/start-executor/reference/implement.md', 'claude-code/skills/start-executor/reference/signals.md',
+    'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
+  const missing = texts.filter((f) => {
+    const t = readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+    const at = order.map((s) => t.indexOf(s))
+    return at.some((i) => i === -1) || !(at[0] < at[1] && at[1] < at[2])
+  })
+  check('executor order: every executor text, and the fix rounds, run pre-gate, then the push-time dry-run, then the gate, then the push', missing.length === 0, missing.join('\n'))
+}
+
 // ---------------------------------------------------------------- --wait (lib/wait.mjs)
 // The waiter runs in the background so a test can change the fixture mid-wait. Intervals are 1s.
 function start(ctx, script, args) {
@@ -961,6 +982,152 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   check('poll: a --pr that is not a number → usage error, exit 1', bad.startsWith('EXIT 1') && bad.includes('Usage'), bad)
   rmSync(fresh.home, { recursive: true, force: true })
   rmSync(migrated.home, { recursive: true, force: true })
+}
+
+// ---------------------------------------------------------------- audit.mjs, the auditor's numbers (#85)
+{
+  // One month: a prose-only PR gated in full (#10), a code PR with a run cancelled, a re-run after a
+  // cancelled attempt, a re-run after a failure and two review rounds (#11), and an issue left blocked
+  // for a day (#20). An in-progress lint run has no cost yet, so no lint finding may appear.
+  const ctx = makeEnv()
+  const at = (d) => `2026-03-${d}Z`
+  const wfRun = (id, sha, start, end, extra = {}) => ({ id, path: '.github/workflows/ci.yml', head_sha: sha, status: 'completed', conclusion: 'success', run_attempt: 1, run_started_at: at(start), updated_at: at(end), ...extra })
+  const fx = {
+    prs: [
+      { number: 10, createdAt: at('02T09:00:00'), closedAt: at('03T09:00:00'), mergedAt: at('03T09:00:00'), files: [{ path: 'README.md' }, { path: 'docs/guide.md' }] },
+      { number: 11, createdAt: at('05T08:00:00'), closedAt: at('07T00:00:00'), mergedAt: at('07T00:00:00'), files: [{ path: 'src/a.js' }, { path: 'README.md' }] },
+    ],
+    prCommits: {
+      10: [{ sha: 'a10', commit: { committer: { date: at('02T10:00:00') } } }],
+      11: [{ sha: 'b11', commit: { committer: { date: at('05T09:00:00') } } }, { sha: 'c11', commit: { committer: { date: at('06T09:00:00') } } }],
+    },
+    runs: [
+      wfRun(1001, 'a10', '02T10:01:00', '02T10:12:00'),
+      wfRun(1101, 'b11', '05T09:01:00', '05T09:03:00', { conclusion: 'cancelled' }),
+      wfRun(1102, 'b11', '05T09:05:00', '05T09:15:00', { run_attempt: 2 }),
+      wfRun(1103, 'c11', '06T09:10:00', '06T09:15:00', { run_attempt: 2 }),
+      wfRun(1201, 'a10', '02T10:01:00', '02T10:02:00', { path: '.github/workflows/lint.yml', status: 'in_progress', conclusion: null }),
+      wfRun(9999, 'zzz', '05T09:00:00', '05T10:00:00'),
+      wfRun(1301, 'a10', '02T10:05:00', '02T10:05:00', { path: '.github/workflows/docs.yml' }),
+      wfRun(1302, 'b11', '05T09:05:00', '05T09:05:00', { path: '.github/workflows/docs.yml' }),
+      wfRun(1401, 'a10', '02T10:01:00', '02T10:02:00', { path: '.github/workflows/build.yml' }),
+      wfRun(1402, 'b11', '05T09:01:00', '05T09:11:00', { path: '.github/workflows/build.yml' }),
+      wfRun(1403, 'c11', '06T09:01:00', '06T09:11:00', { path: '.github/workflows/build.yml' }),
+      wfRun(1501, 'a10', '02T10:01:00', '02T10:03:00', { path: '.github/workflows/pages.yml' }),
+    ],
+    attempts: {
+      '1102/1': wfRun(1102, 'b11', '05T09:03:00', '05T09:04:00', { conclusion: 'cancelled' }),
+      '1103/1': wfRun(1103, 'c11', '06T09:01:00', '06T09:06:00', { conclusion: 'failure' }),
+    },
+    issueComments: {
+      10: [],
+      11: [comment('[reviewer] Review of b11.', at('05T12:00:00'), 'acme'), comment('[reviewer] LGTM', at('06T12:00:00'), 'acme'), comment('merging', at('06T20:00:00'), 'acme')],
+      20: [comment('[executor] BLOCKED: waiting.', at('10T00:05:00'), 'acme'), comment('[dev] noted', at('10T01:00:00'), 'acme'), comment('ping', at('10T06:00:00'), 'stranger')],
+      21: [],
+      // Two executors claimed #22 three minutes apart: the claim comment settled a race.
+      22: [comment('[executor] Claimed by exec-a', at('15T10:00:00'), 'acme'), comment('[executor] Claimed by exec-b', at('15T10:03:00'), 'acme')],
+    },
+    items: [{ number: 20, state: 'open', closed_at: null, labels: [] }, { number: 11, state: 'closed', closed_at: at('07T00:00:00') }, { number: 21, state: 'open', closed_at: null },
+      { number: 22, state: 'open', closed_at: null }],
+    events: {
+      11: [{ event: 'labeled', label: { name: 'needs-operator' }, created_at: at('06T13:00:00') }],
+      // A span wholly before the period, then the day-long one inside it.
+      20: [{ event: 'labeled', label: { name: 'needs-operator' }, created_at: '2026-02-01T00:00:00Z' }, { event: 'unlabeled', label: { name: 'needs-operator' }, created_at: '2026-02-02T00:00:00Z' },
+        { event: 'labeled', label: { name: 'is-blocked' }, created_at: at('10T00:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: at('11T00:00:00') }],
+      // A span that crosses the period's end: cut at --until (the end of 2026-03-31).
+      21: [{ event: 'labeled', label: { name: 'is-blocked' }, created_at: at('31T12:00:00') }, { event: 'unlabeled', label: { name: 'is-blocked' }, created_at: '2026-04-01T12:00:00Z' }],
+      22: [{ event: 'labeled', label: { name: 'in-progress' }, created_at: at('15T10:00:00') }, { event: 'unlabeled', label: { name: 'in-progress' }, created_at: at('16T10:00:00') }],
+    },
+  }
+  const audit = (extra = []) => run_(['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json', ...extra])
+  const run_ = (args) => {
+    const out = run(ctx, 'audit.mjs', args, fx)
+    try {
+      return JSON.parse(out)
+    } catch {
+      return { error: out }
+    }
+  }
+  const r = audit()
+  const f = (id) => (r.findings ?? []).find((x) => x.id === id)
+  const brief = JSON.stringify((r.findings ?? []).map((x) => [x.id, x.cost, x.caught, x.recommendation]))
+  check('audit: a prose-only PR gated in full → ci-prose finding, its run\'s minutes, caught 0, narrow with the narrower rule',
+    f('ci-prose:ci')?.cost === 11 && f('ci-prose:ci').caught === 0 && f('ci-prose:ci').recommendation === 'narrow' && /prose/.test(f('ci-prose:ci').rule) &&
+      JSON.stringify(f('ci-prose:ci').prs) === '[10]', brief + (r.error ?? ''))
+  check('audit: a cancelled run and a cancelled first attempt → cancelled cost 3 min over 2 runs, caught 0; the attempt after the cancel is no re-run cost (re-runs: 5 min, one attempt)',
+    f('cancelled:ci')?.cost === 3 && f('cancelled:ci').runs === 2 && f('reruns:ci')?.cost === 5 && f('reruns:ci').runs === 1, brief)
+  check('audit: a re-run that passed after a failed attempt (a flake) → caught 1, keep', f('reruns:ci')?.caught === 1 && f('reruns:ci').recommendation === 'keep', brief)
+  check('audit: claim and release times are measured with no finding: the time held, the claim comments and a race settled within 10 minutes',
+    !(r.findings ?? []).some((x) => x.id === 'claims') && JSON.stringify(r.claims) === JSON.stringify({ items: [22], minutes: 1440, claims: 2, races: 1 }) &&
+      (r.notes ?? []).some((n) => n.startsWith('Claims: 1 item (#22) held `in-progress` for 1440 min')), JSON.stringify([r.claims, r.notes]))
+  check('audit: an issue left blocked for a day with no operator comment (a stranger\'s, a role-prefixed and a [dev] one by the owner don\'t count) → caught 0, narrow',
+    f('label:is-blocked')?.caught === 0 && f('label:is-blocked').recommendation === 'narrow', brief)
+  check('audit: label time is clipped to the period: a span before it adds nothing, one crossing its end is cut there (1440 + 720 min)',
+    f('label:is-blocked')?.cost === 2160 && f('label:is-blocked').spans === 2 && f('label:needs-operator')?.spans === 1, brief)
+  check('audit: a workflow whose prose runs cost under half its code runs gets no ci-prose finding (it already skips the work)',
+    !(r.findings ?? []).some((x) => x.id === 'ci-prose:build'), brief)
+  check('audit: prose runs with no code run to compare → no finding, and a note says so',
+    !(r.findings ?? []).some((x) => x.id === 'ci-prose:pages') && (r.notes ?? []).some((n) => n.startsWith('`ci-prose:pages`: no run on a code PR')), JSON.stringify(r.notes))
+  const listed = audit(['--operators', '[@stranger, other]', '--floor', '[ci-prose:ci]'])
+  const lf = (id) => (listed.findings ?? []).find((x) => x.id === id)
+  check('audit: lists written as a block writes them ([a, b], @login) parse: a --operators login\'s comment catches; a bracketed --floor id is honoured',
+    lf('label:is-blocked')?.caught === 1 && lf('label:is-blocked').recommendation === 'keep' && lf('ci-prose:ci')?.floor === true, JSON.stringify(listed))
+  check('audit: a label that stayed on until the merge → caught, keep', f('label:needs-operator')?.cost === 660 && f('label:needs-operator').caught === 1 && f('label:needs-operator').recommendation === 'keep', brief)
+  check('audit: review rounds → 2 rounds, 1 followed by a commit, 360 min from commit to review, keep',
+    f('review-rounds')?.rounds === 2 && f('review-rounds').caught === 1 && f('review-rounds').cost === 360 && f('review-rounds').recommendation === 'keep', brief)
+  check('audit: a run with no cost yet (in progress) gives no finding, and a run of no PR in the period is not counted',
+    !(r.findings ?? []).some((x) => x.id.endsWith(':lint')) && !brief.includes('9999') && f('ci-prose:ci')?.runs === 1, brief)
+  check('audit: a finding with a zero cost (a run that took no time) is not posted: both numbers or nothing',
+    !(r.findings ?? []).some((x) => x.id.endsWith(':docs')), brief)
+  check('audit: findings come in cost order', JSON.stringify((r.findings ?? []).map((x) => x.id)) ===
+    JSON.stringify(['label:is-blocked', 'label:needs-operator', 'review-rounds', 'ci-prose:ci', 'reruns:ci', 'cancelled:ci']), brief)
+  // #103 review: a re-run of a real failure caught nothing (the first attempt found it); one claim
+  // per item settles no race.
+  const rerunFx = (runs, attempts, extra = {}) => ({
+    prs: [{ number: 31, createdAt: at('04T08:00:00'), closedAt: at('04T20:00:00'), mergedAt: null, files: [{ path: 'src/b.js' }] }],
+    prCommits: { 31: [{ sha: 'd31', commit: { committer: { date: at('04T09:00:00') } } }] },
+    runs, attempts, issueComments: { 31: [], ...(extra.comments ?? {}) }, items: extra.items ?? [], events: extra.events ?? {},
+  })
+  const det = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
+    [wfRun(3101, 'd31', '04T10:20:00', '04T10:30:00', { run_attempt: 3, conclusion: 'failure' })],
+    { '3101/1': wfRun(3101, 'd31', '04T10:00:00', '04T10:10:00', { conclusion: 'failure' }), '3101/2': wfRun(3101, 'd31', '04T10:10:00', '04T10:20:00', { run_attempt: 2, conclusion: 'failure' }) },
+    { comments: { 33: [comment('[executor] Claimed by exec-a', at('20T10:00:00'), 'acme')] }, items: [{ number: 33, state: 'open', closed_at: null }],
+      events: { 33: [{ event: 'labeled', label: { name: 'in-progress' }, created_at: at('20T10:00:00') }, { event: 'unlabeled', label: { name: 'in-progress' }, created_at: at('20T12:00:00') }] } }))
+  const detF = (id) => (JSON.parse(det.startsWith('{') ? det : '{}').findings ?? []).find((x) => x.id === id)
+  check('audit: a deterministic failure re-run twice → cost of attempts 2 and 3 (20 min), caught 0, narrow with the never-again rule',
+    detF('reruns:ci')?.cost === 20 && detF('reruns:ci').runs === 2 && detF('reruns:ci').caught === 0 && detF('reruns:ci').recommendation === 'narrow' &&
+      /never again after it fails a second time/.test(detF('reruns:ci').rule), det)
+  const detJ = JSON.parse(det.startsWith('{') ? det : '{}')
+  check('audit: a single long claim gives no claims finding; it is measured (120 min held, one claim, no race)',
+    !detF('claims') && JSON.stringify(detJ.claims) === JSON.stringify({ items: [33], minutes: 120, claims: 1, races: 0 }), det)
+  const resumed = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
+    [wfRun(3301, 'd31', '04T10:02:00', '04T10:12:00', { run_attempt: 2 })], { '3301/1': wfRun(3301, 'd31', '04T10:00:00', '04T10:02:00', { conclusion: 'cancelled' }) }))
+  const resumedJ = JSON.parse(resumed.startsWith('{') ? resumed : '{}')
+  check('audit: a cancelled attempt re-run to a pass → no reruns finding (the head needed a result); cancelled:ci costs the 2 cancelled minutes',
+    !(resumedJ.findings ?? []).some((x) => x.id === 'reruns:ci') && (resumedJ.findings ?? []).find((x) => x.id === 'cancelled:ci')?.cost === 2, resumed)
+  const flake = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--format', 'json'], rerunFx(
+    [wfRun(3201, 'd31', '04T10:10:00', '04T10:20:00', { run_attempt: 2 })], { '3201/1': wfRun(3201, 'd31', '04T10:00:00', '04T10:10:00', { conclusion: 'failure' }) }))
+  const flakeF = (JSON.parse(flake.startsWith('{') ? flake : '{}').findings ?? []).find((x) => x.id === 'reruns:ci')
+  check('audit: a flake (failure, then a pass on re-run) → cost of the re-run alone (10 min), caught 1, keep',
+    flakeF?.cost === 10 && flakeF.caught === 1 && flakeF.recommendation === 'keep', flake)
+  const fl = audit(['--floor', 'ci-prose:ci,label:typo'])
+  const flp = (fl.findings ?? []).find((x) => x.id === 'ci-prose:ci')
+  check('audit: a floor control keeps its cost but gets no recommendation; a floor id that matched nothing is listed',
+    flp?.cost === 11 && flp.floor === true && flp.recommendation === null && flp.rule === null && JSON.stringify(fl.unmatchedFloor) === '["label:typo"]', JSON.stringify(fl))
+  const md = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31', '--floor', 'ci-prose:ci'], fx)
+  const section = md.split('\n### ').find((s) => s.startsWith('`ci-prose:ci`')) ?? ''
+  check('audit md: the header names the period and the exact arguments to reproduce it; a floor line is cost only; PRs by number',
+    md.startsWith('# [auditor] Audit 2026-03-01..2026-03-31\n') && md.includes('Reproduce: `node scripts/audit.mjs --repo acme/widgets --since 2026-03-01T00:00:00Z --until 2026-03-31T23:59:59Z --floor ci-prose:ci`') &&
+      section.includes('In `audit-floor`: cost only') && !section.includes('Recommendation') && section.includes('#10'), md)
+  const bad = run(ctx, 'audit.mjs', ['--repo', REPO], fx)
+  check('audit: no --since → usage error, exit 1', /^EXIT 1/.test(bad) && /--since is required/.test(bad), bad)
+  const failed = run(ctx, 'audit.mjs', ['--repo', REPO, '--since', '7d'], { fail: true })
+  check('audit: a failed gh call → one audit: line, exit 2', /^EXIT 2\n\naudit: HTTP 502/.test(failed), failed)
+  // An auditor's report is an issue for the operator: no executor may pick it as work.
+  const picked = run(ctx, 'pick-next.mjs', ['--repo', REPO], { issues: [{ number: 5, title: 'a', body: '', labels: [{ name: 'auditor-report' }] }, { number: 6, title: 'b', body: '', labels: [] }] }).trim()
+  const own = run(ctx, 'pick-next.mjs', ['--repo', REPO], { issues: [{ number: 5, title: 'a', body: '', labels: [{ name: 'audit' }] }, { number: 6, title: 'b', body: '', labels: [] }] }).trim()
+  check('pick: an issue labelled auditor-report is never picked; a project\'s own audit label is not that label', picked === 'ISSUE:6' && own === 'ISSUE:5', `${picked} ${own}`)
+  rmSync(ctx.home, { recursive: true, force: true })
 }
 
 // ---------------------------------------------------------------- already read before the role's own post (#28)
@@ -1716,12 +1883,31 @@ const putMessage = (dir, id, extra, meta) => {
   land({ 'AGENTS.md': block(''), 'src/a.js': '1\n' })
   g(home, 'clone', '-q', '--branch', 'main', origin, loop)
   const pull = (...args) => spawnSync('node', [path.join(scripts, 'pull.mjs'), ...args], { cwd: loop, env, encoding: 'utf8' })
+  // The pending rules record (#89): keyed by the clone's real path, in the state folder.
+  const record = path.join(home, '.agent-loop', 'state', `rules-${createHash('sha256').update(realpathSync(loop)).digest('hex').slice(0, 16)}.json`)
+  const bin = path.join(home, 'bin')
+  mkdirSync(bin)
+  writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\nexec node "${path.join(here, 'fake-gh.mjs')}" "$@"\n`)
+  chmodSync(path.join(bin, 'gh'), 0o755)
+  const fixture = path.join(home, 'fixture.json')
+  writeFileSync(fixture, JSON.stringify({ issues: [{ number: 11, title: '#11', body: '', labels: [] }] }))
+  const ghLog = path.join(home, 'gh.log')
+  const pickEnv = { ...env, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_FIXTURE: fixture, FAKE_GH_LOG: ghLog }
+  // --clone as the executor runs it: the refusal comes before the RESUME lookup, which calls gh.
+  const pickIn = (cwd = loop) => spawnSync('node', [path.join(scripts, 'pick-next.mjs'), '--repo', REPO, '--clone', 'loop'], { cwd, env: pickEnv, encoding: 'utf8' })
+  const ack = (cwd = loop) => spawnSync('node', [path.join(scripts, 'rules-ack.mjs')], { cwd, env, encoding: 'utf8' })
+  const pendingLine = (files) => `RULES_PENDING: ${files}: run node ${path.join(scripts, 'rules-ack.mjs')}, then pick again\n`
 
   const head0 = g(loop, 'rev-parse', 'HEAD')
   land({ 'src/a.js': '2\n' })
   const code = pull()
   check('pull: a pull that changes no rules file → nothing printed, exit 0, the clone is at the new head',
     code.status === 0 && code.stdout === '' && g(loop, 'rev-parse', 'HEAD') !== head0, `${code.status} ${code.stdout}${code.stderr}`)
+  const plain = pickIn()
+  check('rules record: no rules change → no record, and pick-next picks as before',
+    !existsSync(record) && plain.status === 0 && plain.stdout === 'ISSUE:11\n', `${existsSync(record)} ${plain.stdout}${plain.stderr}`)
+  const quiet = ack()
+  check('rules-ack: nothing pending → nothing printed, exit 0', quiet.status === 0 && quiet.stdout === '' && quiet.stderr === '', `${quiet.status} ${quiet.stdout}${quiet.stderr}`)
   const idle = pull()
   check('pull: nothing new to pull → nothing printed', idle.status === 0 && idle.stdout === '', `${idle.stdout}${idle.stderr}`)
 
@@ -1730,6 +1916,14 @@ const putMessage = (dir, id, extra, meta) => {
   const agents = pull()
   check('pull: AGENTS.md changed → RULES_CHANGED: AGENTS.md, and the diff command for exactly that range',
     agents.stdout === `RULES_CHANGED: AGENTS.md\n  git diff ${before.slice(0, 12)}..${after.slice(0, 12)} -- AGENTS.md\n`, agents.stdout)
+  writeFileSync(ghLog, '')
+  const refused = pickIn()
+  check('rules record: a pull with a rules change → pick-next prints RULES_PENDING and the ack command, picks nothing, calls no gh, exit 0',
+    refused.status === 0 && refused.stdout === pendingLine('AGENTS.md') && readFileSync(ghLog, 'utf8') === '', `${refused.status} ${refused.stdout}${refused.stderr}`)
+  mkdirSync(path.join(loop, 'src', 'deep'), { recursive: true })
+  const fromSub = pickIn(path.join(loop, 'src', 'deep'))
+  check('rules record: pick-next run from a folder inside the clone → the same record, still refused, no gh call',
+    fromSub.stdout === pendingLine('AGENTS.md') && readFileSync(ghLog, 'utf8') === '', fromSub.stdout + fromSub.stderr)
 
   land({ 'docs/b.md': 'b\n', 'not-this.md': 'x\n', 'src/a.js': '4\n' })
   const one = pull()
@@ -1738,6 +1932,18 @@ const putMessage = (dir, id, extra, meta) => {
   check('pull: a rules key with two paths → each listed file that changed, and nothing outside the block\'s list',
     /^RULES_CHANGED: docs\/b\.md\n/.test(one.stdout) && /^RULES_CHANGED: docs\/a\.md docs\/b\.md\n {2}git diff \w+\.\.\w+ -- docs\/a\.md docs\/b\.md\n$/.test(two.stdout),
     `${one.stdout}---\n${two.stdout}`)
+  const kept = JSON.parse(readFileSync(record, 'utf8')).pending
+  check('rules record: more changes before an ack → every range kept, oldest first, and pick-next names each file once',
+    kept.length === 3 && kept[0].from === before && kept[0].to === after && kept[1].files.join() === 'docs/b.md' && kept[2].files.join() === 'docs/a.md,docs/b.md' &&
+      kept[0].to === kept[1].from && pickIn().stdout === pendingLine('AGENTS.md docs/b.md docs/a.md'), JSON.stringify(kept))
+  const acked = ack()
+  const heads = acked.stdout.split('\n').filter((l) => l.startsWith('RULES_DIFF: '))
+  check('rules-ack: prints each pending range\'s diff command and diff, oldest first, then clears the record',
+    acked.status === 0 && heads.length === 3 && heads[0] === `RULES_DIFF: git diff ${before.slice(0, 12)}..${after.slice(0, 12)} -- AGENTS.md` &&
+      acked.stdout.includes('+rules: docs/a.md, ./docs/b.md') && acked.stdout.includes('+b2') && !acked.stdout.includes('RULES_CUT') && !existsSync(record),
+    `${acked.status} ${acked.stdout}${acked.stderr}`)
+  const after2 = pickIn()
+  check('rules record: after the ack, pick-next picks again', after2.stdout === 'ISSUE:11\n', after2.stdout + after2.stderr)
   land({ 'AGENTS.md': block('docs/'), 'docs/c.md': 'c\n' })
   const dir = pull()
   check('pull: a rules path ending in "/" covers the directory', /^RULES_CHANGED: AGENTS\.md docs\/c\.md\n/.test(dir.stdout), dir.stdout)
@@ -1764,6 +1970,101 @@ const putMessage = (dir, id, extra, meta) => {
   check('pull --start: a start with --inbox and --outbox → the restart line keeps both, exactly, before --milestone',
     mailed.stdout === 'RESTART: exit this session, start a new one in this clone, then run: /agent-loop:start-executor --inbox /srv/agent-mail/<clone>/inbox --outbox /srv/agent-mail/<clone>/outbox --milestone "M3"\n',
     mailed.stdout)
+
+  const spacedAck = ack()
+  check('rules-ack: a path with a space or a quote is one shell word in the RULES_DIFF line',
+    spacedAck.stdout.includes(`-- 'docs/my rules.md' 'docs/it'\\''s.md'\n`) && !existsSync(record), spacedAck.stdout)
+
+  // The clone's .git/config is writable by PR code, and a sandbox may exempt rules-ack.mjs: an
+  // external diff or a textconv driver configured there must never run under it.
+  const marker = path.join(home, 'driver-ran')
+  const driver = path.join(home, 'driver.sh')
+  writeFileSync(driver, `#!/bin/sh\ntouch '${marker}'\ncat "$1" 2>/dev/null\n`)
+  chmodSync(driver, 0o755)
+  g(loop, 'config', 'diff.external', driver)
+  g(loop, 'config', 'diff.planted.textconv', driver)
+  writeFileSync(path.join(loop, '.git', 'info', 'attributes'), '* diff=planted\n')
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nplanted drivers\n` })
+  pull()
+  const drivers = ack()
+  check('rules-ack: a diff.external or textconv driver set in the clone\'s config never runs; the plain diff is printed',
+    drivers.status === 0 && !existsSync(marker) && drivers.stdout.includes('+planted drivers') && !existsSync(record), `${drivers.status} ${existsSync(marker)} ${drivers.stdout}${drivers.stderr}`)
+  g(loop, 'config', '--unset', 'diff.external')
+  g(loop, 'config', '--unset', 'diff.planted.textconv')
+  rmSync(path.join(loop, '.git', 'info', 'attributes'))
+
+  const long =Array.from({ length: 300 }, (_, i) => `line ${i}`).join('\n')
+  const bigFrom = g(loop, 'rev-parse', 'HEAD')
+  const bigTo = land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\n${long}\n` })
+  pull()
+  const nextTo = land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\n${long}\nmore\n` })
+  pull()
+  const capped = ack()
+  const out = capped.stdout.split('\n').filter(Boolean)
+  const cut = out.findIndex((l) => l.startsWith('RULES_CUT: '))
+  check('rules-ack: an over-cap diff → 200 lines, then RULES_CUT and the command for the cut range and every one after it; the record cleared',
+    capped.status === 0 && cut === 200 && /^RULES_CUT: \d+ more lines; run each command below for the rest$/.test(out[cut]) &&
+      out[cut + 1] === `  git diff ${bigFrom.slice(0, 12)}..${bigTo.slice(0, 12)} -- AGENTS.md` &&
+      out[cut + 2] === `  git diff ${bigTo.slice(0, 12)}..${nextTo.slice(0, 12)} -- AGENTS.md` && out.length === cut + 3 && !existsSync(record),
+    `${capped.status} ${out.length} ${cut} ${out.slice(195).join('\n')}${capped.stderr}`)
+
+  mkdirSync(path.dirname(record), { recursive: true })
+  writeFileSync(record, '{not json')
+  const unreadable = pickIn()
+  const unreadAck = ack()
+  check('rules record: an unreadable record → pick-next refuses; rules-ack says to read the rules in full and clears it',
+    unreadable.stdout === pendingLine('(unreadable record)') && unreadAck.status === 0 &&
+      unreadAck.stdout.startsWith('RULES_UNREADABLE: ') && !existsSync(record) && pickIn().stdout === 'ISSUE:11\n',
+    `${unreadable.stdout}${unreadAck.stdout}${unreadAck.stderr}`)
+  const headNow = g(loop, 'rev-parse', 'HEAD')
+  writeFileSync(record, JSON.stringify({ pending: [{ from: 'deadbeef0000', to: headNow, files: ['AGENTS.md'] }, { from: bigFrom, to: bigTo, files: ['AGENTS.md'] }] }))
+  const lost = ack()
+  check('rules-ack: a range whose commits the clone lacks → RULES_UNREADABLE first, naming it, the other range still diffed, the record cleared',
+    lost.status === 0 && lost.stdout.startsWith(`RULES_UNREADABLE: this clone lacks the commits of deadbeef0000..${headNow.slice(0, 12)}; read AGENTS.md`) &&
+      lost.stdout.includes(`RULES_DIFF: git diff ${bigFrom.slice(0, 12)}..${bigTo.slice(0, 12)} -- AGENTS.md`) && !existsSync(record),
+    `${lost.status} ${lost.stdout.slice(0, 400)}${lost.stderr}`)
+
+  // #93 review: the record outlives the clone; a shallow clone at the same path lacks the range.
+  const again = path.join(home, 'again')
+  g(home, 'clone', '-q', '--branch', 'main', origin, again)
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nshallow\n` })
+  spawnSync('node', [path.join(scripts, 'pull.mjs')], { cwd: again, env, encoding: 'utf8' })
+  const againRecord = path.join(home, '.agent-loop', 'state', `rules-${createHash('sha256').update(realpathSync(again)).digest('hex').slice(0, 16)}.json`)
+  const recorded = existsSync(againRecord)
+  rmSync(again, { recursive: true, force: true })
+  g(home, 'clone', '-q', '--depth', '1', '--branch', 'main', `file://${origin}`, again)
+  const shallowAck = ack(again)
+  const shallowPick = pickIn(again)
+  check('rules-ack: a shallow re-clone at the same path → RULES_UNREADABLE, exit 0, the record cleared, and the next pick proceeds',
+    recorded && shallowAck.status === 0 && shallowAck.stdout.startsWith('RULES_UNREADABLE: this clone lacks the commits of ') &&
+      !existsSync(againRecord) && shallowPick.stdout === 'ISSUE:11\n', `${recorded} ${shallowAck.status} ${shallowAck.stdout}${shallowAck.stderr}${shallowPick.stdout}`)
+
+  writeFileSync(record, JSON.stringify({ pending: [{ from: bigFrom, to: bigTo, files: ['AGENTS.md'] }] }))
+  chmodSync(path.dirname(record), 0o555)
+  const stuck = ack()
+  chmodSync(path.dirname(record), 0o755)
+  check('rules-ack: a record it can\'t clear → exit 2, one rules-ack: line naming the record, nothing on stdout, the record kept',
+    stuck.status === 2 && stuck.stdout === '' && stuck.stderr.startsWith('rules-ack: ') && stuck.stderr.trimEnd().endsWith(`(record: ${record})`) &&
+      stuck.stderr.split('\n').filter(Boolean).length === 1 && existsSync(record), `${stuck.status} ${stuck.stdout}${stuck.stderr}`)
+  rmSync(record)
+
+  chmodSync(path.dirname(record), 0o555)
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nunwritable\n` })
+  const noState = pull()
+  const noStatePick = pickIn()
+  chmodSync(path.dirname(record), 0o755)
+  check('pull: an unwritable state folder → RULES_NOT_RECORDED after the diff command (run it yourself), exit 0, no record, the pick not held',
+    noState.status === 0 && /^RULES_CHANGED: AGENTS\.md\n {2}git diff \w+\.\.\w+ -- AGENTS\.md\nRULES_NOT_RECORDED: run the git diff command above yourself; pick-next\.mjs will not wait for it\n$/.test(noState.stdout) &&
+      /^pull: rules change not recorded: /.test(noState.stderr) && !existsSync(record) && noStatePick.stdout === 'ISSUE:11\n',
+    `${noState.status} ${noState.stdout}${noState.stderr}${noStatePick.stdout}`)
+
+  mkdirSync(record)
+  land({ 'AGENTS.md': `${block("docs/my rules.md, docs/it's.md")}\nlast\n` })
+  const unrecorded = pull()
+  check('pull: a record it can\'t write → a pull: warning on stderr, exit 0, RULES_CHANGED still printed',
+    unrecorded.status === 0 && unrecorded.stdout.startsWith('RULES_CHANGED: AGENTS.md\n') && /^pull: rules change not recorded: /.test(unrecorded.stderr),
+    `${unrecorded.status} ${unrecorded.stdout}${unrecorded.stderr}`)
+  rmSync(record, { recursive: true })
 
   writeFileSync(path.join(loop, 'local.txt'), 'x\n')
   g(loop, 'add', 'local.txt')
@@ -1846,6 +2147,10 @@ const putMessage = (dir, id, extra, meta) => {
     guard('sess-new', 'Bash', { command: 'git status' }) === 'ALLOW' && guard('sess-new', 'Edit', { file_path: 'x' }) === 'ALLOW' &&
     guard('sess-operator', 'Bash', { command: 'git status' }) === 'ALLOW')
   check('guard: merging is still refused for the holder', /operator's action/.test(guard('sess-new', 'Bash', { command: 'gh pr merge 7' })))
+  // #87: the executor runs the push-time checks with `git push --dry-run` before the gate.
+  check('guard: git push --dry-run to a feature branch passes; to main it is refused like a push',
+    guard('sess-new', 'Bash', { command: 'git push --dry-run origin 87-cheap-checks' }) === 'ALLOW' &&
+      /operator's action/.test(guard('sess-new', 'Bash', { command: 'git push --dry-run origin main' })))
   const status = (fields) => guard('sess-new', 'Bash', { command: `gh api -X POST repos/o/r/statuses/abc123 ${fields}` })
   check('guard: a commit status other than pending is refused (success, failure, error, quoted, no gap, no state, --input)',
     ['-f state=success -f context=local-ci', '-f state=failure', '-f state=error', "-f 'state=success'", '-fstate=success', '-F state=success',
@@ -1914,6 +2219,66 @@ const putMessage = (dir, id, extra, meta) => {
   for (const dir of [exec, reviewer, bare]) rmSync(dir, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- loop texts' command forms (#90, #91)
+{
+  // Each slip cost a live session a failed call, an improvised command or an approval prompt.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const flat = (t) => t.replace(/\n\s*/g, ' ')
+  const read = (f) => readFileSync(path.join(adapters, f), 'utf8')
+  const paragraphWith = (f, needle) => read(f).split(/\n[ \t]*\n/).map(flat).find((p) => p.includes(needle)) ?? ''
+  const texts = readdirSync(adapters, { recursive: true }).filter((f) => /\.(md|sh)$/.test(f))
+  const brackets = texts.flatMap((f) => [...flat(read(f)).matchAll(/--jq '([^']*)'/g)].filter((m) => m[1].includes(']]')).map((m) => `${f}: ${m[1]}`))
+  check('loop texts: no --jq filter holds ]] (Claude Code\'s safety check prompts on it)', brackets.length === 0, brackets.join('\n'))
+
+  const fallback = "git grep -n '<pattern>' -- '<pathspec>'"
+  const grepTexts = ['claude-code/skills/start-executor/reference/implement.md', 'claude-code/skills/start-reviewer/reference/review.md',
+    'claude-code/skills/start-qa/reference/evaluate.md', 'generic/executor.md', 'generic/reviewer.md', 'generic/qa.md',
+    'kiro/skills/start-executor/SKILL.md', 'kiro/skills/start-reviewer/SKILL.md', 'kiro/skills/start-qa/SKILL.md']
+  const noGrepClause = grepTexts.filter((f) => {
+    const p = paragraphWith(f, fallback).toLowerCase()
+    return !(p.includes("options go before the pattern (`git grep -n -a<n> '<pattern>' -- '<pathspec>'`): after it, git reads them as a revision") &&
+      p.includes("no `{…,…}` in a pattern or a pathspec: write alternatives as `-e '(a|b)'` and give each pathspec separately (`'*.ts' '*.tsx'`)"))
+  })
+  check('loop texts: beside every git grep fallback, options go before the pattern and no braces', noGrepClause.length === 0, noGrepClause.join('\n'))
+
+  const editTexts = grepTexts.filter((f) => !/qa/.test(f))
+  const noEditClause = editTexts.filter((f) => {
+    const p = paragraphWith(f, fallback)
+    return !(/Change files .*, never through (Bash|the shell): no heredoc, `python3 -`, `node -e`, `sed -i`, `tee` or `>` redirect/.test(p) &&
+      p.includes('generators and formatters, run as one plain command, are build steps, not hand edits'))
+  })
+  check('loop texts: the executor\'s and reviewer\'s plain-command rules change files with the edit tools, never through the shell', noEditClause.length === 0, noEditClause.join('\n'))
+
+  const perRow = 'emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`'
+  const jqTexts = [['claude-code/skills/start-executor/SKILL.md', '**One plain command per Bash call**'], ['claude-code/skills/start-reviewer/SKILL.md', '**One plain command per Bash call**'],
+    ['claude-code/skills/start-qa/SKILL.md', 'one plain command per Bash call in the loop'], ...grepTexts.slice(3).map((f) => [f, fallback])]
+  const noJqClause = jqTexts.filter(([f, needle]) => !paragraphWith(f, needle).includes(perRow)).map(([f]) => f)
+  check('loop texts: every loop\'s plain-command rule says --jq filters never end in ]], one array per row', noJqClause.length === 0, noJqClause.join('\n'))
+
+  const listing = 'gh api --paginate "repos/<repo>/issues/<N>/comments" --jq \'.[] | select((.body // "") | startswith("[executor] Claimed by ")) | "\\(.id) \\(.created_at) \\(.body)"\''
+  // Counted flat (lines rewrapped) and raw: a copy may wrap at jq's whitespace, never inside the
+  // "[executor] Claimed by " string, where the line break would become part of the match (#99 review).
+  const count = (f) => flat(read(f)).split(listing).length - 1
+  const unbroken = (f) => read(f).split('startswith("[executor] Claimed by "))').length - 1
+  const cc = flat(read('claude-code/skills/start-executor/SKILL.md'))
+  const listings = ['claude-code/skills/start-executor/SKILL.md', 'claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
+  check('loop texts: every executor\'s resume lists the claims inline, the same command as its claim step, never wrapped inside a string',
+    count('claude-code/skills/start-executor/SKILL.md') === 1 && count('claude-code/skills/start-executor/reference/implement.md') === 1 &&
+      !cc.includes('list them with the command in') && count('generic/executor.md') === 2 && count('kiro/skills/start-executor/SKILL.md') === 2 &&
+      listings.every((f) => unbroken(f) === count(f)),
+    listings.map((f) => `${f}: ${count(f)} flat, ${unbroken(f)} unbroken`).join('\n'))
+
+  // The first branch of the mailbox step, with the literal line: a live run that read a pointer to
+  // "the ⚠ No mailbox line" printed none.
+  const oneFolder = 'Only one of the two → print `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never supply the other folder, and carry on without a mailbox.'
+  const supplies = ['executor', 'reviewer', 'qa'].filter((r) => {
+    const t = flat(read(`claude-code/skills/start-${r}/SKILL.md`))
+    const at = t.indexOf(oneFolder)
+    return at === -1 || at > t.indexOf('Both → `node')
+  })
+  check('loop texts: with one mailbox folder of the two, every Claude Code loop prints the literal ⚠ line first, without --check, never making up the other', supplies.length === 0, supplies.join('\n'))
+}
+
 // ---------------------------------------------------------------- the executor's author check (#81)
 {
   // `gh issue view --json` has no authorAssociation field (it exits 1), so the author check must
@@ -1932,6 +2297,26 @@ const putMessage = (dir, id, extra, meta) => {
   check('author check: every executor says a failed re-fetch, or a null or empty login or association, is no author check', noClaim.length === 0, noClaim.join('\n'))
   const objects = prompts.flatMap(([f, t]) => [...t.replace(/\n\s*/g, ' ').matchAll(/--jq '([^']*)'/g)].filter((m) => /\{[^}]*,[^}]*\}/.test(m[1])).map((m) => `${f}: ${m[1]}`))
   check('no adapter\'s --jq holds an object with a comma (a permission prompt in Claude Code)', objects.length === 0, objects.join('\n'))
+}
+
+// ---------------------------------------------------------------- the waiter's exit-3 rule (#86)
+{
+  // A loop once carried "a waiter is running" from an exit-3 cycle into the next one and started
+  // none. The scope has to sit in the rule's own paragraph, and the invariant has to say which
+  // waiter counts.
+  const skills = path.resolve(scripts, '..', 'adapters', 'claude-code', 'skills')
+  const paragraph = (text, start) => text.split(/\n[ \t]*\n/).map((p) => p.replace(/\n\s*/g, ' ')).find((p) => p.startsWith(start)) ?? ''
+  for (const role of ['executor', 'reviewer', 'qa']) {
+    const text = readFileSync(path.join(skills, `start-${role}`, 'SKILL.md'), 'utf8')
+    const rule = paragraph(text, "A waiter's notification that says **`failed with exit code 3`** is the exception")
+    check(`exit-3 rule (${role}): its paragraph scopes it to this cycle only, names the surviving waiter's own exit as another wake, and says never to assume a waiter`,
+      rule.includes('This covers only the cycle this exit-3 notification starts.') &&
+        rule.includes("The next wake of any other kind (the surviving waiter's own exit, a message, the fallback wakeup) runs a full cycle, ended as usual with a new waiter") &&
+        rule.includes('a waiter whose exit has notified you is gone, so never assume one is still running because an earlier cycle saw it'), rule)
+    const invariant = paragraph(text, '**Loop invariant: every cycle ends with a waiter running')
+    check(`exit-3 rule (${role}): the loop invariant says a waiter running is one this cycle started, never one an earlier cycle saw`,
+      invariant.includes('"A waiter running" means one this cycle started or, on an exit-3 wake only, the one that refused a second; never one an earlier cycle saw.'), invariant)
+  }
 }
 
 // ---------------------------------------------------------------- .github/workflows/ci.yml

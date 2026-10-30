@@ -15,8 +15,11 @@ whole file: project rules are criteria too. Never merge or push; no interactive 
 gate, workflows, tests): read files with your tool's file-read and search tools, not `cat`,
 `head` or `sed`; where it has no search tool, search with
 `git grep -n '<pattern>' -- '<pathspec>'` and list with `git ls-files '<pathspec>'`, globs
-quoted, not `grep` or `find`; no `;`, `&&`, pipes, `for` loops or `cd <dir> && …`; nothing outside the
-checkout. A project allows commands one by one, and anything else waits for an approval nobody is
+quoted, not `grep` or `find`. Options go before the pattern (`git grep -n -A<n> '<pattern>' --
+'<pathspec>'`): after it, git reads them as a revision. No `{…,…}` in a pattern or a pathspec:
+write alternatives as `-E '(a|b)'` and give each pathspec separately (`'*.ts' '*.tsx'`). No `;`,
+`&&`, pipes, `for` loops or `cd <dir> && …`; nothing outside the checkout. `--jq` filters never
+end in `]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`. A project allows commands one by one, and anything else waits for an approval nobody is
 there to give: the loop stops.
 
 **First line you print, on every start** (including one that resumes work or stops at a check),

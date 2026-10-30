@@ -20,7 +20,10 @@ Never compose the verdict in the same tool batch as these fetches; it depends on
 **Reading files, here and in Step 4: one plain command per Bash call.** Read files with Read (its
 offset and limit for a range) and search with Grep and Glob. A session without Grep and Glob
 searches with `git grep -n '<pattern>' -- '<pathspec>'` and lists files with
-`git ls-files '<pathspec>'`, globs quoted (unquoted, zsh fails on `no matches found`). Never
+`git ls-files '<pathspec>'`, globs quoted (unquoted, zsh fails on `no matches found`). Options go
+before the pattern (`git grep -n -A<n> '<pattern>' -- '<pathspec>'`): after it, git reads them as
+a revision. No `{…,…}` in a pattern or a pathspec: write alternatives as `-E '(a|b)'` and give
+each pathspec separately (`'*.ts' '*.tsx'`). Never
 `cat`, `head`, `tail`, `sed -n`, `ls`, `find` or plain `grep` through Bash. Never chain: no `;`, `&&`, pipes (`| head` included), `for`
 loops or `cd <dir> && …`. Stay inside the clone, the plugin's folder and the scratchpad: a path
 anywhere else prompts too. Why: the project allows commands one by one, and a compound command,

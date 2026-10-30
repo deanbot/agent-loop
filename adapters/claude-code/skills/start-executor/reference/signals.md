@@ -6,15 +6,25 @@ waiter and the single `ScheduleWakeup` call.
 
 "Run `quality-gates`" below includes the gate when the block has `gate` and the PR has no CI
 checks: run it before the push and quote its last line in the push comment
-([implement.md](implement.md) §3). The local runner's check is CI.
+([implement.md](implement.md) §3). The local runner's check is CI. It also means the cheap
+checks first. **Before every push, in this order:** `pre-gate` when the block has it, fixed and
+run again until it passes (commit what a formatter changed); commit; the push-time checks without
+pushing: `git push --dry-run origin <branch>`, which runs the project's pre-push hooks on the
+commits it would send, and, where the project's conventions name a command that checks a post's
+text without posting, that command on the PR title and body you are about to post; then
+`quality-gates` and the gate on the committed, clean tree; then the push. A merge commit from
+`MERGE_CONFLICT` goes through the same order.
 
 ## MERGED
 
 `gh issue edit <N> --remove-label <in-progress-label> --repo <repo>`, then `git checkout main`,
 then the pull, with the restart line: `node ${CLAUDE_PLUGIN_ROOT}/scripts/pull.mjs --start
 "/agent-loop:start-executor"`, plus `--milestone "<milestone>"` when you have one (the current
-track, after any `MOVE_ON`). A `RULES_CHANGED:` line → run the `git diff …` command under it and
-follow what changed (SKILL.md, "Rules that hold"). Then, before the next pick, write as your own
+track, after any `MOVE_ON`). A `RULES_CHANGED:` line → run `node
+${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs`, which prints the diff, and follow what changed
+(SKILL.md, "Rules that hold"); with a `RULES_NOT_RECORDED` line too, nothing was recorded, so run
+the `git diff …` command under `RULES_CHANGED` yourself instead. Until you do, `pick-next.mjs` picks nothing and prints
+`RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again`. Then, before the next pick, write as your own
 text a one-line note to the operator, and the `RESTART: …` line exactly as the script gave it, on
 its own line. The script's output is not enough: a terminal can collapse or cut a tool's output,
 and a session summary doesn't carry it, so the operator may never see the line unless you write
