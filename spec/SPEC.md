@@ -50,6 +50,7 @@ is the project's conventions, which the agents follow.
 | `pre-gate` | no | — | one plain command that runs in seconds (lint, a format check, a text guard) and should check rather than rewrite. Before every push the executor runs it, commits, runs the push-time checks without pushing (`git push --dry-run origin <branch>`, which runs the pre-push hooks), and only then `quality-gates` and `gate`, so a cheap refusal never costs a second gate. Without it, the dry-run still comes before the gate. Added later in 0.2, additive |
 | `quality-gates` | no | — | command that must pass before a PR is opened or a fix is pushed |
 | `gate` | no | — | the command that stands in for CI when a PR has none (no checks reported, or every check skipped), for a project that can turn CI off: the executor runs it before each push and the reviewer on the head before an LGTM, each quoting its last line, and `MERGE_READY` then requires the reviewer's quote (Merge policy). It may be the same command as `quality-gates`. A local runner can run it for them ("Local CI runner") |
+| `local-ci` | no | — | the context a local runner (`local-ci.mjs`) posts the gate's result under, such as `local-ci`: the runner gates every head, so the executor never runs the gate before opening a PR, and a new head with no checks is waiting for CI, not without it, until the runner's check appears or the poll's window passes (`NO_LOCAL_CI`; "Local CI runner"). Added later in 0.2 |
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status) |
@@ -312,6 +313,7 @@ Script runs once per poll cycle for one PR, emits signals and content blocks, ex
 | `NEW_REVIEW_SUBMISSION` | New formal review (APPROVED / CHANGES_REQUESTED / COMMENTED) |
 | `NEW_INLINE_COMMENT` | New or still-unanswered line-level comment(s), not the executor's own |
 | `CI_FAILING` | A check failed or was cancelled on the current head; emitted once per distinct failure set (a re-run that fails again is reported again; a commit status, which `gh pr checks` gives no completion time, is told apart by its REST status id) |
+| `NO_LOCAL_CI` | With `--local-ci <context>`: the head has had no checks and none under `<context>` for the window (`--local-ci-window`, default 300 s from the poll first seeing the head), so the runner isn't posting and the PR has no CI after all. Before the window passes, such a head counts as CI pending. Emitted once per PR: its later heads with no check have no CI at once, with no new window, until the runner's check appears on one of them |
 | `MERGE_CONFLICT` | the PR conflicts with its base (GitHub reports it unmergeable); repeated on every run while it holds, whether or not the head moved |
 | `MERGE_READY` | the reviewer's newest comment after the head commit is an LGTM, CI green, no unanswered inline threads, not in conflict (and QA's newest is a PASS with `--require-qa`; and with `--require-gate` and no CI, the LGTM quotes the gate on the head) |
 | `MERGED` | PR is merged |
@@ -685,6 +687,20 @@ runner's machine, so the executor runs the gate itself to read it. With the runn
 no status on new heads, and the reviewer's quoted run is the merge signal as before. A runner
 stopped mid-run leaves the head `pending`, which withholds `MERGE_READY` until it runs again.
 
+**Before the PR exists.** Nothing on GitHub shows a runner before the first push, so the block says
+so: `local-ci: <context>`. With it, the executor never runs the gate before opening the PR. It
+runs `pre-gate`, the push-time checks and `quality-gates`, opens the PR, and writes `Gate: runs as
+the <context> check.` in the body in place of a `Gate on` quote. Its `pr-poll --local-ci
+<context>` treats a head with no checks as waiting for CI (`MERGE_READY` withheld, no quote asked
+for) until the runner's check appears. The runner posts `pending` within a pass, even while
+another gate runs. If no check under the context has appeared once the window has passed (300
+seconds from the poll first seeing the head), the poll says `NO_LOCAL_CI` once. The PR then has no
+CI, as without the key: the executor runs the gate and quotes it in an `[executor]` comment, and
+`MERGE_READY` needs the reviewer's quoted run (`--require-gate`). The PR stays without CI for its
+later heads, with no new window and no second `NO_LOCAL_CI`, so a push that the executor gated
+first is not held for five minutes and gated again. Once the runner's check appears on a head,
+the PR has CI again. Without the key nothing changes.
+
 **Agents post `pending` only.** In single-account mode the runner and every role post as one
 login, so `pr-poll` cannot tell the runner's `success` from an agent's. An agent may post
 `pending` under the context (a re-run request) and never another state; adapters refuse the rest
@@ -1022,4 +1038,7 @@ run goes on; the status contexts and states are unchanged. Later in 0.2, additiv
 the lock over from a verified waiter, which prints `TAKEN_OVER` and exits 4 (its own output,
 never a signal line). The lock records the script and the state file; a lock without them, from
 an older waiter, is never taken over. An adapter prompt that predates this reads exit 4 as a
-broken waiter, so the loops restart with the skills that handle it.
+broken waiter, so the loops restart with the skills that handle it. Later in 0.2, additive: the
+`local-ci` key, `pr-poll --local-ci <context> [--local-ci-window <secs>]` and its `NO_LOCAL_CI`
+signal; without the flag `pr-poll` is unchanged, and an executor prompt that predates the key
+ignores it and runs the gate as before.

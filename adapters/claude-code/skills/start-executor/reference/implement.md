@@ -106,6 +106,14 @@ give, and the loop stops until the operator happens to look.
   quote (`--require-gate`). A project may run the local runner (`local-ci.mjs`), which runs the
   gate on every head and posts the result as a check (`local-ci` unless the project named another
   context). While that check is on the PR, the PR has CI: skip the gate and the quote.
+- **With `local-ci: <context>` in the block**, the project runs that runner and it gates every
+  head, so the gate is never yours before opening the PR, and never before a later push while
+  the PR has its check. Run `pre-gate`, the push-time checks and `quality-gates` as above, then
+  open the PR. In place of the `Gate on` line, its body says `Gate: runs as the <context> check.`
+  The poll treats the new head as waiting for CI, not as having none, until the runner's check
+  appears. Only `NO_LOCAL_CI` from the poll (no check under `<context>` on the head after the
+  window, [signals.md](signals.md)) makes the PR one without CI. Then run the gate as in the
+  bullet above.
 
 ## 4. Self-check before opening the PR
 
@@ -138,7 +146,8 @@ terse and stays true after merge:
 | <criterion, quoted or named> | `<test file>::<test name>` |
 | <criterion> | by hand, before merge: <exact command or steps> |
 
-Gate on <short sha>: <the gate's last line>   (only with `gate`, and no CI on the PR)
+Gate on <short sha>: <the gate's last line>   (only with `gate`, no `local-ci` key, and no CI on the PR)
+Gate: runs as the <context> check.             (with `local-ci: <context>` instead)
 
 ## Decisions
 - <call you made>: <what and why, one line each>

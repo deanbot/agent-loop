@@ -6,7 +6,8 @@ waiter and the single `ScheduleWakeup` call.
 
 "Run `quality-gates`" below includes the gate when the block has `gate` and the PR has no CI
 checks: run it before the push and quote its last line in the push comment
-([implement.md](implement.md) §3). The local runner's check is CI. It also means the cheap
+([implement.md](implement.md) §3). The local runner's check is CI; with `local-ci: <context>` in
+the block, a PR counts as having no CI only after `NO_LOCAL_CI` (below). It also means the cheap
 checks first. **Before every push, in this order:** `pre-gate` when the block has it, fixed and
 run again until it passes (commit what a formatter changed); commit; the push-time checks without
 pushing: `git push --dry-run origin <branch>`, which runs the project's pre-push hooks on the
@@ -54,6 +55,18 @@ Emitted once per head commit, with the failing check names and links. `gh run vi
   name: `gh api -X POST repos/<repo>/statuses/<head sha> -f state=pending -f context=<check name>
   -f description=re-run`. The runner runs every pending head it finds. Post `pending` only, never
   another state: a result is CI's, the runner's alone (the guard hook refuses any other).
+
+## NO_LOCAL_CI
+
+Only with `local-ci: <context>` in the block. The head has had no check under `<context>` for
+the poll's window (5 minutes): the runner is down or doesn't list this PR. From now on the PR has
+no CI, as without the key. Run `<gate>` on your committed, clean tree (in the background when it
+takes minutes) and post `[executor] No <context> check on <short sha>: Gate on <short sha>: <the
+gate's last line>`. A failure is yours to fix as for `CI_FAILING`. The reviewer's quoted run is
+the merge signal again (`--require-gate`), and later pushes run the gate first while the PR
+reports no checks, quoting it in the push comment as without the key. It is said once per PR:
+the poll takes later heads with no check as without CI at once, so it never asks again for a
+head you already gated. When the runner's check appears on a head, the PR has CI again.
 
 ## MERGE_CONFLICT
 
@@ -124,7 +137,8 @@ After posting, the PR body may be stale: update it (`gh pr edit <PR> --repo <rep
 
 `[reviewer] LGTM` is newer than the last commit, CI is green, no inline thread is unanswered,
 the PR does not conflict with `main` (and with `qa-gate: on`, `[qa] PASS` is newer than the last
-commit; with `gate` and no CI, the LGTM quotes the gate on the head). Every cycle it holds:
+commit; with `gate` and no CI, the LGTM quotes the gate on the head; with `local-ci`, the runner's
+check counts as CI, and before it appears CI is pending). Every cycle it holds:
 `gh pr edit <PR> --repo <repo> --add-label <needs-operator-label>` (a no-op when it is on). Print
 the status block with "✅ Ready — operator merges when ready", then wait as usual. Do not merge,
 do not offer to, do not ask. If the operator comments after this, handle it. When you push again,

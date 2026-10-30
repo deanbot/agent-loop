@@ -137,6 +137,53 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
     !ready(poll(ctx, noCi(quoted, { pr: { merged: false, head: { sha: head }, mergeable: false, mergeable_state: 'dirty' } }), gate)))
   check('poll without --require-gate: no CI, LGTM → MERGE_READY as before', ready(poll(ctx, noCi(''))))
   rmSync(ctx.home, { recursive: true, force: true })
+
+  // #107 --local-ci: a head the runner hasn't marked yet is pending CI for the window, then no CI.
+  const lctx = makeEnv()
+  const local = ['--require-gate', '--local-ci', 'local-ci']
+  const stateFile = path.join(lctx.home, '.agent-loop', 'state', 'acme-widgets-pr-poll-7.json')
+  const age = (secs) => {
+    const s = JSON.parse(readFileSync(stateFile, 'utf8'))
+    s.head.seenAt = Date.now() - secs * 1000
+    writeFileSync(stateFile, JSON.stringify(s))
+  }
+  const fresh = poll(lctx, noCi(quoted), local)
+  check('poll --local-ci: no checks yet on a head first seen now → CI pending: no MERGE_READY even with the gate quoted, no NO_LOCAL_CI',
+    !ready(fresh) && !signals(fresh).includes('NO_LOCAL_CI'), fresh)
+  age(200)
+  const within = poll(lctx, noCi(quoted), local)
+  check('poll --local-ci: … still within the window (200 s of 300) → still pending', !ready(within) && !signals(within).includes('NO_LOCAL_CI'), within)
+  age(301)
+  const after = poll(lctx, noCi(''), local)
+  check('poll --local-ci: after the window with still no check → NO_LOCAL_CI, and no CI as without the flag (the quote is needed)',
+    signals(after).includes('NO_LOCAL_CI') && !ready(after), after)
+  const again = poll(lctx, noCi(quoted), local)
+  check('poll --local-ci: … NO_LOCAL_CI once per head; the gate quoted on the head then gives MERGE_READY',
+    !signals(again).includes('NO_LOCAL_CI') && ready(again), again)
+  const runner = (bucket) => ({ checks: [{ name: 'local-ci', state: bucket === 'pass' ? 'SUCCESS' : 'PENDING', bucket, link: '', completedAt: '0001-01-01T00:00:00Z' }] })
+  const newHead = 'b2c3d4e5f60718293a4b5c6d7e8f901234567890'
+  const moved = (body, more = {}) => noCi(body, { pr: { merged: false, head: { sha: newHead } }, ...more })
+  // The review of #121: after NO_LOCAL_CI the runner is down for the PR; a later head with no check
+  // has no CI at once, without a second window or a second NO_LOCAL_CI.
+  const downHead = 'c3d4e5f60718293a4b5c6d7e8f90123456789012'
+  const down = (body) => noCi(body, { pr: { merged: false, head: { sha: downHead } } })
+  const later = poll(lctx, down('\n\nGate on c3d4e5f: ok'), local)
+  check('poll --local-ci: after NO_LOCAL_CI, a later head with no check has no CI at once: MERGE_READY with its quote, no second NO_LOCAL_CI',
+    ready(later) && !signals(later).includes('NO_LOCAL_CI'), later)
+  const laterUnquoted = poll(lctx, down(''), local)
+  check('poll --local-ci: … and without the quote no MERGE_READY (no CI, so the quote is needed)', !ready(laterUnquoted) && !signals(laterUnquoted).includes('NO_LOCAL_CI'), laterUnquoted)
+  const pendingRun = poll(lctx, moved('', runner('pending')), local)
+  check('poll --local-ci: the runner\'s pending check on a new head → CI pending as for any check, no NO_LOCAL_CI', !ready(pendingRun) && !signals(pendingRun).includes('NO_LOCAL_CI'), pendingRun)
+  age(400)
+  const passed = poll(lctx, moved('', runner('pass')), local)
+  check('poll --local-ci: the runner\'s check passing → MERGE_READY with no quote (it is CI), never NO_LOCAL_CI', ready(passed) && !signals(passed).includes('NO_LOCAL_CI'), passed)
+  const backHead = 'd4e5f60718293a4b5c6d7e8f9012345678901234'
+  const back = poll(lctx, noCi(`\n\nGate on d4e5f60: ok`, { pr: { merged: false, head: { sha: backHead } } }), local)
+  check('poll --local-ci: once the runner\'s check has shown up again, the next unmarked head gets a window again (CI pending)',
+    !ready(back) && !signals(back).includes('NO_LOCAL_CI'), back)
+  const window = run(lctx, 'pr-poll.mjs', ['--repo', REPO, '--pr', '7', '--local-ci-window', '60'], BASE)
+  check('poll: --local-ci-window without --local-ci → usage error, exit 1', window.startsWith('EXIT 1'), window)
+  rmSync(lctx.home, { recursive: true, force: true })
 }
 {
   const ctx = makeEnv()
@@ -2571,6 +2618,28 @@ const putMessage = (dir, id, extra, meta) => {
     return at === -1 || at > t.indexOf('Both → `node')
   })
   check('loop texts: with one mailbox folder of the two, every Claude Code loop prints the literal ⚠ line first, without --check, never making up the other', supplies.length === 0, supplies.join('\n'))
+}
+
+// ---------------------------------------------------------------- the local-ci key (#107)
+{
+  // With `local-ci: <context>` every executor leaves the gate to the runner before the PR, passes
+  // --local-ci to its poll, and runs the gate only on NO_LOCAL_CI.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const flat = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+  const texts = {
+    'claude-code': flat('claude-code/skills/start-executor/SKILL.md') + flat('claude-code/skills/start-executor/reference/implement.md') + flat('claude-code/skills/start-executor/reference/signals.md'),
+    generic: flat('generic/executor.md'),
+    kiro: flat('kiro/skills/start-executor/SKILL.md'),
+  }
+  const missing = Object.entries(texts).filter(([, t]) =>
+    !(t.includes('`--local-ci <context>` when') && t.includes('Gate: runs as the <context> check.') &&
+      t.includes('`[executor] No <context> check on <short sha>: Gate on <short sha>:') && /never run the gate before opening the PR|the gate is never yours before opening the PR/.test(t))
+  ).map(([k]) => k)
+  check('local-ci key: every executor skips the gate before the PR, passes --local-ci to the poll, and runs the gate on NO_LOCAL_CI', missing.length === 0, missing.join('\n'))
+  const cc = flat('claude-code/skills/start-executor/SKILL.md')
+  check('local-ci key: the Claude Code executor reads the key from the block, and handles NO_LOCAL_CI in its signal order',
+    cc.includes('`local-ci` (optional: the context a local runner posts the gate\'s result under') && cc.includes('`MERGED`, `CI_FAILING`, `NO_LOCAL_CI`,') &&
+      (cc.match(/\[--local-ci <context>\] --wait 30/g) ?? []).length === 2, '')
 }
 
 // ---------------------------------------------------------------- the executor's author check (#81)

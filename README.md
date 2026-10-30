@@ -169,6 +169,10 @@ whenever a head's lockfiles differ from those of the clone's last install: a PR 
 removes a package then gets the right set, and a failed install posts `error`, not `failure`.
 A push during a run gets `pending` within the `--wait` interval, so the new head shows CI at once,
 and a head replaced before its turn is never gated (`error`, `superseded by <sha>: not run`).
+Add `local-ci: local-ci` (the runner's `--context`) to the `## Agent loop` block as well. Then
+executors leave the gate to the runner from the first push and open the PR without running it.
+If the runner's check doesn't appear on a head within 5 minutes, the executor gets `NO_LOCAL_CI`
+and runs the gate as for a PR without CI.
 
 Make one clone per role (for example `proj`, `proj-exec`, `proj-review`) and run
 `/agent-loop:setup <operator|executor|reviewer|qa>` inside each. A clone can live anywhere (next to
