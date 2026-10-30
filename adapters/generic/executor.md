@@ -117,7 +117,9 @@ auth) → stop and say `Could not tell whether <n> is a PR: <the error>. Restart
   lingering `blocked-label` or `needs-operator-label` from the issue and the PR), enter the poll
   loop.
 - Issue number → look for an open PR that closes it: `node scripts/pr-for-issue.mjs --repo
-  <repo> --closes <N>`. `PR:<n> <branch>` → orient on PR #<n> and poll; `NONE` → implement.
+  <repo> --closes <N>`. `PR:<n> <branch>` → orient on PR #<n> and poll; `NONE` → implement. A
+  failed lookup (exit 2, a `pr-for-issue:` line) is neither: never claim on it. Stop and say
+  `Could not look up open PRs for #<N>: <the pr-for-issue: line>. Restart when gh works.`
 - Nothing → pick next with `node scripts/pick-next.mjs --repo <repo> --in-progress-label <l>
   --blocked-label <l>` (plus `--milestone "<title>"`, plus `--skip <n,n>` for issues this run
   turned down: author check failed, claim lost). Run it every time, after a wait too; never pick

@@ -196,7 +196,9 @@ number.
   was parked) and enter the loop. `NONE` → claim and
   implement
   (read [reference/implement.md](reference/implement.md) now; it covers the author check, the
-  claim, dependencies, tests-first, the pre-PR self-check and the PR body).
+  claim, dependencies, tests-first, the pre-PR self-check and the PR body). A failed lookup (exit
+  2, a `pr-for-issue:` line) is neither: never claim on it. **Stop** and say `Could not look up
+  open PRs for #<N>: <the pr-for-issue: line>. Restart when gh works.`
 
 **Pick next** with the script, every time, a wake included. Never pick from a list you
 remember: issues are filed while you wait, and only a fresh listing sees them.

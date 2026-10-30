@@ -8,9 +8,10 @@
  *   node scripts/pr-for-issue.mjs --repo owner/repo --closes <N>
  *
  * Output, one line, exit 0:
- *   PR:<number> <head branch>   the lowest-numbered open, same-repository PR whose body says
- *                               `Closes #<N>` (case-insensitive, not followed by another digit,
- *                               as pick-next.mjs reads it)
+ *   PR:<number> <head branch>   the newest (highest-numbered) open, same-repository PR whose body
+ *                               says `Closes #<N>` (case-insensitive, not followed by another
+ *                               digit, as pick-next.mjs reads it, and the one its blocker check
+ *                               and the --jq filter this replaced name when several do)
  *   NONE                        no such PR
  * A failed gh call: `pr-for-issue: <message>` on stderr, exit 2. A usage error: exit 1.
  *
@@ -62,5 +63,5 @@ try {
 const closes = new RegExp(`Closes #${issue}(?![0-9])`, 'i')
 const pr = prs
   .filter((p) => p.isCrossRepository !== true && closes.test(p.body ?? ''))
-  .sort((a, b) => a.number - b.number)[0]
+  .sort((a, b) => b.number - a.number)[0]
 process.stdout.write(pr ? `PR:${pr.number} ${pr.headRefName}\n` : 'NONE\n')

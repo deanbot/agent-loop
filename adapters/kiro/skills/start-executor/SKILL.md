@@ -65,6 +65,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first (skip it when $ARGUMENTS is empt
   - **Empty $ARGUMENTS:** run pick-next query (step 8), use result as issue number.
   - **Issue number:** check for existing open PR: `node scripts/pr-for-issue.mjs --repo <repo> --closes <N>`
     - `PR:<n> <branch>`: orient on PR #<n> (step 6b), enter executor loop (step 7) — do not re-claim label.
+    - A failed lookup (exit 2, a `pr-for-issue:` line) is neither: never claim on it. Stop and say `Could not look up open PRs for #<N>: <the pr-for-issue: line>. Restart when gh works.`
     - `NONE`: immediately before claiming, re-fetch: `gh api repos/<repo>/issues/<N> --jq '[.user.login, .author_association, [.labels[].name], .title, .body]'`, one JSON array: `login`, `assoc`, the labels, the title, the body (the REST issue carries the association; `gh issue view --json` has no such field; an array, not a jq object with commas, which some permission checks refuse, and a filter that doesn't end in `]]`, which some read as shell `[[ … ]]`). A failed re-fetch, or one whose first or second element is null or empty, is no author check: never claim on it
       - If `<in-progress-label>` now present in labels: another agent claimed it; go to step 8 — unless the newest `[executor] Claimed by` comment names `<clone>` exactly: then it is yours, so resume (above). **Do not infer staleness — absence of an open PR is not evidence the claim is stale. The label is authoritative.**
       - If `<blocked-label>` now present in labels: issue is blocked; go to step 8 silently.

@@ -2696,8 +2696,12 @@ const putMessage = (dir, id, extra, meta) => {
     pr(2, null, 'no-body'),
   ]
   const look = (args, fixture = { prs }) => run(ctx, 'pr-for-issue.mjs', ['--repo', REPO, ...args], fixture)
-  check('pr-for-issue: the lowest-numbered open same-repo PR closing #42 (any case) → PR:<n> <branch>', look(['--closes', '42']) === 'PR:5 issue-42-first\n', look(['--closes', '42']))
-  check('pr-for-issue: … "#42" as the argument works too', look(['--closes', '#42']) === 'PR:5 issue-42-first\n', look(['--closes', '#42']))
+  // The fixture lists PRs out of order, so a pick by list position (first or last) fails too.
+  check('pr-for-issue: the newest (highest-numbered) open same-repo PR closing #42 (any case) → PR:<n> <branch>, as the old filter and pick-next took',
+    look(['--closes', '42']) === 'PR:9 issue-42-later\n', look(['--closes', '42']))
+  check('pr-for-issue: … "#42" as the argument works too', look(['--closes', '#42']) === 'PR:9 issue-42-later\n', look(['--closes', '#42']))
+  check('pr-for-issue: … whatever the list order (the higher number listed last)',
+    look(['--closes', '42'], { prs: [pr(5, 'Closes #42', 'issue-42-first'), pr(1, 'x', 'other'), pr(9, 'Closes #42', 'issue-42-later')] }) === 'PR:9 issue-42-later\n')
   check('pr-for-issue: "Closes #420" is not #42, and a fork\'s PR is never returned', look(['--closes', '4']) === 'NONE\n' &&
     look(['--closes', '42'], { prs: [pr(7, 'Closes #42', 'from-a-fork', true), pr(3, 'Closes #420', 'issue-420')] }) === 'NONE\n', look(['--closes', '4']))
   check('pr-for-issue: no open PR closes it (a null body included) → NONE', look(['--closes', '99']) === 'NONE\n', look(['--closes', '99']))
@@ -2717,6 +2721,10 @@ const putMessage = (dir, id, extra, meta) => {
   const executors = ['claude-code/skills/start-executor/SKILL.md', 'kiro/skills/start-executor/SKILL.md', 'generic/executor.md']
   const noScript = executors.filter((f) => !/scripts\/pr-for-issue\.mjs --repo <repo> --closes <N>/.test(flatOf(f)))
   check('open-PR lookup: every executor uses pr-for-issue.mjs', noScript.length === 0, noScript.join('\n'))
+  // A failed lookup read as "no PR" would claim an issue whose PR is open (#130 review).
+  const noStop = executors.filter((f) => !flatOf(f).includes('A failed lookup (exit 2, a `pr-for-issue:` line) is neither: never claim on it.') ||
+    !flatOf(f).includes('say `Could not look up open PRs for #<N>: <the pr-for-issue: line>. Restart when gh works.`'))
+  check('open-PR lookup: every executor stops on a failed lookup, never claims on it', noStop.length === 0, noStop.join('\n'))
   const clause = 'holds no `$` inside a double-quoted string (a regex such as `test("…$")`, which drew the same prompt): a lookup that needs one goes through a plugin script'
   const clauseTexts = ['claude-code/skills/start-executor/SKILL.md', 'claude-code/skills/start-reviewer/SKILL.md', 'generic/executor.md', 'generic/qa.md', 'generic/reviewer.md',
     'kiro/skills/start-executor/SKILL.md', 'kiro/skills/start-qa/SKILL.md', 'kiro/skills/start-reviewer/SKILL.md']

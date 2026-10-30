@@ -31,9 +31,10 @@ Three layers. Boundaries are strict.
   the window (300 s from first seeing the head), `NO_LOCAL_CI` once for the PR and no CI as before,
   later heads included, until the runner's check appears on a head again.
 - `scripts/pr-for-issue.mjs` — the executor's open-PR lookup before it claims an issue it was
-  started on. `--repo owner/repo --closes <N>` prints `PR:<n> <branch>` (the lowest-numbered open,
-  same-repository PR whose body says `Closes #<N>`) or `NONE`; exit 2 on a failed `gh` call. It
-  replaces a `--jq` regex filter that drew Claude Code's safety check.
+  started on. `--repo owner/repo --closes <N>` prints `PR:<n> <branch>` (the newest open,
+  same-repository PR whose body says `Closes #<N>`) or `NONE`; exit 2 on a failed `gh` call, on
+  which the executor stops rather than claims. It replaces a `--jq` regex filter that drew Claude
+  Code's safety check.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
 - `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
   [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n] [--clone <clone>]`. Prints
