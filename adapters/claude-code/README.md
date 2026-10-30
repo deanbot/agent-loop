@@ -78,7 +78,13 @@ goes back to the normal wait. The executor keeps its `--max 600` wait while its 
 open.
 The skill never reads the waiter's output (the notification carries only an output-file path,
 outside the project), and a session that dies before handling a wake loses nothing: the state was
-never written. A waiter that finds another alive exits with code 3, which the notification shows
+never written. A waiter that finds another live waiter for the same state, one it can verify
+(the lock's script and state file, the same user, its command line and start time), takes the
+lock over: the old one prints `TAKEN_OVER` and exits 4 ("failed with exit code 4"). That wake
+starts no waiter, since the newer one is alive and would only be taken over in turn, and
+schedules the fallback in 3600 seconds, past any waiter's `--max`. So an orphan from an ended or
+superseded session no longer blocks waiters for up to an hour. A waiter that can't verify the
+holder exits with code 3, which the notification shows
 ("failed with exit code 3"); that wake only re-schedules the fallback, in 300 seconds since the
 live waiter may be another session's, and only that one: the
 next wake of any other kind (the surviving waiter's own exit included) runs a full cycle that
@@ -193,10 +199,12 @@ wins: a restart never has to wait for, or find, the old session. The old one is 
 NotebookEdit call with a reason that tells it to stop; its next wake also prints `SUPERSEDED`. It
 stops without unclaiming or posting, since the claims belong to the clone. The hook's
 `session_id` and the skill's `${CLAUDE_SESSION_ID}` were checked to be the same string, subagents
-included. One leftover: the old session's background waiter may still hold the PR's waiter lock,
-so the new session's waiters exit 3 until it ends (at most 25 minutes, 55 if it was idle); that
-wake re-schedules in 300 seconds, and the loop tries a waiter again at each next wake until one
-starts.
+included. One leftover: the old session's background waiter may still hold the PR's waiter lock.
+The new session's first waiter takes it over (the old one exits 4, waking the superseded session,
+which stops on its beat). Only when that waiter can't verify the holder, as with one started by a
+plugin version before the lock named its script, does it exit 3 until the holder ends (at most 25
+minutes, 55 if it was idle): that wake re-schedules in 300 seconds, and the loop tries a waiter
+again at each next wake until one starts.
 
 ## Permissions
 

@@ -34,12 +34,21 @@
 // direction. It reads inbox.mjs's record and never writes it; a folder that does not exist is never
 // news. One-shot runs accept the flag and ignore it: the agent runs inbox.mjs itself.
 //
-// One waiter per state file: a pid lock (`<state>-wait.lock`). A second waiter
-// while the first is alive prints `WATCHER_RUNNING <pid>` and exits 3, so a harness that reports
-// only exit codes can tell it apart. A failed pass (network, rate limit, auth) is reported on
-// stderr and retried on the next interval; a one-shot run still fails as before.
-import { execSync } from 'child_process'
-import { readFileSync, writeFileSync, openSync, closeSync, unlinkSync, renameSync } from 'fs'
+// One waiter per state file: a pid lock (`<state>-wait.lock`). A new waiter that finds the lock held
+// by a live waiter it can verify takes it over (#116): the holder gets SIGUSR2, prints `TAKEN_OVER`
+// and exits 4, releasing the lock, and the new one waits as usual. Verified means all of: the lock
+// names this script and this state file (a lock without them, from an older version, is never
+// verified); the holder runs as this user; its command line runs this script with --wait; and it
+// started when the lock says (a reused pid did not). Anything else, a platform where a command line
+// can't be read, or a holder still alive after a few seconds, and the new waiter prints
+// `WATCHER_RUNNING <pid>` and exits 3, as before; it never sends SIGKILL, and it tries a takeover
+// at most once, so two new waiters never take the lock back and forth. Exit codes 3 and 4 let a
+// harness that reports only exit codes tell both cases apart. A failed pass (network, rate limit,
+// auth) is reported on stderr and retried on the next interval; a one-shot run still fails as
+// before.
+import { execSync, execFileSync } from 'child_process'
+import { readFileSync, writeFileSync, writeSync, openSync, closeSync, unlinkSync, renameSync } from 'fs'
+import path from 'path'
 import { unreported, expandHome } from './inbox.mjs'
 
 export function usageError(usage, message) {
@@ -132,11 +141,71 @@ function pidAlive(pid) {
   }
 }
 
-function acquireLock(lockFile, max) {
-  for (let attempt = 0; attempt < 2; attempt++) {
+// A process this user may signal (EPERM, which pidAlive counts as alive, is another user's).
+function signallable(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// `ps` elapsed time, [[dd-]hh:]mm:ss, in seconds; null when it isn't one.
+function elapsedSecs(text) {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(text)
+  return m ? Number(m[1] ?? 0) * 86400 + Number(m[2] ?? 0) * 3600 + Number(m[3]) * 60 + Number(m[4]) : null
+}
+
+// Whether the lock's holder is verifiably a waiter for this same state file (see the header).
+// Every doubt is a no.
+function verifiedWaiter(held, self) {
+  if (process.platform === 'win32') return false
+  if (!Number.isInteger(held.pid) || held.script !== self.script || held.stateFile !== self.stateFile) return false
+  if (!signallable(held.pid)) return false
+  let line
+  try {
+    line = execFileSync('ps', ['-ww', '-o', 'etime=,command=', '-p', String(held.pid)], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, LC_ALL: 'C' },
+    }).trim()
+  } catch {
+    return false
+  }
+  const m = /^(\S+)\s+(.+)$/.exec(line)
+  const secs = m ? elapsedSecs(m[1]) : null
+  if (secs === null) return false
+  // The lock is written a moment after the process starts, and ps counts whole seconds.
+  const lag = held.started - (Date.now() - secs * 1000)
+  if (!(lag > -3000 && lag < 30000)) return false
+  const words = m[2].split(/\s+/)
+  return words.some((w) => path.basename(w) === path.basename(self.script)) && words.includes('--wait')
+}
+
+const pause = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Asks a verified holder to give the lock up; true once it has exited, false if it is still alive
+// after the grace period (it is then left alone).
+async function takeOver(pid) {
+  try {
+    process.kill(pid, 'SIGUSR2')
+  } catch {
+    return !signallable(pid)
+  }
+  for (let waited = 0; waited < 5000; waited += 100) {
+    if (!signallable(pid)) return true
+    await pause(100)
+  }
+  return !signallable(pid)
+}
+
+async function acquireLock(lockFile, max, self) {
+  let triedTakeover = false
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const fd = openSync(lockFile, 'wx')
-      writeFileSync(fd, JSON.stringify({ pid: process.pid, started: Date.now(), max }))
+      writeFileSync(fd, JSON.stringify({ pid: process.pid, started: Date.now(), max, script: self.script, stateFile: self.stateFile }))
       closeSync(fd)
       return null
     } catch (e) {
@@ -148,9 +217,21 @@ function acquireLock(lockFile, max) {
         // unreadable lock: treat as stale
       }
       const expired = Date.now() > (held.started ?? 0) + ((held.max ?? 0) + 120) * 1000
-      if (held.pid && held.pid !== process.pid && pidAlive(held.pid) && !expired) return held.pid
+      if (held.pid && held.pid !== process.pid && pidAlive(held.pid) && !expired) {
+        if (triedTakeover || !verifiedWaiter(held, self)) return held.pid
+        triedTakeover = true
+        if (!(await takeOver(held.pid))) return held.pid
+        // It released the lock on its way out; if it couldn't, the lock is stale now.
+      }
+      // Remove the stale lock, unless another waiter has written its own since it was read.
+      let stillStale = true
       try {
-        unlinkSync(lockFile)
+        stillStale = JSON.parse(readFileSync(lockFile, 'utf8')).pid === held.pid
+      } catch {
+        // gone, or unreadable: stale either way
+      }
+      try {
+        if (stillStale) unlinkSync(lockFile)
       } catch {
         // another run removed it first
       }
@@ -188,11 +269,17 @@ export async function runSignalScript({ argv, usage, stateFile, pass }) {
     return
   }
 
-  const holder = acquireLock(lockFile, max)
+  const holder = await acquireLock(lockFile, max, { script: path.resolve(argv[1]), stateFile: path.resolve(stateFile) })
   if (holder) {
     process.stdout.write(`WATCHER_RUNNING ${holder}\n`)
     process.exit(3)
   }
+  // A newer waiter took the lock over: say so and leave, releasing it on the way out ('exit').
+  // Written synchronously, so the line is out before the process ends.
+  process.on('SIGUSR2', () => {
+    writeSync(1, 'TAKEN_OVER\n')
+    process.exit(4)
+  })
   const release = () => {
     try {
       if (JSON.parse(readFileSync(lockFile, 'utf8')).pid === process.pid) unlinkSync(lockFile)

@@ -534,8 +534,22 @@ the waiter's exit and its next run.
   Standing signals (`MERGE_READY`, a re-surfaced live verdict or unanswered inline thread,
   `REVIEW:<n>` for a PR with no reviewer post) are in the baseline, so they wake the agent when
   they appear or change, not on every poll.
-- **One waiter per state file** (so per PR for `pr-poll`). A second waiter while the first is alive
-  prints `WATCHER_RUNNING <pid>` and exits 3. A stopped waiter prints nothing.
+- **One waiter per state file** (so per PR for `pr-poll`), held by a pid lock. A new waiter that
+  finds a live holder takes the lock over when it can verify the holder is a waiter for the same
+  state file. Verified means all of the following:
+  - the lock names this script and state file;
+  - the holder runs as the same user;
+  - its command line runs the script with `--wait`;
+  - its start time matches the lock's, so a reused pid fails.
+
+  The holder then gets SIGUSR2, prints `TAKEN_OVER` and exits 4, releasing the lock, and the new
+  waiter waits as usual. Otherwise the new waiter prints `WATCHER_RUNNING <pid>` and exits 3: an
+  unverifiable holder (any doubt, a lock from an older version, a platform whose command lines
+  can't be read), or one still alive a few seconds after the request. It tries a takeover once,
+  so two new waiters never trade the lock, and it never sends SIGKILL. A waiter stopped another
+  way (SIGTERM) prints nothing. An agent woken by exit 4 starts no waiter: the newer one is alive
+  and wakes whoever started it, and a new waiter would take it over in turn. Its fallback timer is
+  longer than any waiter's `--max`.
 - A failed poll (network, rate limit, auth) is reported on stderr and retried on the next
   interval.
 - **`--inbox <folder>`** (waiters of the three signal scripts): the waiter also prints `PENDING`
@@ -559,7 +573,8 @@ merge, a finding) within an interval; with only the fallback timer, as late as t
 1. Before a cycle ends, the loop checks that the cycle started its waiter (in the background, by
    the tool's own way of starting one). If it didn't, and the cycle is not one of those below, it
    starts it then and says so in its status line.
-2. A waiter that fails (exit 3, `WATCHER_RUNNING`, or any other non-zero exit) is not restarted
+2. A waiter that fails (exit 3, `WATCHER_RUNNING`, or any other non-zero exit but 4, which is a
+   takeover, above) is not restarted
    on the wake its failure causes: that cycle ends with a short timer (300 seconds). An exit 3's
    live waiter may be another session's, whose exit wakes that session. The next wake runs a full
    cycle that starts a waiter again: the one restart.
@@ -570,7 +585,9 @@ merge, a finding) within an interval; with only the fallback timer, as late as t
    retried: the loop starts no more waiters (the executor for that PR) and ends every cycle with
    the short timer, each cycle still running its one-shot script. A waiter that exits 0 ends the
    count.
-4. While no waiter runs, the timer is the short one, never the 30- or 60-minute fallback.
+4. While no waiter runs, the timer is the short one, never the 30- or 60-minute fallback. A wake
+   from exit 4 is the one exception: a newer waiter runs, so it takes a timer longer than any
+   waiter's `--max` (3600 seconds) and starts none.
 
 ### Idle count (`--idle-after <n>`)
 
@@ -996,4 +1013,8 @@ refusal of a path that is not a folder or lies under a file. Later in 0.2, addit
 behaves as before. Later in 0.2, adapter rules only, no script or signal change: no cycle ends
 without a waiter or a short timer ("Waiting for events"). Later in 0.2: `local-ci.mjs` skips a
 superseded head (`error`, `superseded by <sha>: not run`) and marks new heads `pending` while a
-run goes on; the status contexts and states are unchanged.
+run goes on; the status contexts and states are unchanged. Later in 0.2, additive: a waiter takes
+the lock over from a verified waiter, which prints `TAKEN_OVER` and exits 4 (its own output,
+never a signal line). The lock records the script and the state file; a lock without them, from
+an older waiter, is never taken over. An adapter prompt that predates this reads exit 4 as a
+broken waiter, so the loops restart with the skills that handle it.

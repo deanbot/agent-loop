@@ -773,11 +773,14 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
   run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
   setFixture(ctx, watchReviewed)
-  const first = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4'))
+  // #116: a second waiter on the same state takes the lock over; the first says TAKEN_OVER, exit 4.
+  const first = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
   await pause(1000)
-  const second = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4')).done
-  check('wait: a second waiter on the same state → WATCHER_RUNNING <pid>, exit 3', /^WATCHER_RUNNING \d+\n$/.test(second.out) && second.code === 3, `code ${second.code}\n${second.out}${second.err}`)
-  await first.done
+  const second = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4'))
+  const f = await first.done
+  check('wait: a second waiter on the same state takes the lock over: the first prints TAKEN_OVER and exits 4', f.out === 'TAKEN_OVER\n' && f.code === 4, `code ${f.code}\n${f.out}${f.err}`)
+  const s = await second.done
+  check('wait: … and the second waits as usual (NONE at --max, exit 0)', signals(s.out).join() === 'NONE' && s.code === 0, `code ${s.code}\n${s.out}${s.err}`)
   const third = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '1')).done
   check('wait: the lock is released when a waiter exits', signals(third.out).join() === 'NONE', `${third.out}${third.err}`)
   const killed = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
@@ -786,6 +789,66 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   const k = await killed.done
   const fourth = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '1')).done
   check('wait: a stopped waiter (SIGTERM) prints nothing and releases the lock', k.out === '' && signals(fourth.out).join() === 'NONE', `${k.out}|${fourth.out}${fourth.err}`)
+
+  // Two new waiters at once for one holder: one takes it over, the other exits 3 (one attempt each).
+  const holder = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
+  await pause(1000)
+  const a = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '3'))
+  const b = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '3'))
+  const [h, ra, rb] = await Promise.all([holder.done, a.done, b.done])
+  const codes = [ra.code, rb.code].sort().join()
+  check('wait: two new waiters at once → the holder is taken over once; one waits, the other exits 3',
+    h.code === 4 && codes === '0,3' && [ra, rb].some((r) => /^WATCHER_RUNNING \d+\n$/.test(r.out)), `holder ${h.code} ${h.out}| ${ra.code} ${ra.out}| ${rb.code} ${rb.out}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+}
+{
+  // A lock that can't be verified is never taken over: the new waiter exits 3 as before and the
+  // holder is left alone. The holders here are stand-ins, never this test's own process.
+  const ctx = makeEnv()
+  setFixture(ctx, watchReviewed)
+  const stateDir = path.join(ctx.home, '.agent-loop', 'state')
+  mkdirSync(stateDir, { recursive: true })
+  const stateFile = path.join(stateDir, WATCH_STATE)
+  const lockFile = stateFile.replace(/\.json$/, '-wait.lock')
+  const script = path.join(scripts, 'pr-watch.mjs')
+  // A stand-in that exits 9 on SIGUSR2 (so a signal shows), or ignores it.
+  const standIn = (args, ignore = false) =>
+    spawn('node', ['-e', `process.on('SIGUSR2',()=>{${ignore ? '' : 'process.exit(9)'}});setInterval(()=>{},1000)`, ...args], { env: ctx.env })
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const tryWith = async (proc, lock) => {
+    await pause(500)
+    writeFileSync(lockFile, JSON.stringify({ pid: proc.pid, started: Date.now(), max: 3300, script, stateFile, ...lock }))
+    const r = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
+    const stillAlive = alive(proc.pid)
+    proc.kill('SIGKILL')
+    rmSync(lockFile, { force: true })
+    return { ...r, stillAlive }
+  }
+  const notWaiter = await tryWith(standIn([]))
+  check('wait: a live process at the lock\'s pid that is not a waiter → exit 3, left alone',
+    notWaiter.code === 3 && /^WATCHER_RUNNING \d+\n$/.test(notWaiter.out) && notWaiter.stillAlive, `${notWaiter.code} ${notWaiter.out}${notWaiter.err} alive ${notWaiter.stillAlive}`)
+  const oldLock = await tryWith(standIn([script, '--wait']), { script: undefined, stateFile: undefined })
+  check('wait: a lock without the script and state file (an older version\'s) → exit 3, its holder left alone',
+    oldLock.code === 3 && oldLock.stillAlive, `${oldLock.code} ${oldLock.out}${oldLock.err} alive ${oldLock.stillAlive}`)
+  const reused = await tryWith(standIn([script, '--wait']), { started: Date.now() - 600000 })
+  check('wait: a holder that started long before the lock says (a reused pid) → exit 3, left alone',
+    reused.code === 3 && reused.stillAlive, `${reused.code} ${reused.out}${reused.err} alive ${reused.stillAlive}`)
+  const otherState = await tryWith(standIn([script, '--wait']), { stateFile: path.join(stateDir, 'other.json') })
+  check('wait: a lock naming another state file → exit 3, its holder left alone',
+    otherState.code === 3 && otherState.stillAlive, `${otherState.code} ${otherState.out}${otherState.err} alive ${otherState.stillAlive}`)
+  const stubborn = await tryWith(standIn([script, '--wait'], true))
+  check('wait: a verified holder that ignores the request → exit 3 after the grace period, still alive (no SIGKILL)',
+    stubborn.code === 3 && stubborn.stillAlive && stubborn.ms >= 4500, `${stubborn.code} ${stubborn.ms}ms ${stubborn.out}${stubborn.err} alive ${stubborn.stillAlive}`)
+  const verified = await tryWith(standIn([script, '--wait']))
+  check('wait: … while the same stand-in that does leave on the request is taken over (the checks above are the only difference)',
+    verified.code === 0 && !verified.stillAlive, `${verified.code} ${verified.out}${verified.err} alive ${verified.stillAlive}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
@@ -2517,7 +2580,7 @@ const putMessage = (dir, id, extra, meta) => {
       rule.includes('only call `ScheduleWakeup({ delaySeconds: 300, … })`, step 5\'s call with the short delay') && !rule.includes("the last cycle's delay"), rule)
     const restart = paragraph(text, '**A failed waiter gets one restart.**')
     check(`no cycle without a waiter (${role}): a failed waiter, exit 3 included, gets one restart, and a second failure is reported once`,
-      restart.includes('Exit 3 and any other failed exit are both a failed waiter.') &&
+      restart.includes('Exit 3 and any other failed exit except 4 are both a failed waiter.') &&
         restart.includes('runs a full cycle ended with a waiter as usual: that is the restart. When that waiter fails too, the second failure in a row,') &&
         restart.includes("`⚠ No waiter: <the exit code and the waiter's first line>; checking every 5 minutes instead.`") &&
         restart.includes('--role ROLE_AGENT --from <clone> --to operator') &&
@@ -2536,6 +2599,17 @@ const putMessage = (dir, id, extra, meta) => {
         text.indexOf('**Before the turn ends, check the waiter.**') < text.indexOf('**Loop invariant:'), endCheck)
     check(`no cycle without a waiter (${role}): the invariant allows only the 300-second timer in place of a waiter`,
       invariant.includes('A cycle that may start no waiter (above) ends with the 300-second `ScheduleWakeup` instead, never a longer one'), invariant)
+
+    // #116: a waiter taken over exits 4. Its wake must start no waiter (one would take the live one
+    // over, whose exit wakes again) and schedule past any --max, and it is no failed waiter.
+    const taken = paragraph(text, "A waiter's notification that says **`failed with exit code 4`**")
+    check(`taken over (${role}): an exit-4 wake starts no waiter, waits 3600 seconds, and is not a failed waiter`,
+      taken.includes('a newer waiter took its lock over (it printed `TAKEN_OVER`), and that one wakes you when it ends') &&
+        taken.includes('Beat, then run nothing else and start no waiter; call `ScheduleWakeup({ delaySeconds: 3600, … })`, longer than any waiter\'s `--max`') &&
+        taken.includes('Exit 4 is not a failed waiter: the count below stays as it was.') &&
+        rule.includes('Any **other failed exit** (not 3, and not 4 below) means the waiter itself broke') &&
+        endCheck.includes('or an exit-4 wake that called it with 3600 seconds') &&
+        invariant.includes('an exit-4 wake, whose newer waiter is alive, ends with the 3600-second one'), taken)
   }
 }
 
