@@ -637,7 +637,13 @@ Each is an absolute path or starts with `~` and a slash (the home folder); `<clo
 the clone's folder name, so one launch line serves every clone. Each is its own folder, neither
 inside the other, so a mount carries exactly one direction. `inbox.mjs --check --dir <inbox>
 --outbox <outbox>`, run in the clone's root, prints `MAILBOX_OK`, or `MAILBOX_REFUSED: <reason>`
-when a folder is relative, inside the clone (after following symlinks) or inside the other.
+when a folder is relative, inside the clone (after following symlinks) or inside the other, or
+when either path exists as something other than a folder or lies under a file (it could never be
+created). An inbox that does not exist yet is
+accepted, since a mount may appear after the start, but `MAILBOX_OK` is followed by
+`MAILBOX_WARN: the inbox does not exist yet; nothing arrives until it is created`, and the
+adapter warns once: a mistyped folder would otherwise read as an empty inbox for good. A missing
+outbox gets no warning (sending creates it).
 Neither argument → no mailbox, and nothing changes. One without the other, or a refused pair → the
 adapter warns once and runs without a mailbox.
 
@@ -918,4 +924,6 @@ format, the loops' `--inbox`/`--outbox` start arguments ("Inbox folder"), and th
 `--inbox <folder>`. Later in 0.2, additive: the pending rules record, `pick-next.mjs`'s
 `RULES_PENDING:` line and `rules-ack.mjs` ("Rules that change while a loop runs"); an executor
 prompt that predates them meets `RULES_PENDING:` as an unknown pick line, so the executor
-restarts with the skill that handles it.
+restarts with the skill that handles it. Later in 0.2, additive: `--check`'s `MAILBOX_WARN:` line
+after `MAILBOX_OK` (an adapter that predates it keys on the first line and keeps working) and its
+refusal of a path that is not a folder or lies under a file.

@@ -62,10 +62,12 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
    the base name of your working directory for `<clone>` in each. Only one of the two → print
    `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never supply the other
    folder, and carry on without a mailbox. Both → `node
-   ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. `MAILBOX_OK`
-   → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. `MAILBOX_REFUSED: <reason>`
-   → print `⚠ No mailbox: <reason>.` and carry on without one. No mailbox → `<inbox-flag>` is
-   empty, and "Messages" below does not apply.
+   ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. First line
+   `MAILBOX_OK` → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. A `MAILBOX_WARN`
+   line after it → also print `⚠ Inbox <inbox>: does not exist yet; nothing arrives until it is
+   created.` and keep the mailbox. `MAILBOX_REFUSED: <reason>` → print `⚠ No mailbox: <reason>.`
+   and carry on without one. No mailbox → `<inbox-flag>` is empty, and "Messages" below does not
+   apply.
 
 Rules for the whole session: never merge or push; no interactive prompts (a decision you need from
 the operator is a standalone `[qa] Question: <one line>` comment with two or three lines of context

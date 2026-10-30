@@ -6,7 +6,7 @@
 // message id plus `.json`: dotfiles, temporary names (`.<id>.<pid>.tmp`, see sendMessage),
 // directories and symlinks are never messages. sendMessage writes the temporary name first and
 // renames it, so a reader never sees half a message.
-import { readdirSync, lstatSync, readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync, realpathSync } from 'fs'
+import { readdirSync, lstatSync, statSync, readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync, realpathSync } from 'fs'
 import { randomUUID, createHash } from 'crypto'
 import { homedir } from 'os'
 import path from 'path'
@@ -118,14 +118,39 @@ const within = (p, folder) => {
 
 // What is wrong with a mailbox (an inbox read as direction, an outbox for replies) for the clone at
 // `clone`, or null when nothing is (spec: "Inbox folder", Trust). PR code runs in the clone, so
-// neither folder may be in it; and each is its own folder, so a mount carries one direction.
+// neither folder may be in it; and each is its own folder, so a mount carries one direction. A path
+// that exists as something other than a folder (a symlink is followed), or lies under a file, can
+// never hold messages.
 export function mailboxProblem(inbox, outbox, clone) {
   if (!path.isAbsolute(inbox) || !path.isAbsolute(outbox)) return 'both folders must be absolute or start with ~'
   const [i, o, c] = [realish(inbox), realish(outbox), realish(clone)]
   if (within(i, c)) return 'the inbox is inside the clone, where PR code runs'
   if (within(o, c)) return 'the outbox is inside the clone, where PR code runs'
   if (within(i, o) || within(o, i)) return 'the inbox and the outbox must be separate folders, neither inside the other'
+  for (const [name, p] of [['inbox', inbox], ['outbox', outbox]]) {
+    const k = kind(p)
+    if (k === 'other') return `the ${name} is not a folder`
+    if (k === 'blocked') return `the ${name} is under a file, so it can never be created`
+  }
   return null
+}
+
+// 'folder', 'missing' (nothing there yet, a dangling symlink included), 'blocked' (a file where a
+// parent folder should be: it can never be made) or 'other', following symlinks. A path that can't
+// be looked at for another reason counts as a folder: reading it fails loudly.
+function kind(p) {
+  try {
+    return statSync(p).isDirectory() ? 'folder' : 'other'
+  } catch (e) {
+    return e.code === 'ENOENT' ? 'missing' : e.code === 'ENOTDIR' ? 'blocked' : 'folder'
+  }
+}
+
+// The warning for an acceptable mailbox, or null: an inbox that does not exist yet reads as empty
+// (a mount may appear later, so it is no refusal), which a mistyped path would look like forever.
+// A missing outbox is fine: sending creates it.
+export function mailboxWarning(inbox) {
+  return kind(inbox) === 'missing' ? 'the inbox does not exist yet; nothing arrives until it is created' : null
 }
 
 // The record of what inbox.mjs has reported for `dir`: one file per folder, in the state folder the
