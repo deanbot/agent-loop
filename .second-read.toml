@@ -1,0 +1,2 @@
+# agent-loop's docs name its state folder on purpose: the runners' records and logs live there on every machine.
+allowed_paths = ["~/.agent-loop"]
