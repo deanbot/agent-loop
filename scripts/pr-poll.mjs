@@ -44,9 +44,10 @@
  * through the API (never the clone's copy, which is the PR head's: a PR must not change its own
  * gate): `qa-gate: on` turns on --require-qa, a `gate` key --require-gate, and `local-ci: <context>`
  * gives --local-ci <context>, so none of them depends on the caller passing it. A flag given on the
- * command line still wins (its context over the block's); the block only adds. No AGENTS.md there
- * (404) is a block with no keys. A block that can't be read (network, auth) withholds MERGE_READY
- * for that run, with the error on stderr, and the run goes on with the flags alone. A successful
+ * command line still wins (its context over the block's); the block only adds. A block that can't
+ * be read (network, auth, or no AGENTS.md there at all, which a project running the loop never
+ * has) withholds MERGE_READY for that run, with the reason on stderr, and the run goes on with the
+ * flags alone. A successful
  * read lasts for the process.
  *
  * --require-qa: MERGE_READY additionally requires the QA verdict to be PASS. Without it the QA role is
@@ -131,7 +132,7 @@ function readJson(file) {
   }
 }
 
-// The default branch's AGENTS.md text ('' when it has none), or null when it can't be read. Kept once
+// The default branch's AGENTS.md text, or null when it can't be read or isn't there. Kept once
 // read: the block changes rarely, and a waiter would otherwise fetch it every interval.
 let agentsText
 function readAgents(gh, dry) {
@@ -143,8 +144,10 @@ function readAgents(gh, dry) {
     agentsText = Buffer.from(file.content ?? '', 'base64').toString('utf8')
   } catch (e) {
     const stderr = String(e?.stderr ?? '')
-    if (/HTTP 404|Not Found/.test(stderr)) return (agentsText = '')
-    if (!dry) process.stderr.write(`pr-poll: could not read the Agent loop block (MERGE_READY withheld): ${stderr.trim() || e?.message}\n`)
+    // A project that runs the loop has a block, so a missing file (a misnamed one included: the API
+    // is case-sensitive) is a fault to show, not a block with no keys.
+    const why = /HTTP 404|Not Found/.test(stderr) ? 'no AGENTS.md on the default branch' : stderr.trim() || e?.message
+    if (!dry) process.stderr.write(`pr-poll: could not read the Agent loop block (MERGE_READY withheld): ${why}\n`)
     return null
   }
   return agentsText

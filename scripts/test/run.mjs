@@ -252,6 +252,12 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   writeFileSync(ectx.fixture, JSON.stringify({ ...lgtmFx, agents: block('') }))
   const reread = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
   check('poll: … the next run reads it again (a failure is not kept) → MERGE_READY', ready(reread.stdout), reread.stdout + reread.stderr)
+  // The review of #133: the API is case-sensitive, so an agents.md the clone reads fine is a 404 here.
+  writeFileSync(ectx.fixture, JSON.stringify({ ...lgtmFx, agents: null }))
+  const gone = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
+  check('poll: no AGENTS.md on the default branch (404) fails closed, never an empty block → no MERGE_READY, a pr-poll: line saying so',
+    gone.status === 0 && !ready(gone.stdout) && /^pr-poll: could not read the Agent loop block \(MERGE_READY withheld\): no AGENTS\.md on the default branch$/m.test(gone.stderr),
+    `${gone.status}\n${gone.stdout}\n${gone.stderr}`)
   writeFileSync(ectx.fixture, JSON.stringify({ ...lgtmFx, agents: 'too-large' }))
   const large = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
   check('poll: an AGENTS.md the API sends without content (over 1 MB) is unreadable, not an empty block → no MERGE_READY',
@@ -2849,8 +2855,9 @@ const putMessage = (dir, id, extra, meta) => {
     ask(held(['in-progress'], [claimed('exec-a', 12), claimed('exec-b', 1)])) === 'CLAIM_HELD')
   check('claims: a clone name that only starts the same ("exec-a2") is another clone → CLAIM_LOST exec-a2',
     ask(held(['in-progress'], [claimed('exec-a2', 5)])) === 'CLAIM_LOST exec-a2')
-  check('claims: "Claimed by exec-a and more" names no clone exactly → CLAIM_LOST, never HELD',
-    ask(held(['in-progress'], [claimed('exec-a and more', 5)])).startsWith('CLAIM_LOST '))
+  check('claims: "Claimed by exec-a and more" names no clone exactly → CLAIM_LOST (unnamed), never HELD and never this clone\'s name',
+    ask(held(['in-progress'], [claimed('exec-a and more', 5)])) === 'CLAIM_LOST (unnamed)' &&
+    ask(held(['in-progress'], [claimed('exec-b\nexec-a', 5)])) === 'CLAIM_LOST (unnamed)')
   check('claims: a claim naming no clone (control characters, a backtick, nothing) → CLAIM_LOST (unnamed), never the raw text',
     ask(held(['in-progress'], [claimed('\u001b[2J`rm`', 5)])) === 'CLAIM_LOST (unnamed)' && ask(held(['in-progress'], [claimed('', 5)])) === 'CLAIM_LOST (unnamed)')
   check('claims: open, in progress, no claim comment → CLAIM_NONE', ask(held(['in-progress'], [other])) === 'CLAIM_NONE')

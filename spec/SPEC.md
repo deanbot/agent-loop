@@ -308,8 +308,10 @@ The script reads the `## Agent loop` block of `AGENTS.md` on the repository's de
 itself, never the checkout's copy (on a PR's branch that is the PR's, which must not set its own
 gate): `qa-gate: on` turns on `--require-qa`, a `gate` key `--require-gate`, and `local-ci:
 <context>` gives `--local-ci <context>`, so adapters run it with no flags. A flag given still
-wins, and the block only adds to the flags. No `AGENTS.md` there is a block with no keys; a block
-that can't be read withholds `MERGE_READY` for that run.
+wins, and the block only adds to the flags. A block that can't be read withholds `MERGE_READY` for
+that run, and so does no `AGENTS.md` on the default branch: a project running the loop has one,
+so a missing file (or one named in another case, which the API tells apart) is a fault, never a
+block with no keys.
 
 | Signal | Meaning |
 |---|---|

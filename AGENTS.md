@@ -27,8 +27,8 @@ Three layers. Boundaries are strict.
   [--require-gate] [--local-ci <context>] [--local-ci-window <secs>]`. Signals then content
   blocks, exits. It reads `qa-gate`, `gate` and `local-ci` from the `## Agent loop` block of
   `AGENTS.md` on the default branch (the contents API, never the clone's copy, which is the PR's)
-  and turns the matching flag on itself; a flag given still wins, and a block it can't read
-  withholds `MERGE_READY` (#129). `--require-gate` (the block names a `gate`): on a PR with no CI, `MERGE_READY`
+  and turns the matching flag on itself; a flag given still wins, and a block it can't read,
+  or no `AGENTS.md` there at all, withholds `MERGE_READY` (#129). `--require-gate` (the block names a `gate`): on a PR with no CI, `MERGE_READY`
   needs the LGTM's `Gate on <sha>:` line on the head. `--local-ci <context>` (the block's
   `local-ci` key): a head with no checks is CI pending until the runner's check appears, or, after
   the window (300 s from first seeing the head), `NO_LOCAL_CI` once for the PR and no CI as before,

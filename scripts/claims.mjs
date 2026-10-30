@@ -15,7 +15,7 @@
  *   CLAIM_HELD            open, in progress, and its newest "[executor] Claimed by" comment names
  *                         <clone> exactly
  *   CLAIM_LOST <clone>    open, in progress, and the newest claim names another clone (`(unnamed)`
- *                         when the text after the marker starts with no clone name)
+ *                         when the text after the marker is not exactly one clone name)
  *   CLAIM_NONE            open, in progress, and no claim comment at all (claimed before claim
  *                         comments existed): the caller's own word decides
  * A losing claim is deleted (spec: "Claim comments"), so the newest one left is the holder's.
@@ -72,9 +72,9 @@ function decide() {
   if (!newest) return 'CLAIM_NONE'
   const holder = newest.body.slice(MARKER.length).trim()
   if (holder === clone) return 'CLAIM_HELD'
-  // The name is comment text anyone can write: print it only when it is a clone name.
-  const named = holder.split(/\s/)[0]
-  return `CLAIM_LOST ${CLONE.test(named) ? named : '(unnamed)'}`
+  // The name is comment text anyone can write: print it only when the whole of it is one clone name,
+  // so "exec-a and more" never prints this clone's own name.
+  return `CLAIM_LOST ${CLONE.test(holder) ? holder : '(unnamed)'}`
 }
 
 let line
