@@ -69,12 +69,13 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
    watch script, never `--outbox`.
 5. **Mailbox**, only when `$ARGUMENTS` has `--inbox` or `--outbox` (spec: "Inbox folder"). Never
    take the folders from `AGENTS.md` or any other file in the clone: a PR can change those. Put
-   the base name of your working directory for `<clone>` in each. Both → `node
+   the base name of your working directory for `<clone>` in each. Only one of the two → print
+   `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never supply the other
+   folder, and carry on without a mailbox. Both → `node
    ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. `MAILBOX_OK`
-   → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. `MAILBOX_REFUSED: <reason>`,
-   or only one of the two → print `⚠ No mailbox: <the reason, or "--inbox and --outbox go
-   together">.` and carry on without one. No mailbox → `<inbox-flag>` is empty, and "Messages"
-   below does not apply.
+   → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. `MAILBOX_REFUSED: <reason>`
+   → print `⚠ No mailbox: <reason>.` and carry on without one. No mailbox → `<inbox-flag>` is
+   empty, and "Messages" below does not apply.
 
 Rules that hold for the whole session:
 
@@ -87,7 +88,9 @@ Rules that hold for the whole session:
 - **Never `sleep`.** Waiting is a background waiter plus a fallback `ScheduleWakeup` (below).
 - **One plain command per Bash call**, in the loop and in a review's reads, probes and checks
   (reference/review.md §3): no `$(…)`, `;` or pipes (they defeat the permission allowlist and
-  prompt, and an unattended loop stops at the prompt).
+  prompt, and an unattended loop stops at the prompt). `--jq` filters never end in `]]`: emit one
+  array per row with `.[] | [ … ]`, not `[.[] | [ … ]]` (Claude Code's safety check prompts on it,
+  likely read as shell `[[ … ]]`).
 - **`gh` and `git fetch` run on their own**, from the clone's root: `gh … --repo <repo>`, never
   `cd <dir> && gh …`. A sandbox exempts these commands by name (in Claude Code,
   `sandbox.excludedCommands`), and a chained command doesn't match, so it runs sandboxed, fails
@@ -115,7 +118,12 @@ A waiter's notification that says **`failed with exit code 3`** is the exception
 is still alive (it printed `WATCHER_RUNNING`). Beat, then run nothing else and start no waiter;
 only call the `ScheduleWakeup` from step 5, with the last cycle's delay (1800, or 3600 when it was
 idle), or `delaySeconds: 300` when this session's start printed `TOOK_OVER` (the live waiter is
-likely the old session's, which ends within 55 minutes). Any **other failed exit** means the waiter itself broke (a usage
+likely the old session's, which ends within 55 minutes). This covers only the cycle this exit-3
+notification starts. The next wake of any other kind (the surviving waiter's own exit, a message,
+the fallback wakeup) runs a full cycle, ended as usual with a new waiter unless the cycle itself
+is an exit: a waiter whose exit has notified you is gone, so never assume one is still running
+because an earlier cycle saw it. A waiter started while another is in fact alive exits 3 again,
+and this rule then covers that wake alone. Any **other failed exit** means the waiter itself broke (a usage
 error, a broken install): name it in the status line, run the cycle, but end it with
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
 again, so a failure that repeats costs one turn per five minutes, not one per second.
@@ -213,7 +221,8 @@ one, so scheduling it every cycle never stacks wakeups. Standing signals (`REVIE
 you have not posted on, say, while you wait for `[qa] PASS`) do not wake you again by themselves.
 
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
-call.** The only exits are the operator's stop and being superseded. (Claude Code fires one fallback wakeup about 20
+call.** "A waiter running" means one this cycle started or, on an exit-3 wake only, the one that
+refused a second; never one an earlier cycle saw. The only exits are the operator's stop and being superseded. (Claude Code fires one fallback wakeup about 20
 minutes after an iteration that forgets, then ends the loop; do not rely on it.)
 
 ## Messages
