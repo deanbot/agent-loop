@@ -2633,6 +2633,9 @@ const putMessage = (dir, id, extra, meta) => {
       !/never decides it\. Only on `main` with uncommitted changes, or on a branch whose name carries no issue number, take the number from/.test(t) ||
       !t.includes('`gh pr view <n> --repo <repo> --json number,body` succeeds → the number is a PR, and `<N>` is the first issue its body closes (`Closes #<N>`') ||
       !t.includes('no `Closes #N` → there is no `<N>`') ||
+      // The review of #122: only "not a PR" means an issue; a blip must not send a PR's number down the issue path.
+      !t.includes('It fails with `Could not resolve to a PullRequest` → `<N>` is the number. Any other failure (network, auth) →') ||
+      !t.includes('`Could not tell whether <n> is a PR: <the error>. Restart when gh works.`') ||
       !t.includes("The issue checks and the claim listing never run on a PR's number") && !t.includes("The issue checks and the claim listing below never run on a PR's number") ||
       !t.includes('by its own number or by a PR whose `Closes #<N>` names it')
   })
