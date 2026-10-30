@@ -15,7 +15,9 @@
  *     origin each pass, never from the working tree, which sits at a pull request's head);
  *   - posts `pending` under the context on every listed head with no status there yet, so a head
  *     waiting its turn already shows CI as present;
- *   - for each head whose status under the context is `pending`, one at a time: fetches it, checks it
+ *   - for each head whose status under the context is `pending`, one at a time: lists the open pull
+ *     requests again and skips a head that is no longer its PR's head (posting `error`, `superseded
+ *     by <sha>: not run`) or whose PR has closed (no post); fetches it, checks it
  *     out detached (forced, then `git clean -fd`), runs the gate through the shell with its output
  *     in a log file, and posts `success` or `failure` with the gate's last line as the description
  *     (cut to 140 characters). A head that cannot be fetched or checked out gets `error`.
@@ -23,6 +25,9 @@
  *     last successful install, in either direction, runs the install command through the shell
  *     (output in the same log). A failed install posts `error` (`install failed: <last line>`) and
  *     the gate does not run.
+ *   - while an install or a gate runs, every --wait interval (30 seconds one-shot), lists the open
+ *     pull requests and posts `pending` on any head with no status, as at the start of a pass: a
+ *     push during a run shows CI at once. The run itself is never stopped for it.
  * Lockfiles are the tracked files with one of LOCKFILES' names, in any folder, or --lockfiles: a
  * name without a slash matches in any folder, one with a slash is a path from the clone's root.
  * The install record (local-ci-install-<hash of the clone's path>.json, next to the lock) holds a
@@ -339,9 +344,74 @@ function recordInstall(key, sha) {
 const failedRun = (result, what) =>
   result.signal ? `${what} stopped by ${result.signal}` : result.error ? `${what} did not start: ${result.error.message}` : `${what} failed (exit ${result.code})`
 
-async function runOne(pr) {
+// The open, same-repository pull requests whose author is trusted, oldest first.
+const listPrs = (trusted) =>
+  gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '500', '--json', 'number,author,headRefOid,isCrossRepository')
+    .filter((p) => !p.isCrossRepository && trusted.has(p.author?.login) && p.headRefOid)
+    .sort((a, b) => a.number - b.number)
+
+// Posts `pending` on every listed head with no status under the context: a head waiting its turn
+// already shows CI. Returns the heads that are `pending` (posted now or before).
+function markPending(prs) {
+  const queue = []
+  for (const pr of prs) {
+    const state = statusOf(pr.headRefOid)
+    if (state === null) {
+      post(pr.headRefOid, 'pending', `queued: ${gate}`)
+      queue.push(pr)
+    } else if (state === 'pending') {
+      queue.push(pr)
+    }
+  }
+  return queue
+}
+
+// While a gate runs, a push gets `pending` within the interval, so nobody reads the new head as
+// having no CI. It reuses the pass's trusted authors and calls no git: the gate owns the clone. A
+// failed look is said on stderr and tried again at the next tick.
+const LIGHT_POLL_SECS = wait ?? 30
+function whileRunning(trusted) {
+  const timer = setInterval(() => {
+    try {
+      markPending(listPrs(trusted))
+    } catch (e) {
+      process.stderr.write(`${new Date().toISOString()} local-ci: could not mark new heads pending: ${detailOf(e)}\n`)
+    }
+  }, LIGHT_POLL_SECS * 1000)
+  return () => clearInterval(timer)
+}
+
+// Whether a queued head is still its PR's head, checked right before its run: the queue was listed
+// at the start of the pass, and a gate before it can take half an hour.
+function currentHead(pr, trusted) {
+  const now = listPrs(trusted).find((p) => p.number === pr.number)
+  return now ? now.headRefOid : null
+}
+
+async function runOne(pr, trusted) {
   const sha = pr.headRefOid
   const short = sha.slice(0, 7)
+  let head
+  try {
+    head = currentHead(pr, trusted)
+  } catch (e) {
+    // Can't tell: leave it pending for the next pass rather than gate a head that may be stale.
+    process.stderr.write(`${new Date().toISOString()} local-ci: #${pr.number} could not be re-listed before its run: ${detailOf(e)}; skipped this pass\n`)
+    return null
+  }
+  // The PR closed (merged or not) while it waited: its head is no longer anyone's CI. Its pending is
+  // left alone, as for any closed PR; a merged head's commit may be on the default branch.
+  if (head === null) {
+    process.stderr.write(`${new Date().toISOString()} local-ci: #${pr.number} is no longer open; ${short} not run\n`)
+    return null
+  }
+  // A newer push replaced it: a final status, so the commit never waits, and no run. `error`, not
+  // `success`: nothing was gated, and the same commit could become a head again.
+  if (head !== sha) {
+    const description = `superseded by ${head.slice(0, 7)}: not run`
+    post(sha, 'error', description)
+    return `#${pr.number} ${short} error: ${description}`
+  }
   try {
     git('fetch', '--quiet', 'origin', `pull/${pr.number}/head`)
     const fetched = git('rev-parse', 'FETCH_HEAD').trim()
@@ -363,6 +433,17 @@ async function runOne(pr) {
   const logFile = path.join(LOG_DIR, logName)
   writeFileSync(logFile, '')
   const targetUrl = logUrl ? `${logUrl.replace(/\/+$/, '')}/${logName}` : null
+  const stopPolling = whileRunning(trusted)
+  try {
+    return await installAndGate(pr, logFile, targetUrl)
+  } finally {
+    stopPolling()
+  }
+}
+
+async function installAndGate(pr, logFile, targetUrl) {
+  const sha = pr.headRefOid
+  const short = sha.slice(0, 7)
   if (install !== null) {
     let key
     try {
@@ -397,22 +478,10 @@ async function runOne(pr) {
 async function pass() {
   const trusted = new Set(trustedAuthors())
   if (trusted.size === 0) throw new SetupError('no trusted authors: pass --trusted-authors or set trusted-authors in AGENTS.md on the default branch')
-  const prs = gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '500', '--json', 'number,author,headRefOid,isCrossRepository')
-    .filter((p) => !p.isCrossRepository && trusted.has(p.author?.login) && p.headRefOid)
-    .sort((a, b) => a.number - b.number)
-  const queue = []
-  for (const pr of prs) {
-    const state = statusOf(pr.headRefOid)
-    if (state === null) {
-      post(pr.headRefOid, 'pending', `queued: ${gate}`)
-      queue.push(pr)
-    } else if (state === 'pending') {
-      queue.push(pr)
-    }
-  }
+  const queue = markPending(listPrs(trusted))
   const lines = []
   for (const pr of queue) {
-    const line = await runOne(pr)
+    const line = await runOne(pr, trusted)
     if (line) {
       lines.push(line)
       process.stdout.write(`${line}\n`)

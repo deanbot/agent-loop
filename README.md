@@ -167,6 +167,8 @@ status and the reviewer's quoted run is the merge signal as before (spec: "Local
 Add `--install "<command>"` (say `--install "npm ci"`) to install dependencies before the gate
 whenever a head's lockfiles differ from those of the clone's last install: a PR that adds or
 removes a package then gets the right set, and a failed install posts `error`, not `failure`.
+A push during a run gets `pending` within the `--wait` interval, so the new head shows CI at once,
+and a head replaced before its turn is never gated (`error`, `superseded by <sha>: not run`).
 
 Make one clone per role (for example `proj`, `proj-exec`, `proj-review`) and run
 `/agent-loop:setup <operator|executor|reviewer|qa>` inside each. A clone can live anywhere (next to
