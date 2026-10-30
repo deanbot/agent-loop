@@ -1330,7 +1330,10 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
     "printf '\\033[32mall 3 passed\\033[0m\\n\\n'",
   ].join('\n')
   const commitFiles = (files) => {
-    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(seed, name), text)
+    for (const [name, text] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(seed, name)), { recursive: true })
+      writeFileSync(path.join(seed, name), text)
+    }
     g(seed, 'add', '-A')
     g(seed, 'commit', '-q', '-m', 'c')
     return g(seed, 'rev-parse', 'HEAD')
@@ -1471,6 +1474,103 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
     inAgent.startsWith('EXIT 1') && /agent's/.test(inAgent) && inSub.startsWith('EXIT 1') && noTrust.startsWith('EXIT 1') && noGate.startsWith('EXIT 1'),
     `${inAgent}${inSub}${noTrust}${noGate}`)
 
+  // --install (#111): the install runs when the head's lockfiles differ from those of the clone's last
+  // successful install, in either direction. It records the head it ran on in $TRACE.install.
+  const stateDir = path.join(ctx.home, '.agent-loop', 'state')
+  const installRecords = () => readdirSync(stateDir).filter((f) => f.startsWith('local-ci-install-'))
+  check('local-ci: without --install, no install record is written', installRecords().length === 0, installRecords().join())
+  const INSTALL = 'echo "install $(git rev-parse HEAD)" >> "$TRACE.install"; if [ -f fail-install ]; then echo "npm ERR! could not resolve"; exit 1; fi; echo "added 1 package"'
+  const installs = () => {
+    try {
+      return readFileSync(`${trace}.install`, 'utf8').split('\n').filter(Boolean).map((l) => l.split(' ')[1])
+    } catch {
+      return []
+    }
+  }
+  const lciI = (n, sha, extra = []) => lci({ prs: [pr(n, sha)], statuses: {} }, ['--install', INSTALL, ...extra])
+  const installedFor = (sha, f) => {
+    const before = installs().length
+    const out = f()
+    return { out, installed: installs().slice(before).includes(sha) && installs().length === before + 1, ran: installs().length > before }
+  }
+  const lockA = '{"packages":{"left-pad":"1.0.0"}}\n'
+  const lockB = '{"packages":{"left-pad":"1.0.0","is-odd":"3.0.1"}}\n'
+  const s20 = makePr(20, { 'pr.txt': '20\n', 'package-lock.json': lockA })
+  const r20 = installedFor(s20, () => lciI(20, s20))
+  const log20 = readdirSync(logDir).find((f) => f.startsWith(`20-${s20.slice(0, 12)}-`))
+  const log20Text = log20 ? readFileSync(path.join(logDir, log20), 'utf8') : ''
+  check('local-ci --install: no record yet → the install runs before the gate, and the record is written',
+    r20.installed && states(s20) === 'pending,success' && statuses()[s20][1].description === 'all 3 passed' && installRecords().length === 1,
+    `${r20.out}${installs()}${JSON.stringify(statuses()[s20])}`)
+  check('local-ci --install: … the install\'s output and then the gate\'s go to the run\'s log',
+    /added 1 package[\s\S]*all 3 passed/.test(log20Text), log20Text)
+  const s21 = makePr(21, { 'pr.txt': '21\n', 'package-lock.json': lockA })
+  const r21 = installedFor(s21, () => lciI(21, s21))
+  check('local-ci --install: a head with the same lockfiles → no install, the gate runs',
+    !r21.ran && states(s21) === 'pending,success' && traceText().includes(`start 21 ${s21}`), `${r21.out}${installs()}`)
+  const s22 = makePr(22, { 'pr.txt': '22\n', 'package-lock.json': lockB })
+  const r22 = installedFor(s22, () => lciI(22, s22))
+  check('local-ci --install: a head that adds a package → install', r22.installed && states(s22) === 'pending,success', `${r22.out}${installs()}`)
+  const s23 = makePr(23, { 'pr.txt': '23\n', 'package-lock.json': lockA })
+  const r23 = installedFor(s23, () => lciI(23, s23))
+  check('local-ci --install: the next head, which removes it again → install (either direction)', r23.installed && states(s23) === 'pending,success', `${r23.out}${installs()}`)
+  const s27 = makePr(27, '27')
+  const r27 = installedFor(s27, () => lciI(27, s27))
+  check('local-ci --install: a head with no lockfile at all, after one with → install', r27.installed && states(s27) === 'pending,success', `${r27.out}${installs()}`)
+  const s28 = makePr(28, { 'pr.txt': '28\n', 'sub/pkg/yarn.lock': 'left-pad@1\n' })
+  const r28 = installedFor(s28, () => lciI(28, s28))
+  check('local-ci --install: a lockfile in a subfolder counts', r28.installed, `${r28.out}${installs()}`)
+
+  const s24 = makePr(24, { 'pr.txt': '24\n', 'package-lock.json': lockB, 'fail-install': 'x\n' })
+  const r24 = installedFor(s24, () => lciI(24, s24))
+  check('local-ci --install: a failed install → error "install failed: <its last line>", the gate does not run, no record left',
+    r24.installed && states(s24) === 'pending,error' && statuses()[s24][1].description === 'install failed: npm ERR! could not resolve' &&
+    r24.out.includes(`#24 ${s24.slice(0, 7)} error: install failed: npm ERR! could not resolve`) && !traceText().includes(`start 24 `) &&
+    installRecords().length === 0, `${r24.out}${JSON.stringify(statuses()[s24])}${installRecords()}`)
+  // The head gated before the failed install (#28) had these lockfiles; the failed install may have
+  // changed what is installed, so it installs again.
+  const s25 = makePr(25, { 'pr.txt': '25\n', 'sub/pkg/yarn.lock': 'left-pad@1\n' })
+  const r25 = installedFor(s25, () => lciI(25, s25))
+  check('local-ci --install: after a failed install, a head with the last good install\'s lockfiles installs again',
+    r25.installed && states(s25) === 'pending,success' && installRecords().length === 1, `${r25.out}${installs()}`)
+
+  const s29 = makePr(29, { 'pr.txt': '29\n', 'deps.txt': 'x\n', 'package-lock.json': lockA })
+  const s30 = makePr(30, { 'pr.txt': '30\n', 'deps.txt': 'x\n', 'package-lock.json': lockB })
+  const r29 = installedFor(s29, () => lciI(29, s29, ['--lockfiles', 'deps.txt']))
+  const r30 = installedFor(s30, () => lciI(30, s30, ['--lockfiles', 'deps.txt']))
+  check('local-ci --install: --lockfiles replaces the list (deps.txt counts, package-lock.json no longer does)',
+    r29.installed && !r30.ran && states(s30) === 'pending,success', `${r29.out}${r30.out}${installs()}`)
+  const s31 = makePr(31, { 'pr.txt': '31\n', 'deps.txt': 'x\n' })
+  const r31 = installedFor(s31, () => lciI(31, s31, ['--lockfiles', './deps.txt']))
+  check('local-ci --install: a --lockfiles entry with a slash is a path from the clone\'s root', !r31.ran, `${r31.out}${installs()}`)
+  const s32 = makePr(32, { 'pr.txt': '32\n', 'deps.txt': 'x\n' })
+  const before32 = installs().length
+  const out32 = lci({ prs: [pr(32, s32)], statuses: {} }, ['--install', `${INSTALL} # v2`, '--lockfiles', 'deps.txt'])
+  check('local-ci --install: a changed install command → install', installs().length === before32 + 1, `${out32}${installs()}`)
+  const s33 = makePr(33, { 'pr.txt': '33\n', 'deps.txt': 'y\n', 'gate.sh': 'exit 0\n' })
+  lciI(33, s33, ['--lockfiles', 'deps.txt'])
+  check('local-ci --install: the description is the gate\'s own last line, never the install\'s',
+    states(s33) === 'pending,success' && statuses()[s33][1].description === 'gate passed', JSON.stringify(statuses()[s33]))
+  // A tree whose full listing is over 1 MiB (execFileSync's default buffer): only the lockfiles are listed.
+  const bigTree = { 'pr.txt': '35\n', 'package-lock.json': '{"big":1}\n' }
+  for (let i = 0; i < 3000; i++) bigTree[`gen/${'d'.repeat(200)}/${'f'.repeat(150)}${i}.txt`] = ''
+  const s35 = makePr(35, bigTree)
+  const r35 = installedFor(s35, () => lciI(35, s35))
+  check('local-ci --install: a tree listing over 1 MiB → the install and the gate run (success, not error)',
+    r35.installed && states(s35) === 'pending,success', `${r35.out}${JSON.stringify(statuses()[s35])}`)
+  // A run without --install may change what is installed: it removes the record, so the next
+  // --install run installs even for the same lockfiles.
+  const hadRecord = installRecords().length === 1
+  lci({ prs: [], statuses: {} })
+  const s36 = makePr(36, { 'pr.txt': '36\n', 'package-lock.json': '{"big":1}\n' })
+  const r36 = installedFor(s36, () => lciI(36, s36))
+  check('local-ci: a run without --install removes the record; the next --install run installs for the same lockfiles',
+    hadRecord && r36.installed && states(s36) === 'pending,success', `${hadRecord}${r36.out}${installs()}`)
+  const noInstall = lci(null, ['--install', ''])
+  const lockOnly = lci(null, ['--lockfiles', 'deps.txt'])
+  check('local-ci: --install with no command, and --lockfiles without --install → exit 1',
+    noInstall.startsWith('EXIT 1') && /--install/.test(noInstall) && lockOnly.startsWith('EXIT 1') && /--lockfiles needs --install/.test(lockOnly), `${noInstall}${lockOnly}`)
+
   // --wait keeps going after a run; a stop also stops a running gate, whose head stays pending.
   const s13 = makePr(13, '13')
   const s14 = makePr(14, { 'pr.txt': '14\n', 'gate.sh': 'echo $$ > "$TRACE.pid"\nsleep 30\n' })
@@ -1502,6 +1602,26 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   }
   check('local-ci --wait: a stop stops the running gate and releases the lock; the head stays pending',
     started && !gateAlive && states(s14) === 'pending' && !existsSync(lockFile), `${started} ${gateAlive} ${states(s14)}`)
+
+  // A stop during an install stops the install; it leaves no record, so the next start installs again.
+  const s34 = makePr(34, { 'pr.txt': '34\n', 'package-lock.json': '{"stop":1}\n' })
+  setFixture(ctx, { prs: [pr(34, s34)], statuses: {} })
+  const wi = spawn('node', [path.join(scripts, 'local-ci.mjs'), '--repo', REPO, '--gate', 'sh gate.sh', '--install', 'echo $$ > "$TRACE.ipid"; sleep 30', '--wait', '1'], { cwd: runner, env })
+  const iStarted = await waitFor(() => existsSync(`${trace}.ipid`))
+  const installPid = iStarted ? Number(readFileSync(`${trace}.ipid`, 'utf8')) : 0
+  wi.kill('SIGTERM')
+  await new Promise((r) => (wi.exitCode !== null ? r() : wi.on('close', r)))
+  await pause(300)
+  let installAlive = false
+  try {
+    process.kill(installPid, 0)
+    installAlive = true
+  } catch {
+    // gone
+  }
+  check('local-ci --wait --install: a stop stops a running install; no record is left and the head stays pending',
+    iStarted && !installAlive && installRecords().length === 0 && states(s34) === 'pending' && !traceText().includes(`start 34 `),
+    `${iStarted} ${installAlive} ${installRecords()} ${states(s34)}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 

@@ -5,6 +5,7 @@
  *
  * Usage, from the root of a clone kept for it (no role marker):
  *   node scripts/local-ci.mjs --repo owner/repo --gate "<command>" [--context local-ci]
+ *                             [--install "<command>" [--lockfiles a,b]]
  *                             [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]
  *
  * Each pass:
@@ -18,6 +19,17 @@
  *     out detached (forced, then `git clean -fd`), runs the gate through the shell with its output
  *     in a log file, and posts `success` or `failure` with the gate's last line as the description
  *     (cut to 140 characters). A head that cannot be fetched or checked out gets `error`.
+ *   - with --install, before the gate: when the head's lockfiles differ from those of the clone's
+ *     last successful install, in either direction, runs the install command through the shell
+ *     (output in the same log). A failed install posts `error` (`install failed: <last line>`) and
+ *     the gate does not run.
+ * Lockfiles are the tracked files with one of LOCKFILES' names, in any folder, or --lockfiles: a
+ * name without a slash matches in any folder, one with a slash is a path from the clone's root.
+ * The install record (local-ci-install-<hash of the clone's path>.json, next to the lock) holds a
+ * hash of the lockfiles' paths and contents and of the install command. It is removed before an
+ * install starts and written only after one succeeds, so a failed or stopped install leaves no
+ * record and the next head installs again. A run without --install removes the record: its gates
+ * may change what is installed.
  * A head with any other status under the context (`success`, `failure`, `error`) is done. A
  * `pending` the runner finds is never one of its own runs (one runner per repository and context, a
  * pid lock, and runs are one at a time), so it is run: a crash or a stopped runner never leaves a
@@ -37,12 +49,36 @@
  */
 
 import { execFileSync, spawn } from 'child_process'
-import { openSync, closeSync, writeFileSync, readFileSync, unlinkSync, mkdirSync, existsSync, realpathSync } from 'fs'
+import { openSync, closeSync, writeFileSync, readFileSync, unlinkSync, renameSync, mkdirSync, existsSync, realpathSync, statSync } from 'fs'
 import { homedir } from 'os'
+import { createHash } from 'crypto'
 import path from 'path'
 
 const USAGE =
-  'local-ci.mjs --repo owner/repo --gate "<command>" [--context <name>] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]'
+  'local-ci.mjs --repo owner/repo --gate "<command>" [--context <name>] [--install "<command>" [--lockfiles a,b]] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]'
+
+// Dependency lockfiles by name, matched in any folder.
+const LOCKFILES = [
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lock',
+  'bun.lockb',
+  'deno.lock',
+  'uv.lock',
+  'poetry.lock',
+  'Pipfile.lock',
+  'pdm.lock',
+  'Gemfile.lock',
+  'Cargo.lock',
+  'go.sum',
+  'composer.lock',
+  'mix.lock',
+  'pubspec.lock',
+  'Package.resolved',
+  'packages.lock.json',
+]
 
 function usageError(message) {
   process.stderr.write(`${message ? `${message}\n` : ''}Usage: ${USAGE}\n`)
@@ -62,6 +98,12 @@ if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) usageError(repo ? `--repo: expect
 const gate = arg('--gate')
 if (!gate || !gate.trim()) usageError('--gate: expected the gate command')
 const context = arg('--context') ?? 'local-ci'
+const install = arg('--install')
+if (install !== null && !install.trim()) usageError('--install: expected the install command')
+const lockfilesArg = arg('--lockfiles')
+if (lockfilesArg !== null && install === null) usageError('--lockfiles needs --install')
+const lockfiles = lockfilesArg === null ? LOCKFILES : lockfilesArg.split(',').map((s) => s.trim()).filter(Boolean)
+if (lockfiles.length === 0) usageError('--lockfiles: expected file names or paths, a,b')
 const trustedArg = arg('--trusted-authors')
 const logUrl = arg('--log-url')
 let wait = null
@@ -110,6 +152,9 @@ const contextSlug = context.replace(/[^\w.-]/g, '_')
 const STATE_DIR = path.join(homedir(), '.agent-loop', 'state')
 const LOCK_FILE = path.join(STATE_DIR, `${slug}-local-ci-${contextSlug}.lock`)
 const LOG_DIR = path.join(homedir(), '.agent-loop', 'local-ci', slug)
+// What is installed belongs to the clone, not the context: keyed by the clone's real path, and kept
+// outside it, where the pull request's code runs.
+const INSTALL_RECORD = path.join(STATE_DIR, `local-ci-install-${createHash('sha256').update(realpathSync(root)).digest('hex').slice(0, 16)}.json`)
 mkdirSync(STATE_DIR, { recursive: true })
 mkdirSync(LOG_DIR, { recursive: true })
 
@@ -155,10 +200,14 @@ if (holder) {
   process.stdout.write(`RUNNER_RUNNING ${holder}\n`)
   process.exit(3)
 }
+// Gates run without --install can still change what is installed (a project's tooling syncing its
+// dependency folder), so an earlier run's record no longer holds.
+if (install === null) forgetInstall()
 
-let gateChild = null
+// The install or gate running now, if any.
+let child = null
 process.on('exit', () => {
-  if (gateChild) killGate()
+  if (child) killChild()
   try {
     if (JSON.parse(readFileSync(LOCK_FILE, 'utf8')).pid === process.pid) unlinkSync(LOCK_FILE)
   } catch {
@@ -168,10 +217,11 @@ process.on('exit', () => {
 const signalCodes = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }
 for (const [sig, code] of Object.entries(signalCodes)) process.on(sig, () => process.exit(128 + code))
 
-// The gate runs in its own process group, so a stop reaches what it started (a test runner's workers).
-function killGate() {
+// The install and the gate run in their own process group, so a stop reaches what they started (a
+// test runner's workers).
+function killChild() {
   try {
-    process.kill(-gateChild.pid, 'SIGTERM')
+    process.kill(-child.pid, 'SIGTERM')
   } catch {
     // already exited
   }
@@ -208,11 +258,12 @@ function post(sha, state, description, targetUrl) {
   gh('api', '-X', 'POST', `repos/${repo}/statuses/${sha}`, ...fields)
 }
 
-// The gate's last line: the last non-empty one, ANSI colour codes removed.
-function lastLine(file) {
+// A command's last line: the last non-empty one of the log from byte `from` on (the gate's output
+// follows the install's), ANSI colour codes removed.
+function lastLine(file, from = 0) {
   let text = ''
   try {
-    text = readFileSync(file, 'utf8')
+    text = readFileSync(file).subarray(from).toString('utf8')
   } catch {
     // no output
   }
@@ -221,22 +272,72 @@ function lastLine(file) {
   return lines.at(-1) ?? ''
 }
 
-function runGate(logFile) {
-  const fd = openSync(logFile, 'w')
+// Runs a command through the shell in the clone, its output appended to the log.
+function runShell(command, logFile) {
+  const fd = openSync(logFile, 'a')
   return new Promise((resolve) => {
-    gateChild = spawn(gate, { shell: true, cwd: root, stdio: ['ignore', fd, fd], detached: true })
-    gateChild.on('error', (e) => {
-      gateChild = null
+    child = spawn(command, { shell: true, cwd: root, stdio: ['ignore', fd, fd], detached: true })
+    child.on('error', (e) => {
+      child = null
       closeSync(fd)
       resolve({ code: null, signal: null, error: e })
     })
-    gateChild.on('exit', (code, signal) => {
-      gateChild = null
+    child.on('exit', (code, signal) => {
+      child = null
       closeSync(fd)
       resolve({ code, signal })
     })
   })
 }
+
+const sizeOf = (file) => {
+  try {
+    return statSync(file).size
+  } catch {
+    return 0
+  }
+}
+
+// What the install depends on at the checked-out head: the tracked lockfiles' paths and blob ids,
+// and the install command, hashed. A lockfile added, removed or changed changes it. After the forced
+// checkout the index is the head's tree; git lists only the lockfiles, so a large tree costs nothing.
+function installKey() {
+  const specs = lockfiles.map((l) => (l.includes('/') ? `:(literal)${l.replace(/^\.?\/+/, '')}` : `:(glob)**/${l}`))
+  const entries = git('ls-files', '-s', '-z', '--', ...specs)
+    .split('\0')
+    .filter(Boolean)
+    .map((e) => {
+      const tab = e.indexOf('\t')
+      return `${e.slice(0, tab).split(' ')[1]} ${e.slice(tab + 1)}`
+    })
+    .sort()
+  return createHash('sha256').update(JSON.stringify({ install, lockfiles: entries })).digest('hex')
+}
+
+function installedKey() {
+  try {
+    return JSON.parse(readFileSync(INSTALL_RECORD, 'utf8')).key ?? null
+  } catch {
+    return null
+  }
+}
+
+function forgetInstall() {
+  try {
+    unlinkSync(INSTALL_RECORD)
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e
+  }
+}
+
+function recordInstall(key, sha) {
+  const tmp = `${INSTALL_RECORD}.${process.pid}.tmp`
+  writeFileSync(tmp, JSON.stringify({ clone: realpathSync(root), key, sha, installed: new Date().toISOString() }, null, 2) + '\n')
+  renameSync(tmp, INSTALL_RECORD)
+}
+
+const failedRun = (result, what) =>
+  result.signal ? `${what} stopped by ${result.signal}` : result.error ? `${what} did not start: ${result.error.message}` : `${what} failed (exit ${result.code})`
 
 async function runOne(pr) {
   const sha = pr.headRefOid
@@ -260,13 +361,35 @@ async function runOne(pr) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const logName = `${pr.number}-${sha.slice(0, 12)}-${stamp}.log`
   const logFile = path.join(LOG_DIR, logName)
-  const result = await runGate(logFile)
-  const last = lastLine(logFile)
-  const ok = result.code === 0
-  const description =
-    last ||
-    (ok ? 'gate passed' : result.signal ? `gate stopped by ${result.signal}` : result.error ? `gate did not start: ${result.error.message}` : `gate failed (exit ${result.code})`)
+  writeFileSync(logFile, '')
   const targetUrl = logUrl ? `${logUrl.replace(/\/+$/, '')}/${logName}` : null
+  if (install !== null) {
+    let key
+    try {
+      key = installKey()
+    } catch (e) {
+      const detail = detailOf(e)
+      post(sha, 'error', `local-ci could not read the lockfiles of ${short}: ${detail}`)
+      return `#${pr.number} ${short} error: could not read the lockfiles: ${detail}`
+    }
+    if (key !== installedKey()) {
+      // Whatever was installed is unknown from here until the install succeeds: a failed or stopped
+      // install leaves no record, so the next head installs again.
+      forgetInstall()
+      const installed = await runShell(install, logFile)
+      if (installed.code !== 0) {
+        const description = `install failed: ${lastLine(logFile) || failedRun(installed, 'install')}`
+        post(sha, 'error', description, targetUrl)
+        return `#${pr.number} ${short} error: ${cut(description)}`
+      }
+      recordInstall(key, sha)
+    }
+  }
+  const gateFrom = sizeOf(logFile)
+  const result = await runShell(gate, logFile)
+  const last = lastLine(logFile, gateFrom)
+  const ok = result.code === 0
+  const description = last || (ok ? 'gate passed' : failedRun(result, 'gate'))
   post(sha, ok ? 'success' : 'failure', description, targetUrl)
   return `#${pr.number} ${short} ${ok ? 'success' : 'failure'}: ${cut(description)}`
 }

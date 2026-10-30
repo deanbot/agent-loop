@@ -579,6 +579,7 @@ as CI passed.
 
 ```
 node scripts/local-ci.mjs --repo owner/repo --gate "<command>" [--context local-ci]
+                          [--install "<command>" [--lockfiles a,b]]
                           [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]
 ```
 
@@ -594,6 +595,24 @@ node scripts/local-ci.mjs --repo owner/repo --gate "<command>" [--context local-
   (its output to a log file per run), and post `success` or `failure` with the gate's last
   non-empty line as the description (140 characters at most). A head it cannot fetch or check out
   gets `error`. Any other state under the context is done.
+- With `--install "<command>"`, the project's dependencies follow the head. The tree is cleaned
+  without `-x`, so ignored folders such as `node_modules` stay from one head to the next. After
+  the checkout, when the head's lockfiles differ from those of the clone's last successful
+  install, in either direction (a package added or removed, a lockfile changed, added or
+  deleted), the runner runs the install command through the shell before the gate. Its output
+  goes to the same log, ahead of the gate's. A failed install posts `error` with `install failed:
+  <its last line>`, and the gate does not run, so a broken install is never read as a broken
+  change. Lockfiles are the tracked files named `package-lock.json`, `npm-shrinkwrap.json`,
+  `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`, `deno.lock`, `uv.lock`, `poetry.lock`,
+  `Pipfile.lock`, `pdm.lock`, `Gemfile.lock`, `Cargo.lock`, `go.sum`, `composer.lock`,
+  `mix.lock`, `pubspec.lock`, `Package.resolved` or `packages.lock.json`, in any folder.
+  `--lockfiles a,b` replaces the list: a name without a slash matches in any folder, and one with
+  a slash is a path from the clone's root. The record of the last install is a hash of the
+  lockfiles' paths and contents and of the install command, so a changed command installs too.
+  It is removed before an install starts and written only once the install succeeds. A failed or
+  stopped install leaves the clone in an unknown state and no record, so the next head installs
+  again. Without `--install` nothing is installed, and a record an earlier run left is removed:
+  gates run without it can still change what is installed, so the next `--install` run installs.
 - One runner per repository and context (a pid lock; a second prints `RUNNER_RUNNING <pid>` and
   exits 3). So a `pending` it finds is never a run of its own: it runs it. A crash or a stop
   leaves a head `pending`, and the next start runs it; posting `pending` under the context by
@@ -888,6 +907,11 @@ operator looking around in the clone, is not affected.
 | `inbox.mjs` | `inbox-<hash>.json` in the same folder as the rows above, one per inbox folder (`<hash>`: the first 16 hex digits of the SHA-256 of the folder's real path): `{ "reported": [messageId, …] }`, pruned to the files still in the folder |
 | `local-ci.mjs` | no state (the statuses are its record); its lock is `~/.agent-loop/state/<owner>-<repo>-local-ci-<context>.lock`, its logs `~/.agent-loop/local-ci/<owner>-<repo>/<pr>-<sha>-<time>.log` |
 
+With `--install`, `local-ci.mjs` also keeps `local-ci-install-<hash>.json` next to its lock, one per
+runner clone (`<hash>`: the first 16 hex digits of the SHA-256 of the clone's real path):
+`{ "clone", "key", "sha", "installed" }`, what the clone's last successful install was for.
+Deleting it makes the next head install.
+
 Per-repo paths prevent collisions when running agent-loop on several repos, and per-PR paths for
 `pr-poll` let two executors run on one repo without writing the same file. A PR with no `pr-poll`
 file yet takes its entry from the shared `<owner>-<repo>-pr-poll-state.json` that 0.2 scripts
@@ -933,4 +957,6 @@ format, the loops' `--inbox`/`--outbox` start arguments ("Inbox folder"), and th
 prompt that predates them meets `RULES_PENDING:` as an unknown pick line, so the executor
 restarts with the skill that handles it. Later in 0.2, additive: `--check`'s `MAILBOX_WARN:` line
 after `MAILBOX_OK` (an adapter that predates it keys on the first line and keeps working) and its
-refusal of a path that is not a folder or lies under a file.
+refusal of a path that is not a folder or lies under a file. Later in 0.2, additive:
+`local-ci.mjs --install` and `--lockfiles`, and its install record; without them the runner
+behaves as before.

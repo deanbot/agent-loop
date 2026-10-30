@@ -50,10 +50,13 @@ Three layers. Boundaries are strict.
   rules in full), cleared too. When `pull.mjs` can't write the record it adds `RULES_NOT_RECORDED`,
   and the loop runs the printed `git diff` itself.
 - `scripts/local-ci.mjs` — a local CI runner, no agent's. `--repo owner/repo --gate "<command>"
-  [--context local-ci] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]`, from the
-  root of a clone of its own (it refuses one with a role marker). Runs the gate once per trusted,
-  same-repository PR head, one at a time, and posts the result as a commit status, which
-  `gh pr checks` and `pr-poll.mjs` read as CI. One runner per repo and context (pid lock).
+  [--context local-ci] [--install "<command>" [--lockfiles a,b]] [--trusted-authors a,b]
+  [--log-url <base>] [--wait [secs]]`, from the root of a clone of its own (it refuses one with a
+  role marker). Runs the gate once per trusted, same-repository PR head, one at a time, and posts
+  the result as a commit status, which `gh pr checks` and `pr-poll.mjs` read as CI. With
+  `--install`, it runs the install command first whenever the head's lockfiles differ from those of
+  the clone's last successful install, and posts `error` when the install fails. One runner per repo
+  and context (pid lock).
 - `scripts/audit.mjs` — the auditor's numbers, read-only. `--repo owner/repo --since <date|Nd>
   [--until <date>] [--floor id,id] [--operators l,l] [--labels l,l] [--format md|json]`. For each
   control the loop ran over the period (a workflow on prose-only PRs, re-runs, cancelled runs, a
@@ -176,6 +179,9 @@ where PR code could clear it). Next to each, one-shot runs keep `<state>-wait.js
 waiter's baseline, the idle count and (pr-poll) the head-and-CI activity key. Safe to delete. `local-ci.mjs` keeps no state (the commit
 statuses are its record): only its pid lock, `<slug>-local-ci-<context>.lock`, and its run logs
 under `~/.agent-loop/local-ci/<slug>/`.
+With `--install` it also keeps `local-ci-install-<hash>.json` next to its lock: what the runner
+clone's last successful install was for, keyed by the clone's real root path, removed before an
+install and by a run without `--install`, and written after an install succeeds.
 
 ## One clone per role
 
