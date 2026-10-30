@@ -27,7 +27,8 @@ by one, and anything else waits for an approval nobody is there to give: the loo
 **Prerequisite:** `AGENTS.md` has a `## Agent loop` block; otherwise stop and say so. Read the
 whole file and follow the project's conventions. From the block take `repo`,
 `in-progress-label` (default `in-progress`), `blocked-label` (default `is-blocked`),
-`needs-operator-label` (default `needs-operator`), `quality-gates`, `gate` (optional), `qa-gate`
+`needs-operator-label` (default `needs-operator`), `pre-gate` (optional: a check that runs in
+seconds, before the gate), `quality-gates`, `gate` (optional), `qa-gate`
 (default `off`), and
 `trusted-authors` or `allow-author-associations` (default `[OWNER, MEMBER, COLLABORATOR]`).
 
@@ -162,7 +163,15 @@ Then implement:
    <short sha>: <last line>` in the PR body or the push comment. Every later "run
    `quality-gates`" below includes the gate the same way. A check from the project's local
    runner (`local-ci.mjs`, which runs the gate on every head) is CI: with it on the PR, skip the
-   gate and the quote.
+   gate and the quote. **Before every push, in this order:** `pre-gate` when the block has it,
+   fixed and run again until it passes (commit what a formatter changed); commit; the push-time
+   checks without pushing: `git push --dry-run origin <branch>`, which runs the project's
+   pre-push hooks on the commits it would send, and, where the project's conventions name a
+   command that checks a post's text without posting, that command on the PR title and body you
+   are about to post; then `quality-gates` and the gate on the committed, clean tree; then the
+   push. A refusal from `pre-gate` or a push-time check is fixed (a new commit) and the cheap
+   checks run again before the gate, so the gate runs once per pushed head. Every later "run
+   `quality-gates`" below means this whole order.
 5. Self-check: for each criterion, name the test that asserts it (a green suite is not enough),
    or, for one only a human can check, write the exact steps the operator runs. Fix gaps first.
 6. `gh pr create` with: what and why; a Criterion | Evidence table; Decisions; Known limits;

@@ -85,6 +85,14 @@ give, and the loop stops until the operator happens to look.
 - Untrusted input (parsers, escapers, anything handling user text) gets adversarial cases.
 - Toolchain majors may be newer than you remember: read the installed package's docs before
   writing config from memory.
+- **Before every push, in this order:** `pre-gate` when the block has it, fixed and run again
+  until it passes (commit what a formatter changed); commit; the push-time checks without
+  pushing: `git push --dry-run origin <branch>`, which runs the project's pre-push hooks on the
+  commits it would send, and, where the project's conventions name a command that checks a post's
+  text without posting, that command on the PR title and body you are about to post; then
+  `quality-gates` and the gate on the committed, clean tree; then the push. A refusal from
+  `pre-gate` or a push-time check is fixed (a new commit) and the cheap checks run again before
+  the gate, so the gate runs once per pushed head.
 - Run `quality-gates` from the config. If the command does not exist yet (an early bootstrap
   issue is creating it), run the checks the issue itself names and say so in the PR body.
 - **The gate**, only when the block has `gate`. It is the command CI would otherwise be, for a

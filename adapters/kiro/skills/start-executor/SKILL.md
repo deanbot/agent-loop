@@ -27,6 +27,7 @@ Read the project's AGENTS.md `## Agent loop` section first. Extract:
 - `in-progress-label` — label name for claiming issues (default: `in-progress`)
 - `blocked-label` — label name indicating a blocked issue to skip (default: `is-blocked`)
 - `needs-operator-label` — label on a PR while it waits on the operator: an open question, or `MERGE_READY` (default: `needs-operator`)
+- `pre-gate` — optional: one plain command that runs in seconds (lint, format check, a text guard). **Before every push, in this order:** `pre-gate` when the block has it, fixed and run again until it passes (commit what a formatter changed); commit; the push-time checks without pushing: `git push --dry-run origin <branch>`, which runs the project's pre-push hooks on the commits it would send, and, where the project's conventions name a command that checks a post's text without posting, that command on the PR title and body you are about to post; then `quality-gates` and the gate on the committed, clean tree; then the push. A refusal from `pre-gate` or a push-time check is fixed (a new commit) and the cheap checks run again before the gate, so the gate runs once per pushed head. Every "run quality-gates" below means this whole order.
 - `quality-gates` — commands to run at each checkpoint
 - `gate` — optional: the command that stands in for CI on a PR that has none. Every "run quality-gates" includes it: when the PR has no CI checks (`gh pr checks` says "no checks reported", or every check is `skipping`), or no PR exists yet, run `<gate>` on the committed, clean tree before the push (once, when it is the same command as `quality-gates`), and quote its last line as `Gate on <short sha>: <last line>` in the PR body or the push comment. A check from the project's local runner (`local-ci.mjs`, which runs the gate on every head) is CI: with it on the PR, skip the gate and the quote. Pass `--require-gate` to pr-poll.mjs when it is set.
 - `qa-gate` — `on` or `off` (default `off`). With `on`, pass `--require-qa` to pr-poll.mjs and expect `[qa]` verdicts; with `off` the reviewer verifies acceptance criteria itself.
@@ -81,7 +82,7 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first (skip it when $ARGUMENTS is empt
 
 1. Fetch issue: `gh issue view <N> --repo <repo>`
 2. Follow the project's AGENTS.md conventions for branching, work tracking, and commit structure. If not specified, use sensible defaults.
-3. Implement the work described in the issue. Run quality-gates from AGENTS.md config.
+3. Implement the work described in the issue. Run quality-gates from AGENTS.md config, in the order under `pre-gate` above.
 4. **Self-check before opening PR:** Re-read the issue body (especially any "What done looks like", "Acceptance criteria", or "Done when" section) and any project convention files (AGENTS.md, CLAUDE.md). For each criterion:
    - Identify whether it is code-verifiable (a test asserts it) or observation-verifiable (UI visibility, rendering, manual step).
    - Verify the current diff or test suite satisfies it. A passing test suite is not sufficient — a test must assert the specific criterion.
