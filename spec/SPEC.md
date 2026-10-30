@@ -611,7 +611,8 @@ node scripts/local-ci.mjs --repo owner/repo --gate "<command>" [--context local-
   lockfiles' paths and contents and of the install command, so a changed command installs too.
   It is removed before an install starts and written only once the install succeeds. A failed or
   stopped install leaves the clone in an unknown state and no record, so the next head installs
-  again. Without `--install` nothing is installed and no record is kept.
+  again. Without `--install` nothing is installed, and a record an earlier run left is removed:
+  gates run without it can still change what is installed, so the next `--install` run installs.
 - One runner per repository and context (a pid lock; a second prints `RUNNER_RUNNING <pid>` and
   exits 3). So a `pending` it finds is never a run of its own: it runs it. A crash or a stop
   leaves a head `pending`, and the next start runs it; posting `pending` under the context by

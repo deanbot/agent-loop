@@ -28,7 +28,8 @@
  * The install record (local-ci-install-<hash of the clone's path>.json, next to the lock) holds a
  * hash of the lockfiles' paths and contents and of the install command. It is removed before an
  * install starts and written only after one succeeds, so a failed or stopped install leaves no
- * record and the next head installs again.
+ * record and the next head installs again. A run without --install removes the record: its gates
+ * may change what is installed.
  * A head with any other status under the context (`success`, `failure`, `error`) is done. A
  * `pending` the runner finds is never one of its own runs (one runner per repository and context, a
  * pid lock, and runs are one at a time), so it is run: a crash or a stopped runner never leaves a
@@ -199,6 +200,9 @@ if (holder) {
   process.stdout.write(`RUNNER_RUNNING ${holder}\n`)
   process.exit(3)
 }
+// Gates run without --install can still change what is installed (a project's tooling syncing its
+// dependency folder), so an earlier run's record no longer holds.
+if (install === null) forgetInstall()
 
 // The install or gate running now, if any.
 let child = null
@@ -294,20 +298,18 @@ const sizeOf = (file) => {
   }
 }
 
-// What the install depends on at a commit: the tracked lockfiles' paths and blob ids, and the
-// install command, hashed. A lockfile added, removed or changed changes it.
-function installKey(sha) {
-  const byName = lockfiles.filter((l) => !l.includes('/'))
-  const byPath = lockfiles.filter((l) => l.includes('/')).map((l) => l.replace(/^\.?\/+/, ''))
-  const entries = git('ls-tree', '-r', '-z', '--full-tree', sha)
+// What the install depends on at the checked-out head: the tracked lockfiles' paths and blob ids,
+// and the install command, hashed. A lockfile added, removed or changed changes it. After the forced
+// checkout the index is the head's tree; git lists only the lockfiles, so a large tree costs nothing.
+function installKey() {
+  const specs = lockfiles.map((l) => (l.includes('/') ? `:(literal)${l.replace(/^\.?\/+/, '')}` : `:(glob)**/${l}`))
+  const entries = git('ls-files', '-s', '-z', '--', ...specs)
     .split('\0')
     .filter(Boolean)
     .map((e) => {
       const tab = e.indexOf('\t')
-      return { file: e.slice(tab + 1), blob: e.slice(0, tab).split(' ')[2] }
+      return `${e.slice(0, tab).split(' ')[1]} ${e.slice(tab + 1)}`
     })
-    .filter(({ file }) => byName.includes(path.posix.basename(file)) || byPath.includes(file))
-    .map(({ file, blob }) => `${blob} ${file}`)
     .sort()
   return createHash('sha256').update(JSON.stringify({ install, lockfiles: entries })).digest('hex')
 }
@@ -364,7 +366,7 @@ async function runOne(pr) {
   if (install !== null) {
     let key
     try {
-      key = installKey(sha)
+      key = installKey()
     } catch (e) {
       const detail = detailOf(e)
       post(sha, 'error', `local-ci could not read the lockfiles of ${short}: ${detail}`)

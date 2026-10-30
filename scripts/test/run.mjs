@@ -1551,6 +1551,21 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   lciI(33, s33, ['--lockfiles', 'deps.txt'])
   check('local-ci --install: the description is the gate\'s own last line, never the install\'s',
     states(s33) === 'pending,success' && statuses()[s33][1].description === 'gate passed', JSON.stringify(statuses()[s33]))
+  // A tree whose full listing is over 1 MiB (execFileSync's default buffer): only the lockfiles are listed.
+  const bigTree = { 'pr.txt': '35\n', 'package-lock.json': '{"big":1}\n' }
+  for (let i = 0; i < 3000; i++) bigTree[`gen/${'d'.repeat(200)}/${'f'.repeat(150)}${i}.txt`] = ''
+  const s35 = makePr(35, bigTree)
+  const r35 = installedFor(s35, () => lciI(35, s35))
+  check('local-ci --install: a tree listing over 1 MiB → the install and the gate run (success, not error)',
+    r35.installed && states(s35) === 'pending,success', `${r35.out}${JSON.stringify(statuses()[s35])}`)
+  // A run without --install may change what is installed: it removes the record, so the next
+  // --install run installs even for the same lockfiles.
+  const hadRecord = installRecords().length === 1
+  lci({ prs: [], statuses: {} })
+  const s36 = makePr(36, { 'pr.txt': '36\n', 'package-lock.json': '{"big":1}\n' })
+  const r36 = installedFor(s36, () => lciI(36, s36))
+  check('local-ci: a run without --install removes the record; the next --install run installs for the same lockfiles',
+    hadRecord && r36.installed && states(s36) === 'pending,success', `${hadRecord}${r36.out}${installs()}`)
   const noInstall = lci(null, ['--install', ''])
   const lockOnly = lci(null, ['--lockfiles', 'deps.txt'])
   check('local-ci: --install with no command, and --lockfiles without --install → exit 1',

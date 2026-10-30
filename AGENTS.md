@@ -181,7 +181,7 @@ statuses are its record): only its pid lock, `<slug>-local-ci-<context>.lock`, a
 under `~/.agent-loop/local-ci/<slug>/`.
 With `--install` it also keeps `local-ci-install-<hash>.json` next to its lock: what the runner
 clone's last successful install was for, keyed by the clone's real root path, removed before an
-install and written after one succeeds.
+install and by a run without `--install`, and written after an install succeeds.
 
 ## One clone per role
 
