@@ -111,7 +111,8 @@ An adapter is valid if:
    given the exact steps the operator runs by hand. A hand check never blocks an approval; the
    operator confirms by a comment or by merging
 8. Prompts give shell commands as single plain commands (no `$(…)`, `;`, pipes) so permission
-   allowlists can match them
+   allowlists can match them: `git grep` options before the pattern and no braces, no `--jq`
+   filter with `]]`, and files changed with the tool's edit tools, never through the shell
 
 ## Known design constraints
 

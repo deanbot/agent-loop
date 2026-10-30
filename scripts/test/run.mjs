@@ -2049,6 +2049,66 @@ const putMessage = (dir, id, extra, meta) => {
   for (const dir of [exec, reviewer, bare]) rmSync(dir, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- loop texts' command forms (#90, #91)
+{
+  // Each slip cost a live session a failed call, an improvised command or an approval prompt.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const flat = (t) => t.replace(/\n\s*/g, ' ')
+  const read = (f) => readFileSync(path.join(adapters, f), 'utf8')
+  const paragraphWith = (f, needle) => read(f).split(/\n[ \t]*\n/).map(flat).find((p) => p.includes(needle)) ?? ''
+  const texts = readdirSync(adapters, { recursive: true }).filter((f) => /\.(md|sh)$/.test(f))
+  const brackets = texts.flatMap((f) => [...flat(read(f)).matchAll(/--jq '([^']*)'/g)].filter((m) => m[1].includes(']]')).map((m) => `${f}: ${m[1]}`))
+  check('loop texts: no --jq filter holds ]] (Claude Code\'s safety check prompts on it)', brackets.length === 0, brackets.join('\n'))
+
+  const fallback = "git grep -n '<pattern>' -- '<pathspec>'"
+  const grepTexts = ['claude-code/skills/start-executor/reference/implement.md', 'claude-code/skills/start-reviewer/reference/review.md',
+    'claude-code/skills/start-qa/reference/evaluate.md', 'generic/executor.md', 'generic/reviewer.md', 'generic/qa.md',
+    'kiro/skills/start-executor/SKILL.md', 'kiro/skills/start-reviewer/SKILL.md', 'kiro/skills/start-qa/SKILL.md']
+  const noGrepClause = grepTexts.filter((f) => {
+    const p = paragraphWith(f, fallback).toLowerCase()
+    return !(p.includes("options go before the pattern (`git grep -n -a<n> '<pattern>' -- '<pathspec>'`): after it, git reads them as a revision") &&
+      p.includes("no `{…,…}` in a pattern or a pathspec: write alternatives as `-e '(a|b)'` and give each pathspec separately (`'*.ts' '*.tsx'`)"))
+  })
+  check('loop texts: beside every git grep fallback, options go before the pattern and no braces', noGrepClause.length === 0, noGrepClause.join('\n'))
+
+  const editTexts = grepTexts.filter((f) => !/qa/.test(f))
+  const noEditClause = editTexts.filter((f) => {
+    const p = paragraphWith(f, fallback)
+    return !(/Change files .*, never through (Bash|the shell): no heredoc, `python3 -`, `node -e`, `sed -i`, `tee` or `>` redirect/.test(p) &&
+      p.includes('generators and formatters, run as one plain command, are build steps, not hand edits'))
+  })
+  check('loop texts: the executor\'s and reviewer\'s plain-command rules change files with the edit tools, never through the shell', noEditClause.length === 0, noEditClause.join('\n'))
+
+  const perRow = 'emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`'
+  const jqTexts = [['claude-code/skills/start-executor/SKILL.md', '**One plain command per Bash call**'], ['claude-code/skills/start-reviewer/SKILL.md', '**One plain command per Bash call**'],
+    ['claude-code/skills/start-qa/SKILL.md', 'one plain command per Bash call in the loop'], ...grepTexts.slice(3).map((f) => [f, fallback])]
+  const noJqClause = jqTexts.filter(([f, needle]) => !paragraphWith(f, needle).includes(perRow)).map(([f]) => f)
+  check('loop texts: every loop\'s plain-command rule says --jq filters never end in ]], one array per row', noJqClause.length === 0, noJqClause.join('\n'))
+
+  const listing = 'gh api --paginate "repos/<repo>/issues/<N>/comments" --jq \'.[] | select((.body // "") | startswith("[executor] Claimed by ")) | "\\(.id) \\(.created_at) \\(.body)"\''
+  // Counted flat (lines rewrapped) and raw: a copy may wrap at jq's whitespace, never inside the
+  // "[executor] Claimed by " string, where the line break would become part of the match (#99 review).
+  const count = (f) => flat(read(f)).split(listing).length - 1
+  const unbroken = (f) => read(f).split('startswith("[executor] Claimed by "))').length - 1
+  const cc = flat(read('claude-code/skills/start-executor/SKILL.md'))
+  const listings = ['claude-code/skills/start-executor/SKILL.md', 'claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
+  check('loop texts: every executor\'s resume lists the claims inline, the same command as its claim step, never wrapped inside a string',
+    count('claude-code/skills/start-executor/SKILL.md') === 1 && count('claude-code/skills/start-executor/reference/implement.md') === 1 &&
+      !cc.includes('list them with the command in') && count('generic/executor.md') === 2 && count('kiro/skills/start-executor/SKILL.md') === 2 &&
+      listings.every((f) => unbroken(f) === count(f)),
+    listings.map((f) => `${f}: ${count(f)} flat, ${unbroken(f)} unbroken`).join('\n'))
+
+  // The first branch of the mailbox step, with the literal line: a live run that read a pointer to
+  // "the ⚠ No mailbox line" printed none.
+  const oneFolder = 'Only one of the two → print `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never supply the other folder, and carry on without a mailbox.'
+  const supplies = ['executor', 'reviewer', 'qa'].filter((r) => {
+    const t = flat(read(`claude-code/skills/start-${r}/SKILL.md`))
+    const at = t.indexOf(oneFolder)
+    return at === -1 || at > t.indexOf('Both → `node')
+  })
+  check('loop texts: with one mailbox folder of the two, every Claude Code loop prints the literal ⚠ line first, without --check, never making up the other', supplies.length === 0, supplies.join('\n'))
+}
+
 // ---------------------------------------------------------------- the executor's author check (#81)
 {
   // `gh issue view --json` has no authorAssociation field (it exits 1), so the author check must

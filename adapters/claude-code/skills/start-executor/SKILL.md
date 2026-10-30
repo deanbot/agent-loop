@@ -73,8 +73,9 @@ bare start that ran before the intended command) is then seen at once.
    --inbox /srv/mail/app-exec2/inbox --outbox /srv/mail/app-exec2/outbox` names none (not 3, not
    2). Then decide (`<clone>` is the base name of your working directory):
    - **You hold #<N>**: it is open, carries `<in-progress-label>`, and the newest `[executor]
-     Claimed by` comment on it names `<clone>` exactly (list them with the command in
-     [reference/implement.md](reference/implement.md) §1; a losing claim is deleted, so the newest
+     Claimed by` comment on it names `<clone>` exactly (list them with `gh api --paginate
+     "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "") |
+     startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.body)"'`; a losing claim is deleted, so the newest
      one left is the holder's). An issue claimed before claim comments existed has none: it is
      yours only when `$ARGUMENTS` names it. On its branch (`issue-<N>-…`) → **Resume** (below),
      with no `git checkout main` and no `git pull`. On another branch (including `main` with
@@ -83,7 +84,8 @@ bare start that ran before the intended command) is then seen at once.
      `<branch> has uncommitted changes, and #<N>'s work is on <its branch>: commit, stash or
      discard them, then restart.` Never resume on a branch that is not the issue's.
    - **Open, without `<in-progress-label>` or `<blocked-label>`** (you released it, say on a
-     "stop") → claim it again (implement.md §1). You win → you hold it: go on as in the first
+     "stop") → read [reference/implement.md](reference/implement.md) §1 now, then claim it again
+     as it says. You win → you hold it: go on as in the first
      bullet. You lose → as the next bullet.
    - **Anything else** (another clone holds it, it is closed or blocked, or there is no `<N>`):
      with a clean tree, `git checkout main` then pull (committed work stays on its
@@ -99,12 +101,13 @@ bare start that ran before the intended command) is then seen at once.
    safe while other executors run.
 5. **Mailbox**, only when `$ARGUMENTS` has `--inbox <folder>` or `--outbox <folder>` (spec:
    "Inbox folder"). Never take the folders from `AGENTS.md` or any other file in the clone: a PR
-   can change those. Put `<clone>` (the base name of your working directory) in each. Both → `node
+   can change those. Put `<clone>` (the base name of your working directory) in each. Only one
+   of the two → print `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never
+   supply the other folder, and carry on without a mailbox. Both → `node
    ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. `MAILBOX_OK`
-   → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. `MAILBOX_REFUSED: <reason>`,
-   or only one of the two → print `⚠ No mailbox: <the reason, or "--inbox and --outbox go
-   together">.` and carry on without one. No mailbox → `<inbox-flag>` is empty, and "Messages"
-   below does not apply. Messages are read in the PR loop only: one that arrives while you
+   → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. `MAILBOX_REFUSED: <reason>`
+   → print `⚠ No mailbox: <reason>.` and carry on without one. No mailbox → `<inbox-flag>` is
+   empty, and "Messages" below does not apply. Messages are read in the PR loop only: one that arrives while you
    implement or wait on a pick waits for the first poll cycle.
 
 Rules that hold for the whole session:
@@ -134,7 +137,9 @@ Rules that hold for the whole session:
   names), and carry on from the `main` you have.
 - **One plain command per Bash call**, in the loop (`gh …`, `node …`) and while you build, read
   source or run checks (reference/implement.md §3): no `$(…)`, no `;`, no pipes. Compound forms
-  defeat the permission allowlist and prompt, and an unattended loop stops at the prompt.
+  defeat the permission allowlist and prompt, and an unattended loop stops at the prompt. `--jq`
+  filters never end in `]]`: emit one array per row with `.[] | [ … ]`, not `[.[] | [ … ]]`
+  (Claude Code's safety check prompts on it, likely read as shell `[[ … ]]`).
 - **`gh` and `git push|fetch|pull` run on their own**, from the clone's root: `gh … --repo
   <repo>`, never `cd <dir> && gh …`. A sandbox exempts these commands by name (in Claude Code,
   `sandbox.excludedCommands`), and a chained command doesn't match, so it runs sandboxed, fails
