@@ -20,6 +20,10 @@
  *   MERGE_READY                 [reviewer] LGTM posted after last commit + CI passing (+ [qa] PASS with --require-qa;
  *                               + the gate quoted on the head with --require-gate and no CI), and the PR not in
  *                               conflict; no content block
+ *   NO_LOCAL_CI                 with --local-ci <context>: the head has had no check under that context for the
+ *                               window (--local-ci-window, default 300 s from when this script first saw the
+ *                               head), so the local runner isn't posting: the PR has no CI after all; emitted
+ *                               once per head; no content block
  *   MERGED                      PR is merged; executor should stop
  *   IDLE <count>                with --idle-after <n>, last line: <count> runs in a row (n or more) brought no
  *                               new comment, review, commit or CI change and no new signal (lib/wait.mjs)
@@ -44,6 +48,11 @@
  * head commit: a line "Gate on <sha>: <the gate's last line>", where <sha> (7 or more hex digits)
  * starts the head sha. With CI checks present, CI is the gate and no quote is needed.
  *
+ * --local-ci <context> (the project runs local-ci.mjs, block key `local-ci`): a head with no CI checks
+ * and none under <context> yet is not "no CI" during the window: the runner posts `pending` within a
+ * pass. Until it does, CI counts as pending (MERGE_READY withheld, no gate quote asked for). After
+ * the window with still nothing, the head has no CI as without the flag, and NO_LOCAL_CI says so once.
+ *
  * A role's verdict is its NEWEST [role] comment posted after the last commit: a later finding revokes
  * an earlier LGTM/PASS without a push. Reviewer comment kinds by prefix: "[reviewer] LGTM" (verdict),
  * "[reviewer] Question" (for the operator; not actionable for the executor), anything else is a
@@ -56,7 +65,7 @@
  *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-poll-<pr>.json across sessions, one file
  * per PR so two executors never write the same file: { comments, reviews, reviewComments,
- * ciFailedKey } last-seen IDs. A PR with no file yet takes its entry from the shared file earlier
+ * ciFailedKey } last-seen IDs, and with --local-ci { head: { sha, seenAt }, noLocalCi: <sha> }. A PR with no file yet takes its entry from the shared file earlier
  * versions kept (<owner>-<repo>-pr-poll-state.json, keyed by PR number), which is left alone.
  */
 
@@ -65,7 +74,7 @@ import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
 
-const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
+const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--local-ci <context> [--local-ci-window <secs>]] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
 function arg(name) {
   const i = process.argv.indexOf(name)
@@ -82,6 +91,11 @@ const requireGate = flag('--require-gate')
 
 if (!repo || !prNumber) usageError(USAGE)
 if (!/^\d+$/.test(prNumber)) usageError(USAGE, `--pr: expected a PR number, got "${prNumber}"`)
+const localCi = arg('--local-ci')
+if (flag('--local-ci') && (!localCi || localCi.startsWith('--'))) usageError(USAGE, '--local-ci: expected the check\'s context')
+const windowArg = arg('--local-ci-window')
+if (flag('--local-ci-window') && (!localCi || !/^\d+$/.test(windowArg ?? ''))) usageError(USAGE, '--local-ci-window: expected seconds, with --local-ci')
+const LOCAL_CI_WINDOW_MS = Number(windowArg ?? 300) * 1000
 
 // `gh api --paginate` prints one JSON document per page; `--slurp` wraps them in one array (gh ≥ 2.43).
 function ghApiAll(gh, path) {
@@ -154,13 +168,29 @@ function pass({ gh, save, dry, mark }) {
   }
   const checks = fetchChecks()
   const failingChecks = (checks ?? []).filter((c) => c.bucket === 'fail' || c.bucket === 'cancel')
-  const ciPassed = checks !== null && checks.every((c) => c.bucket === 'pass' || c.bucket === 'skipping')
   // No CI: nothing reported, or every check skipped (a workflow switched off by an `if:`). With
   // --require-gate the project's local gate stands in for it (MERGE_READY below).
-  const noCi = checks !== null && checks.every((c) => c.bucket === 'skipping')
+  let noCi = checks !== null && checks.every((c) => c.bucket === 'skipping')
+  // With --local-ci, a head the runner hasn't marked yet is waiting for CI, not without it, until
+  // the window from when this script first saw the head has passed (the header).
+  let localCiPending = false
+  let noLocalCi = false
+  if (localCi && headSha) {
+    if (prState.head?.sha !== headSha) prState.head = { sha: headSha, seenAt: Date.now() }
+    if (noCi && !checks.some((c) => c.name === localCi)) {
+      if (Date.now() - prState.head.seenAt < LOCAL_CI_WINDOW_MS) {
+        localCiPending = true
+        noCi = false
+      } else if (prState.noLocalCi !== headSha) {
+        noLocalCi = true
+        prState.noLocalCi = headSha
+      }
+    }
+  }
+  const ciPassed = checks !== null && !localCiPending && checks.every((c) => c.bucket === 'pass' || c.bucket === 'skipping')
   // The idle count's activity key (lib/wait.mjs): a new commit or a CI change is news to the count
   // even when it changes neither the state nor the output (CI going green with no LGTM yet).
-  const ciKey = checks === null ? 'unknown' : checks.map((c) => `${c.name}=${c.bucket}`).sort().join(',')
+  const ciKey = checks === null ? 'unknown' : `${checks.map((c) => `${c.name}=${c.bucket}`).sort().join(',')}${localCiPending ? ' local-ci-pending' : ''}`
   mark?.(`${headSha} ${ciKey}`)
 
   // First run: seed cursors to current max IDs and emit nothing.
@@ -322,6 +352,9 @@ function pass({ gh, save, dry, mark }) {
     }
     prState.ciFailedKey = ciFailedKey
   }
+
+  // NO_LOCAL_CI — once per head: the runner never marked it, so the executor runs the gate itself.
+  if (noLocalCi) out.push('NO_LOCAL_CI')
 
   // MERGE_CONFLICT — a state, like MERGE_READY: reported on every run while the PR conflicts, so the
   // executor sees it even when the conflict arrived after the LGTM (another PR merged into main).

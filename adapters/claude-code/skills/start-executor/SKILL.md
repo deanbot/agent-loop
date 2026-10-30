@@ -41,7 +41,9 @@ bare start that ran before the intended command) is then seen at once.
    `blocked-label` (default `is-blocked`), `pre-gate` (optional: a check that runs in seconds,
    before the gate; [reference/implement.md](reference/implement.md) §3), `quality-gates` (the
    command that must pass before a PR), `gate` (optional: the command that stands in for CI on a PR that has none; see
-   [reference/implement.md](reference/implement.md) §3), `qa-gate` (`on` or `off`, default
+   [reference/implement.md](reference/implement.md) §3), `local-ci` (optional: the context a local
+   runner posts the gate's result under; with it the runner, not you, gates every head),
+   `qa-gate` (`on` or `off`, default
    `off`), `needs-operator-label` (default `needs-operator`), and the author allowlist
    (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
    **Model check:** if the block has `models:` (comma-separated `role=model[/effort]`, e.g.
@@ -296,7 +298,8 @@ exits 0 (`PENDING` or `NONE`) ends the count and the 5-minute rhythm, and a new 
 waiter again.
 
 Below, `<poll>` is `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR>`, plus
-`--require-qa` when `qa-gate` is `on`, plus `--require-gate` when the block has `gate`.
+`--require-qa` when `qa-gate` is `on`, plus `--require-gate` when the block has `gate`, plus
+`--local-ci <context>` when the block has `local-ci: <context>`.
 
 Each cycle:
 
@@ -306,8 +309,8 @@ Each cycle:
    output. A last line `IDLE <count>` means this is the third poll or later in a row with no new
    comment, review, commit or CI change and no new signal (a standing `MERGE_READY` is nothing
    new): handle the signals as usual, then take the idle wait in step 5.
-2. Handle every signal it printed, in this order: `MERGED`, `CI_FAILING`, `MERGE_CONFLICT`,
-   `NEW_INLINE_COMMENT`, `NEW_REVIEW_SUBMISSION`, `NEW_COMMENT`, `MERGE_READY`, `NONE`. Signal
+2. Handle every signal it printed, in this order: `MERGED`, `CI_FAILING`, `NO_LOCAL_CI`,
+   `MERGE_CONFLICT`, `NEW_INLINE_COMMENT`, `NEW_REVIEW_SUBMISSION`, `NEW_COMMENT`, `MERGE_READY`, `NONE`. Signal
    handling is in [reference/signals.md](reference/signals.md); read it the first time a non-`NONE` signal
    arrives and keep it in mind after that. The short form:
    - `MERGED` → in this order, every step, `RULES_CHANGED` or not (no wakeup for this PR):
@@ -327,6 +330,9 @@ Each cycle:
         status, repeat the `RESTART: …` line in that closing text.
    - `CI_FAILING` → read the failing job's log, fix at the root, run the quality gates, push once,
      post one `[executor] Pushed fix: …`.
+   - `NO_LOCAL_CI` (only with `local-ci`) → the runner never marked this head: run `<gate>`
+     yourself and post `[executor] No <context> check on <short sha>: Gate on <short sha>: <last
+     line>`; the PR has no CI from now on (signals.md).
    - `MERGE_CONFLICT` → the branch conflicts with `main` (often another PR merged after the
      LGTM). `--remove-label <needs-operator-label>` unless a question is still open, bring `main`
      in, resolve, run the quality gates, push once (in the same push as any other fix this cycle),
@@ -365,7 +371,7 @@ Each cycle:
    schedule the fallback:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> [--require-qa] [--require-gate] --wait 30 --max 1500 <inbox-flag>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> [--require-qa] [--require-gate] [--local-ci <context>] --wait 30 --max 1500 <inbox-flag>
 ```
 
 ```
@@ -380,7 +386,7 @@ this cycle, and no question of yours is open: the same waiter with `--max 3300` 
 `--max 600` wait stays, idle or not. The first poll without `IDLE` goes back to the normal wait.
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> [--require-qa] [--require-gate] --wait 30 --max 3300 <inbox-flag>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-poll.mjs --repo <repo> --pr <PR> [--require-qa] [--require-gate] [--local-ci <context>] --wait 30 --max 3300 <inbox-flag>
 ```
 
 With a mailbox, `<inbox-flag>` goes on every waiter (the `--max 600` one too) and makes it end on

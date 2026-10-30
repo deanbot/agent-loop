@@ -163,7 +163,10 @@ Then implement:
    <short sha>: <last line>` in the PR body or the push comment. Every later "run
    `quality-gates`" below includes the gate the same way. A check from the project's local
    runner (`local-ci.mjs`, which runs the gate on every head) is CI: with it on the PR, skip the
-   gate and the quote. **Before every push, in this order:** `pre-gate` when the block has it,
+   gate and the quote. With `local-ci: <context>` in the block, the runner gates every head:
+   never run the gate before opening the PR, and write `Gate: runs as the <context> check.` in
+   the body instead of the quote. Only `NO_LOCAL_CI` from the poll (below) makes the PR one
+   without CI. **Before every push, in this order:** `pre-gate` when the block has it,
    fixed and run again until it passes (commit what a formatter changed); commit; the push-time
    checks without pushing: `git push --dry-run origin <branch>`, which runs the project's
    pre-push hooks on the commits it would send, and, where the project's conventions name a
@@ -184,8 +187,14 @@ Input needed with no PR yet and no safe default: park.
 ## Poll loop
 
 `node scripts/pr-poll.mjs --repo <repo> --pr <PR>` once per cycle (add `--require-qa` when
-`qa-gate: on`, and `--require-gate` when the block has `gate`). Wait ~60s between cycles. Own
-`[executor]` posts are already filtered out.
+`qa-gate: on`, `--require-gate` when the block has `gate`, and `--local-ci <context>` when it
+has `local-ci: <context>`). Wait ~60s between cycles. Own `[executor]` posts are already filtered
+out.
+
+- `NO_LOCAL_CI` (only with `local-ci`) → no check under `<context>` on the head after the poll's
+  window (5 minutes): the runner isn't posting. The PR has no CI from now on: run `<gate>` on
+  the committed, clean tree and post `[executor] No <context> check on <short sha>: Gate on
+  <short sha>: <last line>`.
 
 - `MERGED` → remove `in-progress-label`, `git checkout main`, then `node scripts/pull.mjs --start
   "<how this loop is started>"` plus `--milestone "<milestone>"` when you have one (on

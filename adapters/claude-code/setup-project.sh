@@ -244,5 +244,6 @@ if [ -n "$GATE" ]; then
 Optional: run the gate once per PR head instead, as a local CI check. In a clone of its own (no
 setup, no role), leave this running in a terminal or as a login item:
   node ${PLUGIN_ROOT:-<plugin root>}/scripts/local-ci.mjs --repo $REPO --gate $GATE_QUOTED --wait
+and add 'local-ci: local-ci' to the '## Agent loop' block, so executors leave the gate to it.
 LOCALCI
 fi

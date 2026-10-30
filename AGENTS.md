@@ -24,8 +24,11 @@ Three layers. Boundaries are strict.
   holds a PR. A PR labelled needs-operator that falls into conflict is reported as a standing
   `MERGE_CONFLICT:<n>`.
 - `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]
-  [--require-gate]`. Signals then content blocks, exits. `--require-gate` (the block names a
-  `gate`): on a PR with no CI, `MERGE_READY` needs the LGTM's `Gate on <sha>:` line on the head.
+  [--require-gate] [--local-ci <context> [--local-ci-window <secs>]]`. Signals then content
+  blocks, exits. `--require-gate` (the block names a `gate`): on a PR with no CI, `MERGE_READY`
+  needs the LGTM's `Gate on <sha>:` line on the head. `--local-ci <context>` (the block's
+  `local-ci` key): a head with no checks is CI pending until the runner's check appears, or, after
+  the window (300 s from first seeing the head), `NO_LOCAL_CI` once and no CI as before.
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
 - `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
   [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n] [--clone <clone>]`. Prints
