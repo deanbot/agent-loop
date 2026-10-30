@@ -11,9 +11,10 @@ association; `gh issue view --json` has no such field and fails on it. An array,
 object: Claude Code's safety check prompts on a jq object with a comma (likely read as brace
 expansion), even under `Bash(gh *)`, so an object would stop every claim on a prompt.
 
-- `<in-progress-label>` present → another executor has it, unless the newest `[executor] Claimed
-  by` comment (step 2 of the claim below) names `<clone>` exactly: then it is yours, so resume (SKILL.md,
-  "Resume"). If you are not on its branch, find it with `git branch --list "issue-<N>-*"` and
+- `<in-progress-label>` present → another executor has it, unless `node
+  ${CLAUDE_PLUGIN_ROOT}/scripts/claims.mjs --repo <repo> --issue <N> --clone <clone>
+  --in-progress-label <in-progress-label> --blocked-label <blocked-label>` prints `CLAIM_HELD`:
+  then it is yours, so resume (SKILL.md, "Resume"). If you are not on its branch, find it with `git branch --list "issue-<N>-*"` and
   switch to it first (`git switch <branch>`, only with a clean tree; with uncommitted changes,
   stop and say so). Someone else's: the label is
   authoritative and the absence of an open PR is not evidence the claim is stale. Pick next.
@@ -103,7 +104,7 @@ give, and the loop stops until the operator happens to look.
   fix before the push. Quote its last line, as `Gate on <short sha>: <last line>`, in the PR body
   (under the criteria table) or in the `[executor] Pushed fix` comment for that push. The
   reviewer runs the gate again on the head and quotes it in its LGTM, and `MERGE_READY` needs that
-  quote (`--require-gate`). A project may run the local runner (`local-ci.mjs`), which runs the
+  quote (the poll reads `gate` from the block). A project may run the local runner (`local-ci.mjs`), which runs the
   gate on every head and posts the result as a check (`local-ci` unless the project named another
   context). While that check is on the PR, the PR has CI: skip the gate and the quote.
 - **With `local-ci: <context>` in the block**, the project runs that runner and it gates every

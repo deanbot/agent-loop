@@ -95,7 +95,7 @@ post nothing, wait ~120s. Otherwise the full review:
    run the gate before an LGTM: `git fetch origin pull/<n>/head`, `git switch --detach FETCH_HEAD`, a
    clean `git status --porcelain`, then `<gate>`, then `git switch main`. A failure is a finding. A
    pass goes into the LGTM as its own line, `Gate on <short sha>: <the gate's last line>`, and
-   replaces "CI green" in the threshold below: `MERGE_READY` (`pr-poll --require-gate`) needs that
+   replaces "CI green" in the threshold below: `MERGE_READY` (`pr-poll`, which reads `gate` from the block) needs that
    line on the head, and the label goes on right after the LGTM. A check from the project's
    local runner (`local-ci.mjs`; `local-ci` unless the project named another context), pending
    included, is CI: skip the gate, and name the check in the LGTM line (`CI green (local-ci)`)

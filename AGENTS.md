@@ -24,8 +24,11 @@ Three layers. Boundaries are strict.
   holds a PR. A PR labelled needs-operator that falls into conflict is reported as a standing
   `MERGE_CONFLICT:<n>`.
 - `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]
-  [--require-gate] [--local-ci <context> [--local-ci-window <secs>]]`. Signals then content
-  blocks, exits. `--require-gate` (the block names a `gate`): on a PR with no CI, `MERGE_READY`
+  [--require-gate] [--local-ci <context>] [--local-ci-window <secs>]`. Signals then content
+  blocks, exits. It reads `qa-gate`, `gate` and `local-ci` from the `## Agent loop` block of
+  `AGENTS.md` on the default branch (the contents API, never the clone's copy, which is the PR's)
+  and turns the matching flag on itself; a flag given still wins, and a block it can't read,
+  or no `AGENTS.md` there at all, withholds `MERGE_READY` (#129). `--require-gate` (the block names a `gate`): on a PR with no CI, `MERGE_READY`
   needs the LGTM's `Gate on <sha>:` line on the head. `--local-ci <context>` (the block's
   `local-ci` key): a head with no checks is CI pending until the runner's check appears, or, after
   the window (300 s from first seeing the head), `NO_LOCAL_CI` once for the PR and no CI as before,
@@ -35,6 +38,14 @@ Three layers. Boundaries are strict.
   same-repository PR whose body says `Closes #<N>`) or `NONE`; exit 2 on a failed `gh` call, on
   which the executor stops rather than claims. It replaces a `--jq` regex filter that drew Claude
   Code's safety check.
+- `scripts/claims.mjs` — the executor's claim check on resume. `--repo owner/repo --issue <N>
+  --clone <clone> [--in-progress-label <l>] [--blocked-label <l>]` prints one of `CLAIM_CLOSED`,
+  `CLAIM_BLOCKED`, `CLAIM_RELEASED` (open, not in progress), `CLAIM_HELD` (the newest
+  `[executor] Claimed by` comment names the clone), `CLAIM_LOST <clone>` or `CLAIM_NONE` (no claim
+  comment); exit 2 on a failed `gh` call. The resume branches on its line, so the check can't be
+  skipped.
+- `scripts/lib/block.mjs` — reads a key from the `## Agent loop` block of an `AGENTS.md` text
+  (`pr-poll.mjs`, `pull.mjs`, `local-ci.mjs`).
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
 - `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
   [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n] [--clone <clone>]`. Prints

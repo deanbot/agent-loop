@@ -29,6 +29,7 @@
 
 import { execFileSync } from 'child_process'
 import { recordFile, addPending, shellWord } from './lib/rules.mjs'
+import { blockLine } from './lib/block.mjs'
 
 const USAGE = 'pull.mjs [--start <command> [--milestone <title>]]'
 
@@ -53,8 +54,7 @@ const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['
 
 // The rules files the block lists: `rules: a.md, docs/b.md` (brackets and quotes allowed).
 function rulesPaths(agents) {
-  const block = agents.split(/^## /m).find((s) => s.startsWith('Agent loop')) ?? ''
-  const line = /^rules:[ \t]*(.*)$/m.exec(block)?.[1] ?? ''
+  const line = blockLine(agents, 'rules') ?? ''
   return line
     .replace(/^\[|\]$/g, '')
     .split(',')

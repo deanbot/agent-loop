@@ -106,7 +106,7 @@ After each cycle, re-invoke with the PR number to continue polling.
 | All reviewer signals from `pr-watch.mjs` implemented; acceptance criteria verified when `qa-gate: off` | ✅ |
 | Prefix convention (`[executor]`, `[reviewer]`) | ✅ |
 | Loop invariant (wait between polls) | ✅ — manual or cron |
-| MERGE_READY threshold (LGTM + CI passing + no conflict; + `[qa] PASS` with `--require-qa`; + the gate quote with `--require-gate` and no CI) | ✅ |
+| MERGE_READY threshold (LGTM + CI passing + no conflict; + `[qa] PASS` with `qa-gate: on`; + the gate quote with `gate` and no CI; pr-poll reads both from the block) | ✅ |
 | One session per clone (`scripts/session.mjs`) | ❌ — no session id known to the prompts; a second session in one clone goes unnoticed |
 | Spec version | v0.2 |
 

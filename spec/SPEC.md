@@ -303,8 +303,15 @@ merge" with its steps, and the operator confirms by a comment or by merging.
 ## Executor signals (`pr-poll.mjs`)
 
 Script runs once per poll cycle for one PR, emits signals and content blocks, exits. Usage:
-`pr-poll.mjs --repo owner/repo --pr <n> [--require-qa] [--require-gate]`. Adapters pass
-`--require-qa` when `qa-gate: on`, and `--require-gate` when the block has `gate`.
+`pr-poll.mjs --repo owner/repo --pr <n> [--require-qa] [--require-gate] [--local-ci <context>]`.
+The script reads the `## Agent loop` block of `AGENTS.md` on the repository's default branch
+itself, never the checkout's copy (on a PR's branch that is the PR's, which must not set its own
+gate): `qa-gate: on` turns on `--require-qa`, a `gate` key `--require-gate`, and `local-ci:
+<context>` gives `--local-ci <context>`, so adapters run it with no flags. A flag given still
+wins, and the block only adds to the flags. A block that can't be read withholds `MERGE_READY` for
+that run, and so does no `AGENTS.md` on the default branch: a project running the loop has one,
+so a missing file (or one named in another case, which the API tells apart) is a fault, never a
+block with no keys.
 
 | Signal | Meaning |
 |---|---|
@@ -1041,4 +1048,9 @@ an older waiter, is never taken over. An adapter prompt that predates this reads
 broken waiter, so the loops restart with the skills that handle it. Later in 0.2, additive: the
 `local-ci` key, `pr-poll --local-ci <context> [--local-ci-window <secs>]` and its `NO_LOCAL_CI`
 signal; without the flag `pr-poll` is unchanged, and an executor prompt that predates the key
-ignores it and runs the gate as before.
+ignores it and runs the gate as before. Later in 0.2: `pr-poll` reads `qa-gate`, `gate` and
+`local-ci` from the block on the default branch, so a project with those keys gets their checks
+whether or not the caller passes the flags (a caller that passes them sees no change), and
+`--local-ci-window` no longer needs `--local-ci`. `claims.mjs` gives the executor's resume its
+claim check as one line (`CLAIM_HELD`, `CLAIM_LOST <clone>`, `CLAIM_NONE`, `CLAIM_RELEASED`,
+`CLAIM_CLOSED`, `CLAIM_BLOCKED`); the claim protocol itself is unchanged.
