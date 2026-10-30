@@ -107,6 +107,10 @@ operator's results, such as measurements: ask for them once. On `MERGE_READY` ad
 
 ## Detect input
 
+Tell a PR from an issue with `gh pr view <n> --repo <repo> --json number,body`. It succeeds → a
+PR. It fails with `Could not resolve to a PullRequest` → an issue. Any other failure (network,
+auth) → stop and say `Could not tell whether <n> is a PR: <the error>. Restart when gh works.`
+
 - PR number → orient (read the description and the whole thread; you are resuming, so remove a
   lingering `blocked-label` or `needs-operator-label` from the issue and the PR), enter the poll
   loop.

@@ -61,7 +61,7 @@ $ARGUMENTS may hold `--milestone "<title>"`: take it out first and keep it as `<
 
 Run `gh pr view $ARGUMENTS --repo <repo>` first (skip it when $ARGUMENTS is empty).
 - If it succeeds: $ARGUMENTS is a PR — note linked issue from PR body (`Closes #<N>`), orient (step 6b), enter executor loop (step 7).
-- If it fails or $ARGUMENTS is empty: treat as issue number or pick next.
+- If it fails with `Could not resolve to a PullRequest`, or $ARGUMENTS is empty: treat as issue number or pick next. Any other failure (network, auth) → stop and say `Could not tell whether <n> is a PR: <the error>. Restart when gh works.`
   - **Empty $ARGUMENTS:** run pick-next query (step 8), use result as issue number.
   - **Issue number:** check for existing open PR: `gh pr list --repo <repo> --state open --limit 100 --json number,body --jq '[.[] | select((.body // "") | test("Closes #<N>([^0-9]|$)"; "i"))] | first | .number'`
     - PR found: orient (step 6b), enter executor loop (step 7) — do not re-claim label.
