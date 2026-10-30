@@ -874,6 +874,17 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
     taker.code === 3 && h.code === 0 && signals(h.out).join() === 'NONE', `taker ${taker.code} ${taker.out} | holder ${h.code} ${h.out}${h.err}`)
   check('wait: … and the withdrawn request is gone',
     !existsSync(path.join(ctx.home, '.agent-loop', 'state', WATCH_STATE.replace(/\.json$/, '-wait.lock.takeover'))), '')
+
+  // A request whose taker is gone (stopped after signalling, before withdrawing) is not honoured.
+  setFixture(ctx, watchReviewed)
+  const lone = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4'))
+  await pause(1000)
+  const dead = spawnSync('node', ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).stdout
+  writeFileSync(path.join(ctx.home, '.agent-loop', 'state', WATCH_STATE.replace(/\.json$/, '-wait.lock.takeover')), dead)
+  lone.child.kill('SIGUSR2')
+  const l = await lone.done
+  check('wait: a takeover request whose taker is gone → the holder keeps waiting (NONE at --max), never exit 4',
+    l.code === 0 && signals(l.out).join() === 'NONE', `${l.code} ${l.out}${l.err}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
