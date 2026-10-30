@@ -2851,6 +2851,8 @@ const putMessage = (dir, id, extra, meta) => {
     ask(held(['in-progress'], [claimed('exec-a2', 5)])) === 'CLAIM_LOST exec-a2')
   check('claims: "Claimed by exec-a and more" names no clone exactly → CLAIM_LOST, never HELD',
     ask(held(['in-progress'], [claimed('exec-a and more', 5)])).startsWith('CLAIM_LOST '))
+  check('claims: a claim naming no clone (control characters, a backtick, nothing) → CLAIM_LOST (unnamed), never the raw text',
+    ask(held(['in-progress'], [claimed('\u001b[2J`rm`', 5)])) === 'CLAIM_LOST (unnamed)' && ask(held(['in-progress'], [claimed('', 5)])) === 'CLAIM_LOST (unnamed)')
   check('claims: open, in progress, no claim comment → CLAIM_NONE', ask(held(['in-progress'], [other])) === 'CLAIM_NONE')
   check('claims: open without the in-progress label → CLAIM_RELEASED (a claim of ours on it is old)',
     ask(held([], [claimed('exec-a', 5)])) === 'CLAIM_RELEASED')

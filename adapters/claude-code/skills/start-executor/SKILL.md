@@ -84,8 +84,9 @@ bare start that ran before the intended command) is then seen at once.
    The claim check below never runs on a PR's number. With a `<N>`, run it before deciding
    anything, every start: `node ${CLAUDE_PLUGIN_ROOT}/scripts/claims.mjs --repo <repo> --issue <N>
    --clone <clone> --in-progress-label <in-progress-label> --blocked-label <blocked-label>`
-   (`<clone>` is the base name of your working directory). Its one line decides, never the
-   branch, the labels you remember or the tree. A failed run (exit 2, a `claims:` line) decides
+   (`<clone>` is the base name of your working directory). Whether you hold #<N> is its
+   line alone, never the labels you remember; the branch and the tree decide only how you resume.
+   A failed run (exit 2, a `claims:` line) decides
    nothing: **stop** and say `Could not check the claim on #<N>: <the claims: line>. Restart when
    gh works.` Then:
    - **You hold #<N>**: `CLAIM_HELD`, or `CLAIM_NONE` (claimed before claim comments existed)

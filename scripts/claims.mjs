@@ -14,7 +14,8 @@
  *                         or never claimed); claim it again before any work
  *   CLAIM_HELD            open, in progress, and its newest "[executor] Claimed by" comment names
  *                         <clone> exactly
- *   CLAIM_LOST <clone>    open, in progress, and the newest claim names another clone
+ *   CLAIM_LOST <clone>    open, in progress, and the newest claim names another clone (`(unnamed)`
+ *                         when the text after the marker starts with no clone name)
  *   CLAIM_NONE            open, in progress, and no claim comment at all (claimed before claim
  *                         comments existed): the caller's own word decides
  * A losing claim is deleted (spec: "Claim comments"), so the newest one left is the holder's.
@@ -50,8 +51,9 @@ if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) usageError(repo ? `--repo: expect
 const issueArg = arg('--issue')
 if (!issueArg || !/^#?\d+$/.test(issueArg)) usageError(issueArg ? `--issue: expected an issue number, got "${issueArg}"` : '--issue is required')
 const issue = issueArg.replace(/^#/, '')
+const CLONE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const clone = arg('--clone')
-if (!clone || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(clone)) usageError(clone ? `--clone: expected a clone name, got "${clone}"` : '--clone is required')
+if (!clone || !CLONE.test(clone)) usageError(clone ? `--clone: expected a clone name, got "${clone}"` : '--clone is required')
 const inProgress = arg('--in-progress-label') ?? 'in-progress'
 const blocked = arg('--blocked-label') ?? 'is-blocked'
 
@@ -69,7 +71,10 @@ function decide() {
   const newest = comments.filter((c) => (c.body ?? '').startsWith(MARKER)).sort((a, b) => a.id - b.id).at(-1)
   if (!newest) return 'CLAIM_NONE'
   const holder = newest.body.slice(MARKER.length).trim()
-  return holder === clone ? 'CLAIM_HELD' : `CLAIM_LOST ${holder.split(/\s/)[0] || '(unnamed)'}`
+  if (holder === clone) return 'CLAIM_HELD'
+  // The name is comment text anyone can write: print it only when it is a clone name.
+  const named = holder.split(/\s/)[0]
+  return `CLAIM_LOST ${CLONE.test(named) ? named : '(unnamed)'}`
 }
 
 let line

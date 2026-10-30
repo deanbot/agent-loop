@@ -64,8 +64,8 @@ PullRequest` → `<N>` is the number. Any other failure (network, auth) → stop
 tell whether <n> is a PR: <the error>. Restart when gh works.` The claim check never runs on a
 PR's number. With a `<N>`, run it before deciding anything, every start: `node scripts/claims.mjs
 --repo <repo> --issue <N> --clone <clone> --in-progress-label <l> --blocked-label <l>` (`<clone>`
-is the base name of your working directory). Its one line decides, never the branch or the labels
-you remember. A failed run (exit 2, a `claims:` line) → stop and say `Could not check the claim
+is the base name of your working directory). Whether you hold #<N> is its line alone, never the
+labels you remember; the branch decides only how you resume. A failed run (exit 2, a `claims:` line) → stop and say `Could not check the claim
 on #<N>: <the claims: line>. Restart when gh works.`
 - You hold #<N> (`CLAIM_HELD`, or `CLAIM_NONE`, claimed before claim comments existed, only when
   the input names it, by its own number or by a PR whose `Closes #<N>` names it), and you are on
