@@ -615,6 +615,20 @@ node scripts/local-ci.mjs --repo owner/repo --gate "<command>" [--context local-
   (its output to a log file per run), and post `success` or `failure` with the gate's last
   non-empty line as the description (140 characters at most). A head it cannot fetch or check out
   gets `error`. Any other state under the context is done.
+- Right before a head's run it lists the open PRs again, since a run before it can take half an
+  hour. A head that is no longer its PR's head gets `error`, `superseded by <sha>: not run`, and no
+  run: a final state, so the commit never waits on a run that won't come. It is `error` and not
+  `success`, since nothing was gated and the same commit could become a head again. A head whose PR
+  has closed gets no run and no post. Its `pending` stays as it was, like any closed PR's, because a
+  merged head's commit may be on the default branch.
+- While an install or a gate runs, it lists the open PRs every `--wait` interval (30 seconds in a
+  one-shot run) and posts `pending` on any head with no status, as at the start of a pass. A push
+  during a run then shows CI within the interval, so no reader takes the new head for one with no
+  CI. That look reuses the pass's trusted authors and runs no git, since the clone belongs to the
+  run. A failed look is said on stderr and tried again at the next tick. The run in progress is
+  never stopped for a newer head: a project's gate may hold locks or start services that a stop
+  would not release cleanly, so it finishes, and its status lands on a commit that is no longer
+  the head.
 - With `--install "<command>"`, the project's dependencies follow the head. The tree is cleaned
   without `-x`, so ignored folders such as `node_modules` stay from one head to the next. After
   the checkout, when the head's lockfiles differ from those of the clone's last successful
@@ -980,4 +994,6 @@ after `MAILBOX_OK` (an adapter that predates it keys on the first line and keeps
 refusal of a path that is not a folder or lies under a file. Later in 0.2, additive:
 `local-ci.mjs --install` and `--lockfiles`, and its install record; without them the runner
 behaves as before. Later in 0.2, adapter rules only, no script or signal change: no cycle ends
-without a waiter or a short timer ("Waiting for events").
+without a waiter or a short timer ("Waiting for events"). Later in 0.2: `local-ci.mjs` skips a
+superseded head (`error`, `superseded by <sha>: not run`) and marks new heads `pending` while a
+run goes on; the status contexts and states are unchanged.

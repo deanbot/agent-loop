@@ -55,7 +55,9 @@ Three layers. Boundaries are strict.
   role marker). Runs the gate once per trusted, same-repository PR head, one at a time, and posts
   the result as a commit status, which `gh pr checks` and `pr-poll.mjs` read as CI. With
   `--install`, it runs the install command first whenever the head's lockfiles differ from those of
-  the clone's last successful install, and posts `error` when the install fails. One runner per repo
+  the clone's last successful install, and posts `error` when the install fails. A head that is no
+  longer its PR's head when its turn comes gets `error` (`superseded by <sha>: not run`) and no
+  run; while a run goes on, new heads get `pending` every `--wait` interval. One runner per repo
   and context (pid lock).
 - `scripts/audit.mjs` — the auditor's numbers, read-only. `--repo owner/repo --since <date|Nd>
   [--until <date>] [--floor id,id] [--operators l,l] [--labels l,l] [--format md|json]`. For each

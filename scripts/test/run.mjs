@@ -1448,6 +1448,51 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   check('local-ci: a listed head origin does not have → skipped, with a stderr line naming both heads',
     mis.status === 0 && states(s15a) === 'pending' && new RegExp(`#15 is listed at ${s15a.slice(0, 7)} but origin's pull/15/head is [0-9a-f]{7}`).test(mis.stderr),
     `${mis.stdout}${mis.stderr}`)
+  // #106: a gate that stands for a push during a run. It rewrites the fixture's listing (the fake
+  // gh reads it on every call) from inside the gate, then works for a while.
+  const relist = (edits) =>
+    `node -e "const fs=require('fs');const f=process.env.FAKE_GH_FIXTURE;const x=JSON.parse(fs.readFileSync(f,'utf8'));const e=${JSON.stringify(edits).replace(/"/g, "'")};` +
+    `x.prs=x.prs.filter(p=>e[p.number]!=='closed').map(p=>e[p.number]?Object.assign({},p,{headRefOid:e[p.number]}):p);fs.writeFileSync(f+'.t',JSON.stringify(x));fs.renameSync(f+'.t',f)"`
+  const s41 = makePr(41, '41')
+  const s41b = makePr(41, '41b')
+  const s43 = makePr(43, '43')
+  const s40 = makePr(40, { 'pr.txt': '40\n', 'gate.sh': `echo "start 40 $(git rev-parse HEAD)" >> "$TRACE"\n${relist({ 41: s41b, 43: 'closed' })}\necho "40 passed"\n` })
+  writeFileSync(ctx.log, '')
+  const out40 = lci({ prs: [pr(40, s40), pr(41, s41), pr(43, s43)], statuses: {} })
+  check('local-ci: a queued head its PR no longer has is never run: error "superseded by <sha>: not run"',
+    states(s41) === 'pending,error' && statuses()[s41][1].description === `superseded by ${s41b.slice(0, 7)}: not run` &&
+      !traceText().includes(`start 41 ${s41}`) && out40.includes(`#41 ${s41.slice(0, 7)} error: superseded by ${s41b.slice(0, 7)}: not run`),
+    `${out40}${JSON.stringify(statuses()[s41])}`)
+  check('local-ci: … a queued head whose PR closed is not run and gets no further post (it stays as it was)',
+    states(s43) === 'pending' && !traceText().includes('start 43 ') && !out40.includes('#43 '), `${out40}${JSON.stringify(statuses()[s43])}`)
+  check('local-ci: … and the run before them finished as usual', states(s40) === 'pending,success' && statuses()[s40][1].description === '40 passed', JSON.stringify(statuses()[s40]))
+
+  // A push while a gate runs: the new head is pending before that run ends (--wait 1: a light poll
+  // every second while the gate runs).
+  const s45 = makePr(45, '45')
+  const s45b = makePr(45, '45b')
+  const s44 = makePr(44, { 'pr.txt': '44\n', 'gate.sh': `echo "start 44 $(git rev-parse HEAD)" >> "$TRACE"\n${relist({ 45: s45b })}\nsleep 4\necho "44 passed"\n` })
+  writeFileSync(ctx.log, '')
+  // #45's old head is already done, so the pass queues only #44; its gate moves #45 to a new head
+  // with no status.
+  setFixture(ctx, { prs: [pr(44, s44), pr(45, s45)], statuses: { [s45]: [{ state: 'success', context: 'local-ci', description: 'all 3 passed' }] } })
+  const wp = spawn('node', [path.join(scripts, 'local-ci.mjs'), '--repo', REPO, '--gate', 'sh gate.sh', '--wait', '1'], { cwd: runner, env })
+  const until = async (cond, ms = 20000) => {
+    const t0 = Date.now()
+    while (!cond() && Date.now() - t0 < ms) await pause(100)
+    return cond()
+  }
+  await until(() => states(s44) === 'pending,success')
+  const posted = readFileSync(ctx.log, 'utf8').split('\n').filter((l) => l.includes('/statuses/') && l.includes('POST'))
+  const pendingAt = posted.findIndex((l) => l.includes(`/statuses/${s45b}`) && l.includes('state=pending'))
+  const doneAt = posted.findIndex((l) => l.includes(`/statuses/${s44}`) && l.includes('state=success'))
+  check('local-ci --wait: a head pushed while a gate runs is pending before that run ends',
+    pendingAt !== -1 && doneAt !== -1 && pendingAt < doneAt, posted.join('\n'))
+  await until(() => states(s45b) === 'pending,success')
+  wp.kill('SIGTERM')
+  await new Promise((r) => (wp.exitCode !== null ? r() : wp.on('close', r)))
+  check('local-ci --wait: … and runs in a later pass, once (no second pending)', states(s45b) === 'pending,success' && traceText().includes(`start 45b ${s45b}`), JSON.stringify(statuses()[s45b]))
+
   const otherClone = path.join(ctx.home, 'other-clone')
   g(ctx.home, 'clone', '-q', origin, otherClone)
   g(otherClone, 'remote', 'set-url', 'origin', 'https://github.com/acme/widgets-fork.git')
