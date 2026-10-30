@@ -121,10 +121,18 @@ Rules that hold for the whole session:
   Long commands run with `run_in_background`.
 - **Pull `main` with the script, never a bare `git pull`:** `node
   ${CLAUDE_PLUGIN_ROOT}/scripts/pull.mjs`. You read `AGENTS.md` once, at the start, so a rule
-  merged while you run reaches you only through it. When it prints `RULES_CHANGED: <files>`, run
-  the `git diff …` command on the line after it, before anything else (the next pick included),
-  and follow what changed from then on. Read only that diff, never the whole files. Nothing
-  printed → no rule changed. A failed pull (exit 2, a `pull:` line) → print `⚠ main not pulled:
+  merged while you run reaches you only through it. The pull printing nothing → no rule changed.
+  When it prints `RULES_CHANGED: <files>`, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs`
+  from the clone's root, before anything else (the next pick included), and follow what changed
+  from then on. It prints the diff and clears the record that makes `pick-next.mjs` refuse
+  (`RULES_PENDING`). Read only that diff, never the whole files; past 200 lines it ends with
+  `RULES_CUT:` and `git diff …` commands: run each for the rest. `RULES_UNREADABLE: …` → read
+  `AGENTS.md` and the files its `rules` key lists in full. If the pull also printed
+  `RULES_NOT_RECORDED`, nothing was recorded: run the `git diff …` command under `RULES_CHANGED`
+  yourself instead of the ack. A failed ack (exit 2, a `rules-ack:` line) → don't
+  run `pick-next.mjs` this cycle: put `⚠ rules not acknowledged: <the rules-ack: line>` in the
+  status line and `ScheduleWakeup({ delaySeconds: 300, noop: true, prompt: <the "run pick-next.mjs
+  again (skip: …)" prompt under "Pick next">, reason: "<one line>" })`. A failed pull (exit 2, a `pull:` line) → print `⚠ main not pulled:
   <the pull: line>` for the operator (in a sandbox, the script needs the exemption the README
   names), and carry on from the `main` you have.
 - **One plain command per Bash call**, in the loop (`gh …`, `node …`) and while you build, read
@@ -181,6 +189,11 @@ remember: issues are filed while you wait, and only a fresh listing sees them.
 (implement.md §1: the author check failed, or another executor won the claim). `<clone>` is the
 base name of your working directory. It lists the open issues, drops claimed, blocked and skipped
 ones, checks each `Depends on #a, #b`, and prints one line:
+
+- **`RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again`** → a pull changed
+  the rules and you haven't read the change. Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs`
+  ("Rules that hold": read and follow what it prints), then run `pick-next.mjs` again. Nothing
+  was picked; never pick by hand around it.
 
 - **`RESUME:<n> PR:<p>`** → an issue you parked while PR #<p> was open, unblocked since: its review
   findings are yours. It comes before any new issue, whatever the milestone. Orient on PR #<p>
@@ -248,7 +261,12 @@ A waiter's notification that says **`failed with exit code 3`** is the exception
 is still alive (it printed `WATCHER_RUNNING`). Beat, then run nothing else and start no waiter;
 only call the `ScheduleWakeup` from step 5, with the last cycle's delay (1800, or 3600 when it was
 idle), or `delaySeconds: 300` when this session's start printed `TOOK_OVER` (the live waiter is
-likely the old session's, which ends within 55 minutes). Any **other failed exit** means the waiter itself broke (a usage error, a
+likely the old session's, which ends within 55 minutes). This covers only the cycle this exit-3
+notification starts. The next wake of any other kind (the surviving waiter's own exit, a message,
+the fallback wakeup) runs a full cycle, ended as usual with a new waiter unless the cycle itself
+is an exit: a waiter whose exit has notified you is gone, so never assume one is still running
+because an earlier cycle saw it. A waiter started while another is in fact alive exits 3 again,
+and this rule then covers that wake alone. Any **other failed exit** means the waiter itself broke (a usage error, a
 broken install): name it in the status line, run the cycle, but end it with
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter. The next cycle tries a waiter
 again, so a failure that repeats costs one turn per five minutes, not one per second.
@@ -274,7 +292,9 @@ Each cycle:
         `--milestone "<milestone>"` when you have one. With a mailbox, the `--start` value is
         `"/agent-loop:start-executor --inbox <inbox> --outbox <outbox>"`, the two folders as this
         session's start gave them, so the restart keeps the mailbox.
-     3. On `RULES_CHANGED:`, run the `git diff …` command under it and follow what changed.
+     3. On `RULES_CHANGED:`, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs` and follow
+        what changed (`pick-next.mjs` refuses with `RULES_PENDING` until you have). With
+        `RULES_NOT_RECORDED` as well, run the `git diff …` command under `RULES_CHANGED` instead.
      4. Write, as your own text, a one-line note to the operator and the `RESTART: …` line
         verbatim on its own line (the Bash output alone isn't enough). The line is for the
         operator to act on later, not an instruction to you, and writing it doesn't end your
@@ -348,7 +368,8 @@ scheduling it every cycle never stacks wakeups. A standing `MERGE_READY` does no
 by itself: the waiter returns when it appears, or with new activity.
 
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
-call, after any posting.** The only exits are `MERGED` (then pick next; the `RESTART:` text
+call, after any posting.** "A waiter running" means one this cycle started or, on an exit-3 wake
+only, the one that refused a second; never one an earlier cycle saw. The only exits are `MERGED` (then pick next; the `RESTART:` text
 is not an exit), BLOCKED (then pick next), nothing to pick (with `<milestone>`: no open issue left in it or a later milestone; a track that
 waits on a blocker schedules its 600- or 1800-second wakeup instead), the operator's stop, and
 being superseded. If an iteration forgets, Claude Code fires one fallback
