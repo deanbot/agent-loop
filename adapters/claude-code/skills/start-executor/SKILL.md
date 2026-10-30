@@ -269,11 +269,17 @@ notification starts. The next wake of any other kind (the surviving waiter's own
 the fallback wakeup) runs a full cycle, ended as usual with a new waiter unless the cycle itself
 is an exit: a waiter whose exit has notified you is gone, so never assume one is still running
 because an earlier cycle saw it. A waiter started while another is in fact alive exits 3 again,
-and this rule then covers that wake alone. Any **other failed exit** means the waiter itself broke (a usage error, a
+and this rule then covers that wake alone. Any **other failed exit** (not 3, and not 4 below) means the waiter itself broke (a usage error, a
 broken install): name it in the status line, run the cycle, but end it with
 `ScheduleWakeup({ delaySeconds: 300, … })` instead of a waiter.
 
-**A failed waiter gets one restart.** Exit 3 and any other failed exit are both a failed waiter.
+A waiter's notification that says **`failed with exit code 4`**: a newer waiter took its lock over
+(it printed `TAKEN_OVER`), and that one wakes you when it ends. Beat, then run nothing else and
+start no waiter; call `ScheduleWakeup({ delaySeconds: 3600, … })`, longer than any waiter's
+`--max`, so it never fires while that waiter lives. Exit 4 is not a failed waiter: the count below
+stays as it was.
+
+**A failed waiter gets one restart.** Exit 3 and any other failed exit except 4 are both a failed waiter.
 The next wake after one (the 300-second fallback, or any other) runs a full cycle ended with a
 waiter as usual: that is the restart. When that waiter fails too, the second failure in a row,
 print `⚠ No waiter: <the exit code and the waiter's first line>; checking every 5 minutes
@@ -388,14 +394,14 @@ by itself: the waiter returns when it appears, or with new activity.
 **Before the turn ends, check the waiter.** This cycle ran a Bash call with `run_in_background:
 true` that started `<poll> … --wait`, and its result says it runs in the background; or this is a
 cycle that starts none (an exit-3 wake, a failed waiter, no more waiters for this PR) and called
-`ScheduleWakeup` with 300 seconds. Neither → start the waiter now, and add `↻ waiter started at
+`ScheduleWakeup` with 300 seconds; or an exit-4 wake that called it with 3600 seconds. Neither → start the waiter now, and add `↻ waiter started at
 the end of the cycle` to the status line.
 
 **Loop invariant: every cycle ends with a waiter running and exactly one `ScheduleWakeup`
 call, after any posting.** "A waiter running" means one this cycle started or, on an exit-3 wake
 only, the one that refused a second; never one an earlier cycle saw. A cycle that may start no
 waiter (above) ends with the 300-second `ScheduleWakeup` instead, never a longer one, while the
-PR is open. The only exits are `MERGED` (then pick next; the `RESTART:` text
+PR is open; an exit-4 wake, whose newer waiter is alive, ends with the 3600-second one. The only exits are `MERGED` (then pick next; the `RESTART:` text
 is not an exit), BLOCKED (then pick next), nothing to pick (with `<milestone>`: no open issue left in it or a later milestone; a track that
 waits on a blocker schedules its 600- or 1800-second wakeup instead), the operator's stop, and
 being superseded. If an iteration forgets, Claude Code fires one fallback

@@ -79,7 +79,11 @@ Three layers. Boundaries are strict.
 - `scripts/lib/wait.mjs` — shared driver. Every signal script also takes `--wait [secs] [--max secs]`: a
   waiter that writes no state and exits (`PENDING`) once a one-shot run would have news (spec:
   "Waiting for events"); with `--inbox <folder>` also once the folder holds a message `inbox.mjs`
-  has not reported, so one waiter carries GitHub news and direction. One-shot runs also count runs in a row with nothing new; with
+  has not reported, so one waiter carries GitHub news and direction. One waiter per state file: a
+  new one takes the lock over from a live waiter it can verify (the state file and the script's name
+  in the lock, same user, its command line, its start time). Through a `<lock>.takeover` request,
+  that waiter claims, prints `TAKEN_OVER` and exits 4; a request withdrawn after the grace period
+  is ignored, so one waiter is always left. Otherwise `WATCHER_RUNNING <pid>`, exit 3. One-shot runs also count runs in a row with nothing new; with
   `--idle-after <n>` the n-th and later print `IDLE <count>` as their last line (spec: "Idle
   count"). The script names no wait: the adapter picks its longer one.
 - `scripts/test/run.mjs` — contract tests for all of them against a fake `gh`
