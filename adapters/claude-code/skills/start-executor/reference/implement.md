@@ -16,7 +16,9 @@ expansion), even under `Bash(gh *)`, so an object would stop every claim on a pr
   --in-progress-label <in-progress-label> --blocked-label <blocked-label>` prints `CLAIM_HELD`:
   then it is yours, so resume (SKILL.md, "Resume"). If you are not on its branch, find it with `git branch --list "issue-<N>-*"` and
   switch to it first (`git switch <branch>`, only with a clean tree; with uncommitted changes,
-  stop and say so). Someone else's: the label is
+  stop and say so). No such branch in this clone → it is yours and nothing of it is built here:
+  don't claim it again and don't go back to the open-PR lookup; build it from §2 on a new branch
+  from `main` (§3). Someone else's: the label is
   authoritative and the absence of an open PR is not evidence the claim is stale. Pick next.
 - `<blocked-label>` present → pick next, silently.
 - Dependencies (`Depends on #a, #b` in the body) not all closed → pick next.

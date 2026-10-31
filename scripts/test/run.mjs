@@ -2904,6 +2904,18 @@ const putMessage = (dir, id, extra, meta) => {
   }).map(([f]) => f)
   check('claim check (#138): CLAIM_RELEASED reads as claims.mjs has it (released or never claimed), and a held issue with no branch here goes through the open-PR lookup',
     outcomes.length === 0, outcomes.join('\n'))
+  // That route meets the claim step again, where the label is now on and claims.mjs says
+  // CLAIM_HELD: "resume" with no branch here would send it back to the lookup, a loop (or nowhere,
+  // in Claude Code). The claim step's exception builds it instead.
+  const claimSteps = ['claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
+  const loops = claimSteps.filter((f) => {
+    const t = flat(read(f))
+    const at = t.indexOf('prints `CLAIM_HELD`: then it is yours, so resume')
+    const tail = at === -1 ? '' : t.slice(at, at + 700)
+    return !/No such branch in this clone[^→]*→ it is yours and nothing of it is built here: don't claim it again and don't go back to [^;]*; [^.]*on a new branch from `main`/.test(tail)
+  })
+  check('claim check (#138): the claim step\'s CLAIM_HELD with no branch in this clone builds the issue on a new branch, never back to the lookup',
+    loops.length === 0, loops.join('\n'))
   const heldOnly = ['claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
     .filter((f) => !/unless (`node \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/claims\.mjs [^`]*`|the claim check \(`claims\.mjs`, above\)) prints `CLAIM_HELD`/.test(flat(read(f))))
   check('claim check (#129): the claim step\'s "in progress, unless it is yours" also asks claims.mjs', heldOnly.length === 0, heldOnly.join('\n'))

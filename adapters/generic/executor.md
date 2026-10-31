@@ -157,7 +157,10 @@ field; an array, since some tools' permission checks refuse a jq object with a c
 filter that doesn't end in `]]`, which some read as shell `[[ … ]]`). A failed re-fetch, or one whose first or
 second element is null or empty, is no author check: never claim on it. `in-progress-label` present → another executor has it (the
 label is authoritative; no PR is not evidence it is stale) → pick next, unless the claim check
-(`claims.mjs`, above) prints `CLAIM_HELD`: then it is yours, so resume (above). `blocked-label` → pick
+(`claims.mjs`, above) prints `CLAIM_HELD`: then it is yours, so resume (above). No such branch in
+this clone (`git branch --list "issue-<N>-*"` prints nothing) → it is yours and nothing of it is
+built here: don't claim it again and don't go back to the issue path; implement it (below), on a
+new branch from `main`. `blocked-label` → pick
 next. Author not in `trusted-authors` (or association not allowed) → post `[executor] Skipped:
 @<login> is not in trusted-authors.` and pick next. Otherwise claim with a comment, then the label
 (two executors that pick at the same moment both see no label; `<clone>` is the base name of your
