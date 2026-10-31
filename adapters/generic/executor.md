@@ -53,7 +53,9 @@ removed on `MERGED`, but a loop stopped after `MERGE_READY` never sees the merge
 has no claim to protect, so this is safe while other executors run, and safe to repeat.
 
 **Resume your own issue on start, before touching `main`.** `git branch --show-current` and `git
-status --porcelain`. On `main` with a clean tree, carry on. Otherwise **the branch name comes
+status --porcelain`. On `main` with a clean tree, carry on. **No claim check runs on a clean
+`main`:** an issue number in the input goes to the issue path below, where the open-PR lookup
+(`pr-for-issue.mjs`) runs before any claim. Otherwise **the branch name comes
 first:** on a branch whose name carries an issue number (`issue-<N>-…` or the project's
 convention), that is `<N>`, and the input never decides it. Only on `main` with uncommitted
 changes, or on a branch whose name carries no issue number, take the number from the input. **A
@@ -62,7 +64,8 @@ number is a PR, and `<N>` is the first issue its body closes (`Closes #<N>`, as 
 reads it); no `Closes #N` → there is no `<N>`. It fails with `Could not resolve to a
 PullRequest` → `<N>` is the number. Any other failure (network, auth) → stop and say `Could not
 tell whether <n> is a PR: <the error>. Restart when gh works.` The claim check never runs on a
-PR's number. With a `<N>`, run it before deciding anything, every start: `node scripts/claims.mjs
+PR's number. Off a clean `main` (another branch, or uncommitted changes), with a `<N>`, run it
+before deciding anything: `node scripts/claims.mjs
 --repo <repo> --issue <N> --clone <clone> --in-progress-label <l> --blocked-label <l>` (`<clone>`
 is the base name of your working directory). Whether you hold #<N> is its line alone, never the
 labels you remember; the branch decides only how you resume. A failed run (exit 2, a `claims:` line) → stop and say `Could not check the claim
@@ -74,9 +77,12 @@ on #<N>: <the claims: line>. Restart when gh works.`
   main..HEAD`, `git diff HEAD`), continue (or orient and poll if a PR has `Closes #<N>`). Do not
   re-claim.
 - You hold #<N> but are on another branch → clean tree: switch to its branch (`git branch --list
-  "issue-<N>-*"`) and resume; uncommitted changes: stop and say so. Never resume on a branch
+  "issue-<N>-*"`) and resume; no such branch in this clone → `git checkout main`, `node
+  scripts/pull.mjs`, and take the issue path below with `<N>`, so the open-PR lookup runs before
+  anything is built; uncommitted changes: stop and say so. Never resume on a branch
   that is not the issue's.
-- `CLAIM_RELEASED` (open with neither `in-progress-label` nor `blocked-label`) → claim it; win →
+- `CLAIM_RELEASED` (open with neither `in-progress-label` nor `blocked-label`: nobody holds it,
+  released on a stop or never claimed) → claim it; win →
   you hold it, so as the two bullets above; lose → as below.
 - Anything else (`CLAIM_LOST <clone>`, `CLAIM_CLOSED`, `CLAIM_BLOCKED`, `CLAIM_NONE` the input
   doesn't name, or no `<N>`) → clean tree: `git checkout main`, `node scripts/pull.mjs`; uncommitted

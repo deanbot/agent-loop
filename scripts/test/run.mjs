@@ -2878,11 +2878,32 @@ const putMessage = (dir, id, extra, meta) => {
     ['kiro/skills/start-executor/SKILL.md', claimCmd('node scripts/')]]
   const noCheck = resumes.filter(([f, cmd]) => {
     const t = flat(read(f))
-    return !t.includes(cmd) || !t.includes('run it before deciding anything, every start') ||
+    return !t.includes(cmd) || !t.includes('Off a clean `main` (another branch, or uncommitted changes), with a `<N>`, run it before deciding anything:') ||
       !t.includes('`Could not check the claim on #<N>: <the claims: line>. Restart when gh works.`') ||
       !['`CLAIM_HELD`', '`CLAIM_NONE`', '`CLAIM_LOST <clone>`', '`CLAIM_RELEASED`', '`CLAIM_CLOSED`', '`CLAIM_BLOCKED`'].every((s) => t.includes(s))
   }).map(([f]) => f)
-  check('claim check (#129): every executor\'s resume runs claims.mjs every start, branches on each of its lines, and stops on a failed run', noCheck.length === 0, noCheck.join('\n'))
+  check('claim check (#129): every executor\'s resume runs claims.mjs off a clean main, branches on each of its lines, and stops on a failed run', noCheck.length === 0, noCheck.join('\n'))
+  // #138: "every start" read as covering a clean main too, so a start there claimed on
+  // CLAIM_RELEASED before the open-PR lookup ran, and an unblocked issue with a PR got a second one.
+  // On a clean main no claim check runs: the issue path's lookup comes first, before any claim.
+  const lookupCmd = 'pr-for-issue.mjs --repo <repo> --closes <N>'
+  const claimAt = { 'claude-code/skills/start-executor/SKILL.md': '`NONE` → claim and', 'generic/executor.md': '--body "[executor] Claimed by <clone>"',
+    'kiro/skills/start-executor/SKILL.md': '--body "[executor] Claimed by <clone>"' }
+  const cleanMain = resumes.filter(([f]) => {
+    const t = flat(read(f))
+    const noCheckOnMain = t.indexOf('No claim check runs on a clean `main`:')
+    return noCheckOnMain === -1 || !/where the open-PR lookup \(`pr-for-issue\.mjs`\) runs before any claim/.test(t) ||
+      noCheckOnMain > t.indexOf('Off a clean `main` (another branch, or uncommitted changes), with a `<N>`') ||
+      /run it before deciding anything, every start/.test(t) || t.indexOf(lookupCmd) === -1 || t.indexOf(lookupCmd) > t.indexOf(claimAt[f])
+  }).map(([f]) => f)
+  check('claim check (#138): on a clean main no claim check runs; an issue number takes the open-PR lookup before any claim', cleanMain.length === 0, cleanMain.join('\n'))
+  const outcomes = resumes.filter(([f]) => {
+    const t = flat(read(f))
+    return !t.includes('nobody holds it, released on a stop or never claimed') || t.includes('you released it, say on a') ||
+      !/no such branch in this clone → `git checkout main`, [^;]*so the open-PR lookup runs before anything is built/.test(t)
+  }).map(([f]) => f)
+  check('claim check (#138): CLAIM_RELEASED reads as claims.mjs has it (released or never claimed), and a held issue with no branch here goes through the open-PR lookup',
+    outcomes.length === 0, outcomes.join('\n'))
   const heldOnly = ['claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
     .filter((f) => !/unless (`node \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/claims\.mjs [^`]*`|the claim check \(`claims\.mjs`, above\)) prints `CLAIM_HELD`/.test(flat(read(f))))
   check('claim check (#129): the claim step\'s "in progress, unless it is yours" also asks claims.mjs', heldOnly.length === 0, heldOnly.join('\n'))
