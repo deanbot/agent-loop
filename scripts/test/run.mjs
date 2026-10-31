@@ -2190,13 +2190,6 @@ const putMessage = (dir, id, extra, meta) => {
     const ok = exact ? r.out === want : r.out.startsWith(want) && r.out.endsWith('\n') && r.out.split('\n').length === 2
     check(`inbox --check: ${name} → ${want.split('\n').filter(Boolean).map((l) => l.split(':')[0]).join(' + ')}`, r.code === 0 && ok, JSON.stringify(r))
   }
-  const skillDir = path.resolve(scripts, '..', 'adapters', 'claude-code', 'skills')
-  const unwarned = ['executor', 'reviewer', 'qa'].filter((role) => {
-    const t = readFileSync(path.join(skillDir, `start-${role}`, 'SKILL.md'), 'utf8').replace(/\n\s*/g, ' ')
-    return !(t.includes('First line `MAILBOX_OK` → you have a mailbox') &&
-      t.includes('A `MAILBOX_WARN` line after it → also print `⚠ Inbox <inbox>: does not exist yet; nothing arrives until it is created.` and keep the mailbox.'))
-  })
-  check('inbox --check: every Claude Code loop keeps the mailbox on a first-line MAILBOX_OK and prints the ⚠ line on MAILBOX_WARN', unwarned.length === 0, unwarned.join('\n'))
   check('inbox --check: … writes nothing (no folder made)', !existsSync(mail) && !existsSync(path.join(clone, '.agent-loop')), String(existsSync(mail)))
   putMessage(path.join(mail, 'in'), 'shown')
   putMessage(path.join(mail, 'in'), 'badrole', { role: 'user' })
@@ -2577,6 +2570,14 @@ const putMessage = (dir, id, extra, meta) => {
     guard('sess-old', 'Bash', { command: 'node /plugins/agent-loop/scripts/session.mjs --start sess-old' }) === 'ALLOW')
   check('guard: … and nothing chained onto session.mjs slips past',
     /superseded/.test(guard('sess-old', 'Bash', { command: 'node /p/scripts/session.mjs --beat sess-old && git checkout main' })))
+  // The review of #136: every Claude Code start now runs start-check.mjs, which takes the clone
+  // through session.mjs --start; a restart in the old session must still pass.
+  const startCheck = 'node /p/scripts/start-check.mjs --role executor --session sess-old --model "Opus 5.5" --effort high --inbox /a --outbox /b'
+  check('guard: … a plain start-check.mjs call passes too, in the skills\' shape (a restart in the old session)',
+    guard('sess-old', 'Bash', { command: startCheck }) === 'ALLOW', guard('sess-old', 'Bash', { command: startCheck }))
+  check('guard: … and nothing chained onto start-check.mjs slips past',
+    [`${startCheck} && git checkout main`, `${startCheck}; rm -rf .`, `${startCheck} | tee x`, 'node /p/scripts/start-check.mjs --model $(id)', 'node /p/scripts/restart-check.mjs --role qa']
+      .every((c) => /superseded/.test(guard('sess-old', 'Bash', { command: c }))))
   check('guard: the session holding the clone, and one the file never named, are not affected',
     guard('sess-new', 'Bash', { command: 'git status' }) === 'ALLOW' && guard('sess-new', 'Edit', { file_path: 'x' }) === 'ALLOW' &&
     guard('sess-operator', 'Bash', { command: 'git status' }) === 'ALLOW')
@@ -2604,7 +2605,7 @@ const putMessage = (dir, id, extra, meta) => {
 // ---------------------------------------------------------------- the Claude Code RESTART-line hook
 {
   // After a merge, pull.mjs --start prints the RESTART line; the hook shows it to the operator.
-  const hookPath = path.resolve(scripts, '..', 'adapters', 'claude-code', 'hooks', 'restart-line.mjs')
+  const hookPath = path.resolve(scripts, '..', 'adapters', 'claude-code', 'hooks', 'operator-lines.mjs')
   const run = (input) => spawnSync('node', [hookPath], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' })
   const shown = (input) => {
     const r = run(input)
@@ -2648,9 +2649,113 @@ const putMessage = (dir, id, extra, meta) => {
   const hooks = JSON.parse(readFileSync(path.resolve(scripts, '..', 'adapters', 'claude-code', 'hooks', 'hooks.json'), 'utf8')).hooks
   const runs = (event, file) => (hooks[event] ?? []).some((e) => e.matcher === 'Bash' && e.hooks.some((h) => h.command.includes(`hooks/${file}`)))
   check('restart hook: hooks.json runs it after Bash on PostToolUse and PostToolUseFailure; the guard entry is unchanged',
-    runs('PostToolUse', 'restart-line.mjs') && runs('PostToolUseFailure', 'restart-line.mjs') &&
+    runs('PostToolUse', 'operator-lines.mjs') && runs('PostToolUseFailure', 'operator-lines.mjs') &&
+    hooks.PostToolUse.length === 1 && hooks.PostToolUseFailure.length === 1 &&
     hooks.PreToolUse.length === 1 && hooks.PreToolUse[0].matcher === 'Bash|Edit|Write|NotebookEdit' && hooks.PreToolUse[0].hooks[0].command.includes('hooks/guard.mjs'))
-  for (const dir of [exec, reviewer, bare]) rmSync(dir, { recursive: true, force: true })
+
+  // #128: the same hook shows start-check.mjs's ⚠ lines, in any loop clone.
+  const qa = clone('qa')
+  const startCmd = 'node /plugins/agent-loop/scripts/start-check.mjs --role reviewer --session s1 --model "Opus 5.5" --effort high --inbox /m/in'
+  const warn1 = '⚠ No mailbox: --inbox and --outbox go together.'
+  const warn2 = '⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it with /model and /effort if that is wrong.'
+  const startOut = `NEW\nNO_MAILBOX\n${warn1}\n${warn2}\n`
+  check('start lines hook: start-check.mjs in a reviewer, executor or QA clone → all its ⚠ lines, in order, as one systemMessage, and nothing else',
+    [reviewer, exec, qa].every((d) => shown(ok(startCmd, startOut, d)) === `${warn1}\n${warn2}`), shown(ok(startCmd, startOut, reviewer)))
+  check('start lines hook: … also from a failed run (PostToolUseFailure shape), and from a quoted path',
+    shown({ cwd: reviewer, hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: startCmd }, error: `Exit code 1\n${warn1}` }) === warn1 &&
+      shown(ok('node "/My Plugins/agent-loop/scripts/start-check.mjs" --role qa --session s --model m', startOut, qa)) === `${warn1}\n${warn2}`)
+  check('start lines hook: no ⚠ line → silent', shown(ok(startCmd, 'MINE\nNO_MAILBOX\n', reviewer)) === 'SILENT')
+  const auditor = clone('auditor')
+  check('start lines hook: a clone with no role marker yet (a start runs there too) → the lines; another role\'s marker → silent',
+    shown(ok(startCmd, startOut, bare)) === `${warn1}\n${warn2}` && shown(ok(startCmd, startOut, auditor)) === 'SILENT', shown(ok(startCmd, startOut, bare)))
+  rmSync(auditor, { recursive: true, force: true })
+  check('start lines hook: ⚠ lines from another command (session.mjs, inbox.mjs --check, a grep naming start-check.mjs) → silent',
+    ['node /p/scripts/session.mjs --start s1', 'node /p/scripts/inbox.mjs --check --dir /a --outbox /b', 'grep -n x scripts/start-check.mjs.bak', 'node /p/scripts/restart-check.mjs']
+      .every((c) => shown(ok(c, startOut, reviewer)) === 'SILENT'))
+  check('start lines hook: a RESTART line in start-check output is not shown, nor a ⚠ line in pull.mjs output',
+    shown(ok(startCmd, `RESTART: x\n`, exec)) === 'SILENT' && shown(ok(pull, `${warn1}\n`)) === 'SILENT')
+  for (const dir of [exec, reviewer, bare, qa]) rmSync(dir, { recursive: true, force: true })
+}
+
+// ---------------------------------------------------------------- start-check.mjs, the start's checks (#128)
+{
+  const home = mkdtempSync(path.join(tmpdir(), 'agent-loop-start-'))
+  const root = path.join(home, 'app-review')
+  mkdirSync(path.join(root, '.agent-loop'), { recursive: true })
+  const agents = (models) => writeFileSync(path.join(root, 'AGENTS.md'), `# App\n\n## Agent loop\n\nrepo: acme/widgets\n${models ? `models: ${models}\n` : ''}\n## Other\n`)
+  const start = (args) => spawnSync('node', [path.join(scripts, 'start-check.mjs'), ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, HOME: home } })
+  const lines = (args) => {
+    const r = start(args)
+    return r.status === 0 ? r.stdout.trimEnd().split('\n') : [`EXIT ${r.status}`, r.stderr]
+  }
+  const base = (role = 'reviewer', session = 'sess-a') => ['--role', role, '--session', session, '--model', 'Opus 5.5', '--effort', 'high']
+  const inbox = path.join(home, 'mail', 'in')
+  const outbox = path.join(home, 'mail', 'out')
+  mkdirSync(inbox, { recursive: true })
+
+  agents('executor=opus, reviewer=opus/high')
+  check('start-check: everything matches → the session line, NO_MAILBOX, no ⚠ line', lines(base()).join('|') === 'NEW|NO_MAILBOX', lines(base()).join('|'))
+  check('start-check: … the same session again → MINE', lines(base())[0] === 'MINE')
+  const took = lines(base('reviewer', 'sess-b'))
+  check('start-check: another session held the clone → TOOK_OVER, and the ⚠ takeover line',
+    /^TOOK_OVER sess-a \d+$/.test(took[0]) && took[2] === '⚠ Took over this clone from session sess-a, last active 0 min ago. If it still runs, its next command is refused and it stops.', took.join('\n'))
+  for (const id of ['', '${CLAUDE_SESSION_ID}']) {
+    const none = lines(base('reviewer', id))
+    check(`start-check: session id ${JSON.stringify(id)} (not filled in) → SESSION_NONE and the ⚠ no-session line, exit 0`,
+      none[0] === 'SESSION_NONE' && none.includes('⚠ No session id: a second session in this clone would go unnoticed.'), none.join('\n'))
+  }
+
+  // The review of #128: the tool fills the id and the effort in unquoted, so an empty fill leaves no
+  // word at all. The start must still go on, never stop on a usage error.
+  const emptySession = lines(['--role', 'reviewer', '--session', '--model', 'Opus 5.5', '--effort', 'high'])
+  check('start-check: --session with nothing after it (an empty fill, followed by --model) → SESSION_NONE and the ⚠ line, exit 0',
+    emptySession[0] === 'SESSION_NONE' && emptySession.includes('⚠ No session id: a second session in this clone would go unnoticed.'), emptySession.join('\n'))
+  const emptyEffort = [lines(['--role', 'reviewer', '--session', 'sess-b', '--model', 'Opus 5.5', '--effort']),
+    lines(['--role', 'reviewer', '--session', 'sess-b', '--model', 'Opus 5.5', '--effort', '--inbox', inbox])]
+  check('start-check: --effort last, or followed by --inbox (an empty fill) → no usage error; the next option still read',
+    emptyEffort[0][0] === 'MINE' && emptyEffort[1][0] === 'MINE' && emptyEffort[1].includes('⚠ No mailbox: --inbox and --outbox go together.'), emptyEffort.map((l) => l.join('|')).join('\n'))
+
+  agents('executor=opus, reviewer=sonnet')
+  const wrong = lines(base('reviewer', 'sess-b'))
+  check('start-check: the models entry names another model → the ⚠ model line, with the entry and this session',
+    wrong.includes('⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it with /model and /effort if that is wrong.'), wrong.join('\n'))
+  agents('reviewer=opus/max')
+  check('start-check: … the same model, another effort → the ⚠ model line', lines(base('reviewer', 'sess-b')).some((l) => l.startsWith('⚠ AGENTS.md expects opus/max for the reviewer')))
+  check('start-check: … an effort not filled in is not compared → no line',
+    !lines(['--role', 'reviewer', '--session', 'sess-b', '--model', 'Opus 5.5', '--effort', '${CLAUDE_EFFORT}']).some((l) => l.startsWith('⚠')))
+  agents('executor=sonnet')
+  check('start-check: an entry for another role only → no line', !lines(base('reviewer', 'sess-b')).some((l) => l.startsWith('⚠')))
+  agents('reviewer=\u001b[2Jsonnet\u0007' + 'x'.repeat(200))
+  const hostile = lines(base('reviewer', 'sess-b')).find((l) => l.startsWith('⚠ AGENTS.md')) ?? ''
+  check('start-check: a models entry with control characters or a long value → printed cleaned and cut',
+    hostile !== '' && !/[\u0000-\u001f]/.test(hostile) && hostile.length < 300, JSON.stringify(hostile))
+  agents('reviewer=opus')
+
+  const one = [lines([...base('reviewer', 'sess-b'), '--inbox', inbox]), lines([...base('reviewer', 'sess-b'), '--outbox', outbox])]
+  check('start-check: only --inbox, or only --outbox → NO_MAILBOX and the ⚠ one-folder line',
+    one.every((l) => l[1] === 'NO_MAILBOX' && l.includes('⚠ No mailbox: --inbox and --outbox go together.')), one.map((l) => l.join('|')).join('\n'))
+  check('start-check: … and nothing written to the outbox', !existsSync(outbox))
+  const okBox = lines([...base('reviewer', 'sess-b'), '--inbox', inbox, '--outbox', outbox])
+  check('start-check: both folders, acceptable → MAILBOX <inbox>, no ⚠ line, no outbox message',
+    okBox[1] === `MAILBOX ${inbox}` && okBox.length === 2 && !existsSync(outbox), okBox.join('\n'))
+  const refused = lines([...base('reviewer', 'sess-b'), '--inbox', path.join(root, 'in'), '--outbox', outbox])
+  check('start-check: a refused pair (the inbox in the clone) → NO_MAILBOX and ⚠ No mailbox: <reason>.',
+    refused[1] === 'NO_MAILBOX' && refused.includes('⚠ No mailbox: the inbox is inside the clone, where PR code runs.') && !existsSync(outbox), refused.join('\n'))
+  const later = path.join(home, 'mail', 'later')
+  const warned = lines([...base('reviewer', 'sess-b'), '--inbox', later, '--outbox', outbox])
+  check('start-check: an inbox that does not exist yet → MAILBOX, and the ⚠ inbox line',
+    warned[1] === `MAILBOX ${later}` && warned.includes(`⚠ Inbox ${later}: does not exist yet; nothing arrives until it is created.`), warned.join('\n'))
+  const sent = existsSync(outbox) ? readdirSync(outbox).filter((f) => f.endsWith('.json')) : []
+  const msg = sent.length === 1 ? JSON.parse(readFileSync(path.join(outbox, sent[0]), 'utf8')) : null
+  check('start-check: … with a mailbox and a ⚠ line, the lines go to the outbox as one message to the operator',
+    msg?.metadata?.to === 'operator' && msg.metadata.from === 'app-review' && msg.contextId === 'acme/widgets' && msg.parts[0].text.includes(`⚠ Inbox ${later}: does not exist yet`),
+    JSON.stringify(msg))
+  writeFileSync(path.join(home, 'mail', 'blocker'), 'a file')
+  const badOut = lines(['--role', 'reviewer', '--session', 'sess-c', '--model', 'Opus 5.5', '--inbox', later, '--outbox', path.join(home, 'mail', 'blocker')])
+  check('start-check: an outbox that is a file is refused before any send → NO_MAILBOX, exit 0', badOut[1] === 'NO_MAILBOX', badOut.join('\n'))
+  const usage = [start(['--role', 'boss', '--session', 's', '--model', 'm']), start(['--role', 'qa', '--session', 's']), start([...base(), 'extra'])]
+  check('start-check: an unknown role, no --model, or a stray argument → exit 1', usage.every((r) => r.status === 1), usage.map((r) => r.stderr).join('\n'))
+  rmSync(home, { recursive: true, force: true })
 }
 
 // ---------------------------------------------------------------- loop texts' command forms (#90, #91)
@@ -2716,27 +2821,31 @@ const putMessage = (dir, id, extra, meta) => {
     .filter((f) => !/unless (`node \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/claims\.mjs [^`]*`|the claim check \(`claims\.mjs`, above\)) prints `CLAIM_HELD`/.test(flat(read(f))))
   check('claim check (#129): the claim step\'s "in progress, unless it is yours" also asks claims.mjs', heldOnly.length === 0, heldOnly.join('\n'))
 
-  // The first branch of the mailbox step, with the literal line: a live run that read a pointer to
-  // "the ⚠ No mailbox line" printed none.
-  const oneFolder = 'Only one of the two → print `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never supply the other folder, and carry on without a mailbox.'
-  const supplies = ['executor', 'reviewer', 'qa'].filter((r) => {
+  // #128: a Claude Code start's ⚠ lines come from start-check.mjs, which the hook shows; live starts
+  // dropped the ones the text asked the session to print, the literal one-folder line included.
+  const startCmd = (r) => `node \${CLAUDE_PLUGIN_ROOT}/scripts/start-check.mjs --role ${r} --session \${CLAUDE_SESSION_ID} --model "<model>" --effort \${CLAUDE_EFFORT}`
+  const noStart = ['executor', 'reviewer', 'qa'].filter((r) => {
     const t = flat(read(`claude-code/skills/start-${r}/SKILL.md`))
-    const at = t.indexOf(oneFolder)
-    return at === -1 || at > t.indexOf('Both → `node')
+    return !t.includes(startCmd(r)) || !t.includes('for each of the two that `$ARGUMENTS` holds, **even one alone**, and never one it doesn\'t hold') ||
+      !t.includes('`MAILBOX <inbox>` → you have a mailbox, and `<inbox-flag>` below is `--inbox <inbox>`.') || !t.includes('`NO_MAILBOX` → `<inbox-flag>` is empty') ||
+      !t.includes("The plugin's operator-lines hook shows them to the operator as a system message") || !t.includes("don't copy them into your text") ||
+      // none of the old self-printed start lines, nor a second session or mailbox command, is left
+      /print `⚠ (No mailbox|Took over|No session id|Inbox <inbox>|AGENTS\.md expects)/.test(t) || t.includes('scripts/session.mjs --start') || t.includes('inbox.mjs --check')
   })
-  check('loop texts: with one mailbox folder of the two, every Claude Code loop prints the literal ⚠ line first, without --check, never making up the other', supplies.length === 0, supplies.join('\n'))
+  check('start lines (#128): every Claude Code start runs start-check.mjs with each mailbox folder it was given, branches on its lines, and leaves the ⚠ lines to the hook',
+    noStart.length === 0, noStart.join('\n'))
 }
 
 // ---------------------------------------------------------------- the RESTART line: the hook's in Claude Code (#105)
 {
   // The session's own copy of the RESTART line dropped out in live runs however it was asked for;
-  // the restart-line hook shows it regardless. Claude Code relies on the hook; generic and Kiro,
+  // the operator-lines hook shows it regardless. Claude Code relies on the hook; generic and Kiro,
   // with no hook, keep the text line.
   const adapters = path.resolve(scripts, '..', 'adapters')
   const flat = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
   const cc = flat('claude-code/skills/start-executor/SKILL.md') + flat('claude-code/skills/start-executor/reference/signals.md')
   check('RESTART line (Claude Code): the executor relies on the hook and asks for no text copy or closing repeat',
-    cc.includes("the plugin's restart-line hook shows it to them as a system message") && !/repeat the `RESTART: …` line/.test(cc) &&
+    cc.includes("the plugin's operator-lines hook shows it to them as a system message") && !/repeat the `RESTART: …` line/.test(cc) &&
       !/Write, as your own text, a one-line note to the operator and the `RESTART: …` line/.test(cc) && !/write as your own text a one-line note to the operator, and the `RESTART: …` line/.test(cc), '')
   const readme = flat('claude-code/README.md')
   check('RESTART line (Claude Code README): the hook is the operator\'s copy; the executor doesn\'t write the line',

@@ -20,7 +20,8 @@ adapters/claude-code/
   skills/start-qa/                  /agent-loop:start-qa          SKILL.md + reference/
   hooks/hooks.json, guard.mjs       PreToolUse: deny `gh pr merge` (and a non-pending commit status) in clones with .agent-loop/role,
                                     and every command from a session another one took over
-  hooks/restart-line.mjs            PostToolUse(Failure): show the operator pull.mjs's RESTART line in an executor clone
+  hooks/operator-lines.mjs          PostToolUse(Failure): show the operator pull.mjs's RESTART line (executor clone) and
+                                    start-check.mjs's ⚠ lines (a loop clone, or one with no marker yet)
   setup-project.sh                  what the setup skill runs
   install.sh                        marketplace add + plugin install
 ```
@@ -101,11 +102,12 @@ this cycle started its waiter or scheduled that short wakeup, and starts the wai
 no cycle ends on the 30- or 60-minute fallback alone.
 
 **Mailbox.** Started with `--inbox <folder> --outbox <folder>` (`/agent-loop:start-reviewer
---inbox … --outbox …`, and the same for start-qa and start-executor; spec: "Inbox folder"), a loop
-checks the pair (`inbox.mjs --check`: both outside the clone, neither inside the other, neither a
-file nor under one), warns once with `⚠ Inbox <folder>: does not exist yet; …` when the inbox isn't there yet
-(a mistyped path would read as an empty inbox for good) and keeps the mailbox, and warns and runs
-without one otherwise. Each cycle of the reviewer, QA and the executor's PR loop then runs
+--inbox … --outbox …`, and the same for start-qa and start-executor; spec: "Inbox folder"), a loop's
+start check (`start-check.mjs`) checks the pair (both outside the clone, neither inside the other,
+neither a file nor under one), warns with `⚠ Inbox <folder>: does not exist yet; …` when the inbox
+isn't there yet (a mistyped path would read as an empty inbox for good) and keeps the mailbox, and
+warns and runs without one otherwise: with `⚠ No mailbox: --inbox and --outbox go together.` when
+only one folder was given, `⚠ No mailbox: <reason>.` for a refused pair. Each cycle of the reviewer, QA and the executor's PR loop then runs
 `inbox.mjs --dir <inbox>` before its signal script, reads each new message with `--show`, acts
 on it within the role's rules and replies once into the outbox (`--send --reply-to`, which copies the addressing from the message,
 so none of its values reaches the shell); the waiter takes
@@ -236,9 +238,9 @@ clone has no marker, so nothing changes there. It is a safety net behind the pro
 security boundary: the same action through another program (a script, `sh -c`, the API from node)
 is not caught. A comment body that quotes the literal phrase `gh pr merge` is refused too; reword.
 
-## RESTART-line hook
+## Operator-lines hook
 
-`hooks/restart-line.mjs` runs after every Bash call (`PostToolUse`, and `PostToolUseFailure` for
+`hooks/operator-lines.mjs` runs after every Bash call (`PostToolUse`, and `PostToolUseFailure` for
 a failed pull, which exits 2 and still prints the line). In a clone whose `.agent-loop/role` says
 `executor`, after a `pull.mjs --start …` call, it returns the `RESTART: …` line from the output as
 a `systemMessage`, so the operator sees it even when the terminal collapses the tool's output or
@@ -247,6 +249,14 @@ blocks a call. It is the operator's copy: the executor doesn't write the line in
 live runs a session skipped that step however it was worded, and where nobody watches the
 terminal, the hook's message and the session's text reach the operator the same way, through the
 transcript.
+
+The same hook shows a start's warnings. Every start runs `scripts/start-check.mjs`, which takes
+the clone for the session, checks the `models:` entry and the mailbox folders, and prints a `⚠ `
+line for each thing the operator should know: a takeover, no session id, the wrong model, one
+mailbox folder without the other, a refused pair, an inbox that doesn't exist yet. In a clone whose
+role marker says `executor`, `reviewer` or `qa`, or that has no marker yet, the hook returns all
+of those lines as one `systemMessage`, and the session doesn't copy them. With a mailbox, the script also writes them
+to the outbox as one message, for a deployment where nobody watches the terminal.
 
 ## Known limitations
 

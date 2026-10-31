@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/hooks/restart-line.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/hooks/operator-lines.mjs\"",
             "timeout": 10
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/hooks/restart-line.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/hooks/operator-lines.mjs\"",
             "timeout": 10
           }
         ]

@@ -17,7 +17,9 @@
 // took over in this clone (`.agent-loop/session`, written by scripts/session.mjs: the newest loop
 // start wins). Two sessions in one clone sign claims as the same clone and move the checkout
 // under each other; the old one stops at its next tool call instead of its next wake. Calls to
-// session.mjs itself pass, since the script keeps its own rules. A session the file never named
+// session.mjs itself pass, since the script keeps its own rules, and so do calls to start-check.mjs,
+// which every Claude Code start runs and which takes the clone through session.mjs --start: a
+// restart in the old session is a new start, and the newest start wins. A session the file never named
 // (the operator looking around in the clone) is not affected.
 //
 // Input: the PreToolUse JSON on stdin ({ cwd, session_id, tool_name, tool_input: { command } }).
@@ -50,8 +52,9 @@ try {
 } catch {}
 const sid = input.session_id
 if (sid && Array.isArray(session?.superseded) && session.superseded.includes(sid) && session.owner?.id !== sid) {
-  // Only a plain `node …/scripts/session.mjs …`: nothing chained onto it slips past.
-  const runsSessionScript = input.tool_name === 'Bash' && /^\s*node\s+\S*scripts\/session\.mjs(\s+[^\n;&|`$()<>]*)?$/.test(command)
+  // Only a plain `node …/scripts/session.mjs …` or `…/scripts/start-check.mjs …` (a start, which
+  // runs session.mjs --start): nothing chained onto it slips past.
+  const runsSessionScript = input.tool_name === 'Bash' && /^\s*node\s+\S*scripts\/(session|start-check)\.mjs(\s+[^\n;&|`$()<>]*)?$/.test(command)
   if (!runsSessionScript) {
     const by = session.owner?.id ? `session ${session.owner.id}` : 'another session'
     deny(

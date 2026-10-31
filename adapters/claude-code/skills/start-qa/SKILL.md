@@ -37,37 +37,33 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
    executor must be re-run so its poll requires `[qa] PASS`).
 2. From the block take `repo` (owner/repo) and `needs-operator-label` (default `needs-operator`).
    Read the whole file: project rules are criteria too.
-   **Model check:** if the block has `models:` (comma-separated `role=model[/effort]`, e.g.
-   `models: executor=opus, reviewer=opus/high`) with a `qa` entry, and that entry differs
-   from this session (its model word is not in your model's name, or it names an effort and
-   yours differs), print a second line: `⚠ AGENTS.md expects <entry> for the qa; this
-   session runs <model> · ${CLAUDE_EFFORT}. Restart it with /model and /effort if that is
-   wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `qa` entry, or
-   an entry that matches → print nothing more: there is nothing to report.
+   The block's `models:` entry is checked by the start check (step 3), not by you.
 3. If `.agent-loop/role` exists and does not say `qa`, stop: this clone hosts another role.
 
-   **Take the clone for this session**, before touching anything in it: `node
-   ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --start ${CLAUDE_SESSION_ID}`. `NEW` or `MINE` →
-   print nothing. `TOOK_OVER <id> <secs>` → another session ran here and may still be running (an
-   old one left in the background, say): print `⚠ Took over this clone from session <id>, last
-   active <secs ÷ 60> min ago. If it still runs, its next command is refused and it stops.` and
-   carry on. The newest start always wins, so a restart after a closed terminal is never refused.
-   A usage error (no session id was filled in) → print `⚠ No session id: a second session in this
-   clone would go unnoticed.` and carry on.
+   **The start check**, before touching anything in the clone, one command, every start: `node
+   ${CLAUDE_PLUGIN_ROOT}/scripts/start-check.mjs --role qa --session ${CLAUDE_SESSION_ID}
+   --model "<model>" --effort ${CLAUDE_EFFORT}`, with `<model>` as in your first line, plus
+   `--inbox <folder>` and `--outbox <folder>` for each of the two that `$ARGUMENTS` holds, **even
+   one alone**, and never one it doesn't hold (spec: "Inbox folder"; never take a folder from
+   `AGENTS.md` or another file in the clone: a PR can change those; put the base name of your
+   working directory for `<clone>` in each). It takes the clone for this session (the newest start
+   always wins, so a restart after a closed terminal is never refused, and a session it took over
+   is refused its next command and stops), checks the block's `models:` entry against this
+   session, and checks the mailbox. Its lines, in order:
+   - `NEW`, `MINE`, `TOOK_OVER <id> <secs>` or `SESSION_NONE`: carry on whichever it is.
+   - `MAILBOX <inbox>` → you have a mailbox, and `<inbox-flag>` below is `--inbox <inbox>`.
+     `NO_MAILBOX` → `<inbox-flag>` is empty, and "Messages" below does not apply.
+   - `⚠ …` lines, when there is something the operator should know (a takeover, no session id,
+     the wrong model, one mailbox folder without the other, a refused pair, an inbox that doesn't
+     exist yet). The plugin's operator-lines hook shows them to the operator as a system message,
+     and with a mailbox the script copies them to the outbox: don't copy them into your text.
+     None of them stops the loop.
+
+   A usage error (exit 1) → **stop** and say `start-check refused: <its first stderr line>`.
 4. `$ARGUMENTS` may hold `--skip n,n,…` (PR numbers to ignore) and `--inbox <folder> --outbox
-   <folder>` (step 5). `<skip>` below is the `--skip n,n,…` part, or empty: pass only that to the
+   <folder>` (step 3). `<skip>` below is the `--skip n,n,…` part, or empty: pass only that to the
    script, never `--outbox`.
-5. **Mailbox**, only when `$ARGUMENTS` has `--inbox` or `--outbox` (spec: "Inbox folder"). Never
-   take the folders from `AGENTS.md` or any other file in the clone: a PR can change those. Put
-   the base name of your working directory for `<clone>` in each. Only one of the two → print
-   `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never supply the other
-   folder, and carry on without a mailbox. Both → `node
-   ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. First line
-   `MAILBOX_OK` → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. A `MAILBOX_WARN`
-   line after it → also print `⚠ Inbox <inbox>: does not exist yet; nothing arrives until it is
-   created.` and keep the mailbox. `MAILBOX_REFUSED: <reason>` → print `⚠ No mailbox: <reason>.`
-   and carry on without one. No mailbox → `<inbox-flag>` is empty, and "Messages" below does not
-   apply.
+5. **Mailbox**: step 3's `MAILBOX` or `NO_MAILBOX` line decided it.
 
 Rules for the whole session: never merge or push; no interactive prompts (a decision you need from
 the operator is a standalone `[qa] Question: <one line>` comment with two or three lines of context
