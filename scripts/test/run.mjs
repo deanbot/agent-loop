@@ -2570,6 +2570,14 @@ const putMessage = (dir, id, extra, meta) => {
     guard('sess-old', 'Bash', { command: 'node /plugins/agent-loop/scripts/session.mjs --start sess-old' }) === 'ALLOW')
   check('guard: … and nothing chained onto session.mjs slips past',
     /superseded/.test(guard('sess-old', 'Bash', { command: 'node /p/scripts/session.mjs --beat sess-old && git checkout main' })))
+  // The review of #136: every Claude Code start now runs start-check.mjs, which takes the clone
+  // through session.mjs --start; a restart in the old session must still pass.
+  const startCheck = 'node /p/scripts/start-check.mjs --role executor --session sess-old --model "Opus 5.5" --effort high --inbox /a --outbox /b'
+  check('guard: … a plain start-check.mjs call passes too, in the skills\' shape (a restart in the old session)',
+    guard('sess-old', 'Bash', { command: startCheck }) === 'ALLOW', guard('sess-old', 'Bash', { command: startCheck }))
+  check('guard: … and nothing chained onto start-check.mjs slips past',
+    [`${startCheck} && git checkout main`, `${startCheck}; rm -rf .`, `${startCheck} | tee x`, 'node /p/scripts/start-check.mjs --model $(id)', 'node /p/scripts/restart-check.mjs --role qa']
+      .every((c) => /superseded/.test(guard('sess-old', 'Bash', { command: c }))))
   check('guard: the session holding the clone, and one the file never named, are not affected',
     guard('sess-new', 'Bash', { command: 'git status' }) === 'ALLOW' && guard('sess-new', 'Edit', { file_path: 'x' }) === 'ALLOW' &&
     guard('sess-operator', 'Bash', { command: 'git status' }) === 'ALLOW')
@@ -2831,7 +2839,7 @@ const putMessage = (dir, id, extra, meta) => {
 // ---------------------------------------------------------------- the RESTART line: the hook's in Claude Code (#105)
 {
   // The session's own copy of the RESTART line dropped out in live runs however it was asked for;
-  // the restart-line hook shows it regardless. Claude Code relies on the hook; generic and Kiro,
+  // the operator-lines hook shows it regardless. Claude Code relies on the hook; generic and Kiro,
   // with no hook, keep the text line.
   const adapters = path.resolve(scripts, '..', 'adapters')
   const flat = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
