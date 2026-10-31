@@ -43,7 +43,8 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
    stop and say so. Read the whole file: the project's rules are part of what you review against.
 2. From the block take `repo` (owner/repo), `qa-gate` (`on` or `off`, default `off`),
    `needs-operator-label` (default `needs-operator`), `gate` (optional: the command that stands in
-   for CI on a PR that has none; reference/review.md §4) and `reviewers` (default `1`). With
+   for CI on a PR that has none; reference/review.md §4), `review-waits-for-ci` (`on` or `off`,
+   default `off`: with `on` you hold an LGTM while CI is pending, "What you post") and `reviewers` (default `1`). With
    `reviewers` above 1, read "Several reviewers" below: `<as>` is `--reviewer <clone>`
    (`<clone>` the base name of your working directory); with one reviewer `<as>` is empty and
    nothing there applies.
@@ -153,9 +154,10 @@ those cycles still runs the watch, so news is seen within five minutes. A waiter
 1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> --needs-operator-label
    <needs-operator-label> --idle-after 3 <skip>`, in the foreground, once per cycle. One line,
    space-separated signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`, `REVIEW:<n>`,
-   `REVIEW_COMMENTS:<n>`. A second line `IDLE <count>` means this is the third run or later in a
+   `REVIEW_COMMENTS:<n>`, and with `review-waits-for-ci: on` `CI_DONE:<n>`. A second line `IDLE <count>` means this is the third run or later in a
    row with nothing new (a standing signal you already handled, such as a `MERGE_CONFLICT:<n>`
-   you commented on or a `REVIEW:<n>` still waiting for `[qa] PASS`, is nothing new): handle the
+   you commented on, a `REVIEW:<n>` still waiting for `[qa] PASS`, or a `REVIEW:<n>` for a head
+   you reviewed with no findings and hold for CI, is nothing new): handle the
    signals as usual, then take the idle wait in step 5. You never need the waiter's own output.
 2. Handle each signal. With several reviewers, a signal that leads to work and a post on a PR
    you do not hold yet goes through the claim first ("Several reviewers").
@@ -198,6 +200,16 @@ those cycles still runs the watch, so news is seen within five minutes. A waiter
      included (after an answer, or the operator's reply to your question), runs the gate first
      when the block has `gate` and the PR has no CI, and quotes it (reference/review.md §4):
      without the `Gate on` line `MERGE_READY` stays withheld.
+   - **`CI_DONE:<n>`** (only with `review-waits-for-ci: on`: a check on the head finished) → `gh
+     pr checks <n> --repo <repo> --json name,state,bucket`, and your newest `[reviewer]` post on
+     the PR. A check still `pending` → post nothing. A `fail` or `cancel` caused by this PR (read
+     its log) → findings, as in a review. Every check `pass` or `skipping`, and no verdict of
+     yours on this head yet → you reviewed this head in this session with no findings and held the
+     LGTM: post it now (reference/review.md §5, with its label rules); you can't tell (a restart, a
+     compaction) or never reviewed it → a full review, as for `REVIEW:<n>`, never an LGTM from
+     nothing. Anything else (a verdict of yours already on this head, a red check the PR didn't
+     cause) → post nothing. A `REVIEW:<n>` or `REVIEW_COMMENTS:<n>` on the same line is handled
+     first; this one then needs nothing more if that handling posted.
    - **`NONE`** → nothing to do (there may still be open PRs with nothing new).
 3. **Immediately before posting**, re-fetch `gh pr view <n> --comments --repo <repo>` and
    `gh api repos/<repo>/pulls/<n>/comments`; fold in anything that arrived while you worked, and
@@ -319,7 +331,10 @@ Every comment starts with its kind, because the executor's poll script classifie
   failure comes back as an unprefixed comment you treat as a finding. The exception is a PR that
   must record the operator's results: they are part of the PR, so wait for them like any criterion. Note the CI state in the first line (`CI green` /
   `CI pending`, or `CI none, gate passed`; the local runner's check is CI: `CI green (local-ci)`), but CI is not a precondition either: the executor's poll gates `MERGE_READY` on
-  CI and receives `CI_FAILING` itself, and nothing would re-trigger you when CI finishes. A red
+  CI and receives `CI_FAILING` itself, and nothing would re-trigger you when CI finishes. With
+  `review-waits-for-ci: on` CI is a precondition after all (the project's operator merges on your
+  LGTM): a review with no findings on a head with a check still pending posts nothing, and
+  `CI_DONE:<n>` brings you back to post the LGTM once CI is green. A red
   check caused by this PR *is* a finding, so then you post findings, not LGTM. With `gate` in the
   block and no CI on the PR, the gate is the precondition: you run it on the head, a failure is a
   finding, and the LGTM quotes it (`Gate on <sha>: …`), which `MERGE_READY` requires. A passing recheck

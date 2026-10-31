@@ -142,8 +142,9 @@ For a follow-up after the executor's fix: findings start `[reviewer] Recheck of 
 only what is still wrong; a passing recheck starts `[reviewer] LGTM — recheck of <sha>: …`. The
 first word after the prefix is what the executor's poll classifies, so an LGTM never hides behind
 other text. Repo conventions apply to your comments (for example, no tool attribution). A red check
-caused by this PR is a finding, not an LGTM; a pending check is noted, not waited for. Never ask
-first; post.
+caused by this PR is a finding, not an LGTM; a pending check is noted, not waited for, unless the
+block has `review-waits-for-ci: on`: then post nothing while a check is pending, and post the LGTM
+on `CI_DONE:<n>` once CI is green (SKILL.md). Never ask first; post.
 
 **Label a ready PR with your LGTM**, whoever owns it. The executor adds `<needs-operator-label>`
 when its poll sees `MERGE_READY`, but an executor the operator stopped (its issue keeps its
@@ -163,7 +164,9 @@ label on right after the LGTM: there is no CI to wait for.
   that polls gets `MERGE_CONFLICT` as well; a PR with none would otherwise sit unlabelled with
   nobody told.
   `UNKNOWN` (GitHub still computing) does not hold the label back.
-- CI is pending (everything else holds) → end the LGTM with `CI is pending, so this PR does not
+- CI is pending (everything else holds), with `review-waits-for-ci: on` → no LGTM yet: post
+  nothing and hold it for `CI_DONE:<n>`.
+- CI is pending (everything else holds), without it → end the LGTM with `CI is pending, so this PR does not
   have the <needs-operator-label> label yet: a running executor adds it when CI is green; with
   none, merge it once CI is green.` A failing check caused by the PR is a finding, not an LGTM.
 - Anything else missing → end the LGTM with one line naming it and saying the PR has no

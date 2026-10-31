@@ -30,7 +30,8 @@ by one, and anything else waits for an approval nobody is there to give: the loo
 
 **Prerequisite:** `AGENTS.md` has a `## Agent loop` block; otherwise stop. Read the whole file.
 Take `repo`, `qa-gate` (default `off`), `needs-operator-label` (default `needs-operator`), `gate`
-(optional: the command that stands in for CI on a PR that has none) and `reviewers` (default
+(optional: the command that stands in for CI on a PR that has none), `review-waits-for-ci`
+(default `off`: with `on` you hold an LGTM while CI is pending, step 4) and `reviewers` (default
 `1`).
 
 **Several reviewers** (only with `reviewers` above 1 in the block; one reviewer ignores this): pass `--reviewer <clone>` (the base name of your working directory) to every `pr-watch.mjs` run; it then reports only PRs you hold or nobody holds and keeps its state per reviewer. Before work that ends in a post on a PR (not while it still waits for `[qa] PASS`), claim it, one command each: (1) `node scripts/pr-watch.mjs --repo <repo> --reviewer <clone> --check-claim <n>` → `MINE` go on, `THEIRS <clone>` drop it; (2) `OPEN` → `gh pr comment <n> --repo <repo> --body "[reviewer] Reviewing (<clone>)"` and note the id after `#issuecomment-` in the printed URL; (3) check again: `MINE` go on, anything else → `gh api -X DELETE "repos/<repo>/issues/comments/<id>"` and drop it. The holder keeps the PR's rechecks and follow-ups; a holder silent for 30 minutes after a push loses it to the next claim (spec: "Claim comments").
@@ -111,7 +112,9 @@ post nothing, wait ~120s. Otherwise the full review:
      do not hold it back: list them in the LGTM under "Before you merge" with the exact steps; the
      operator confirms by a comment or by merging. CI is not a precondition (the executor's poll
      gates `MERGE_READY` on it and nothing re-triggers you when a check finishes); a red check
-     caused by the PR is a finding.
+     caused by the PR is a finding. With `review-waits-for-ci: on` in the block it is (the
+     project's operator merges on your LGTM): no findings and a check still pending → post nothing
+     and hold the LGTM; `CI_DONE:<n>` brings you back.
    - or, for a decision you cannot review without, a standalone `[reviewer] Question: <one line>`
      with two or three lines of context and `Reply with: …`; add the `needs-operator-label` and
      remove it when the operator replies. A question withholds `MERGE_READY` like a finding, so
@@ -126,7 +129,8 @@ post nothing, wait ~120s. Otherwise the full review:
      is on); moved → skip it (the new head is unreviewed); `CONFLICTING` → skip it and post
      `[reviewer] Merge conflicts — PR #<n> conflicts with main, so it is not ready to merge.
      Whoever owns it: bring main in, resolve, push.` (a PR with no executor would otherwise sit
-     unlabelled with nobody told). CI pending → end the LGTM with "CI is pending, so this PR does
+     unlabelled with nobody told). CI pending, with `review-waits-for-ci: on` → no LGTM yet (above).
+     CI pending, without it → end the LGTM with "CI is pending, so this PR does
      not have the needs-operator label yet: a running executor adds it when CI is green; with
      none, merge it once CI is green." Anything else missing → one line naming it. When you later
      post findings on a PR that carries the label, remove it unless a question is still open.
@@ -142,6 +146,15 @@ operator confirm a criterion or change the bar? Post `LGTM`, a further finding (
 <sha>." plus only what is still wrong), or a clarification — one comment, only if it says
 something new. Any LGTM on a PR with `gate` and no CI runs the gate first and carries its `Gate
 on` line (step 3 above); without it `MERGE_READY` stays withheld. Wait ~60s after a finding, clarification or question, ~300s after LGTM.
+
+**`CI_DONE:<n>`** (only with `review-waits-for-ci: on`: a check on the head finished) → `gh pr
+checks <n> --json name,state,bucket`, and your newest `[reviewer]` post. A check still `pending`
+→ post nothing. A `fail` or `cancel` caused by this PR → findings. Every check `pass` or
+`skipping`, and no verdict of yours on this head yet → you reviewed this head with no findings and
+held the LGTM: post it now (with the label rules above); you can't tell or never reviewed it → a
+full review, as for `REVIEW:<n>`, never an LGTM from nothing. Anything else (a verdict of yours
+already on this head, a red check the PR didn't cause) → post nothing. With the key on, a
+standing `REVIEW:<n>` for a head you reviewed clean and hold for CI needs nothing new. Wait ~120s.
 
 Do not relay CI status or echo operator comments; the executor receives both directly.
 
