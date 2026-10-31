@@ -957,6 +957,8 @@ const holdsLock = (ctx, w, state) => until(() => lockPid(ctx, state) === w.child
   // A second taker while a first one's request is live: the first gets the lock, the second exits 3
   // (one attempt each). The window is held open by stopping the holder (SIGSTOP), so its handler
   // can't claim the request until the second taker has met it; a fixed pause can't promise that.
+  // The first taker is stopped too once its request is out, so its grace (counted in its own
+  // pauses) can't run out and withdraw the request while the second one starts on a slow machine.
   const holder = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
   const holderHolds = await holdsLock(ctx, holder)
   holder.child.kill('SIGSTOP')
@@ -969,13 +971,18 @@ const holdsLock = (ctx, w, state) => until(() => lockPid(ctx, state) === w.child
       return false
     }
   })
+  if (aAsked) a.child.kill('SIGSTOP')
   const rb = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '3')).done
   holder.child.kill('SIGCONT')
-  const [h, ra] = await Promise.all([holder.done, a.done])
+  a.child.kill('SIGCONT')
+  const h = await holder.done
+  // Never are both waiters gone: once the holder has left, the lock names the first taker.
+  const aHolds = await holdsLock(ctx, a)
+  const ra = await a.done
   check('wait: a taker that meets another taker\'s live request → WATCHER_RUNNING <holder>, exit 3; the first taker gets the lock and waits (exit 0); the holder exits 4',
-    holderHolds && aAsked && rb.code === 3 && rb.out === `WATCHER_RUNNING ${holder.child.pid}\n` && ra.code === 0 && signals(ra.out).join() === 'NONE' &&
+    holderHolds && aAsked && aHolds && rb.code === 3 && rb.out === `WATCHER_RUNNING ${holder.child.pid}\n` && ra.code === 0 && signals(ra.out).join() === 'NONE' &&
       h.code === 4 && h.out === 'TAKEN_OVER\n',
-    `holder held the lock: ${holderHolds}, a's request seen: ${aAsked}\nholder ${h.code} ${h.out}| a ${ra.code} ${ra.out}${ra.err}| b ${rb.code} ${rb.out}${rb.err}`)
+    `holder held the lock: ${holderHolds}, a's request seen: ${aAsked}, a then held it: ${aHolds}\nholder ${h.code} ${h.out}| a ${ra.code} ${ra.out}${ra.err}| b ${rb.code} ${rb.out}${rb.err}`)
 
   // A taker that arrives after a takeover has finished finds the new holder, and takes the lock over
   // from it in turn: expected, not an error (the other order of "two at once").
