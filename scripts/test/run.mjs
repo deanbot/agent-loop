@@ -787,7 +787,7 @@ function start(ctx, script, args) {
   child.stdout.on('data', (d) => (out += d))
   child.stderr.on('data', (d) => (err += d))
   const done = new Promise((resolve) => child.on('close', (code) => resolve({ out, err, code, ms: Date.now() - t0 })))
-  return { child, done }
+  return { child, done, output: () => ({ out, err }) }
 }
 const setFixture = (ctx, fixture) => {
   writeFileSync(`${ctx.fixture}.tmp`, JSON.stringify(fixture))
@@ -810,6 +810,28 @@ const watchFx = {
 }
 const watchReviewed = { ...watchFx, comments: [comment('[reviewer] LGTM', T('2026-01-01T12:00:00Z'))] }
 const watchArgs = (...extra) => ['--repo', REPO, ...extra]
+// The takeover checks wait on what they need to have happened (a lock naming a pid, a request
+// file, a line of output), never on a fixed pause, so a slow machine can't reorder them (#135).
+// True once cond() holds; false at the timeout, which the check then reports.
+const until = async (cond, ms = 15000) => {
+  const t0 = Date.now()
+  while (!cond()) {
+    if (Date.now() - t0 > ms) return false
+    await pause(20)
+  }
+  return true
+}
+const waitLock = (ctx, state = WATCH_STATE) => path.join(ctx.home, '.agent-loop', 'state', state.replace(/\.json$/, '-wait.lock'))
+const lockPid = (ctx, state) => {
+  try {
+    return JSON.parse(readFileSync(waitLock(ctx, state), 'utf8')).pid
+  } catch {
+    return null
+  }
+}
+// A waiter holds the lock once the lock names it; it takes the lock before its first pass, and
+// its signal handlers are on before anything else can run.
+const holdsLock = (ctx, w, state) => until(() => lockPid(ctx, state) === w.child.pid)
 {
   const ctx = makeEnv()
   setFixture(ctx, watchFx)
@@ -915,30 +937,57 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   setFixture(ctx, watchReviewed)
   // #116: a second waiter on the same state takes the lock over; the first says TAKEN_OVER, exit 4.
   const first = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
-  await pause(1000)
+  const firstHolds = await holdsLock(ctx, first)
   const second = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4'))
   const f = await first.done
-  check('wait: a second waiter on the same state takes the lock over: the first prints TAKEN_OVER and exits 4', f.out === 'TAKEN_OVER\n' && f.code === 4, `code ${f.code}\n${f.out}${f.err}`)
+  check('wait: a second waiter on the same state takes the lock over: the first prints TAKEN_OVER and exits 4',
+    firstHolds && f.out === 'TAKEN_OVER\n' && f.code === 4, `first held the lock: ${firstHolds}\ncode ${f.code}\n${f.out}${f.err}`)
   const s = await second.done
   check('wait: … and the second waits as usual (NONE at --max, exit 0)', signals(s.out).join() === 'NONE' && s.code === 0, `code ${s.code}\n${s.out}${s.err}`)
   const third = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '1')).done
   check('wait: the lock is released when a waiter exits', signals(third.out).join() === 'NONE', `${third.out}${third.err}`)
   const killed = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
-  await pause(1000)
+  const killedHolds = await holdsLock(ctx, killed)
   killed.child.kill('SIGTERM')
   const k = await killed.done
   const fourth = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '1')).done
-  check('wait: a stopped waiter (SIGTERM) prints nothing and releases the lock', k.out === '' && signals(fourth.out).join() === 'NONE', `${k.out}|${fourth.out}${fourth.err}`)
+  check('wait: a stopped waiter (SIGTERM) prints nothing and releases the lock',
+    killedHolds && k.out === '' && signals(fourth.out).join() === 'NONE', `held the lock: ${killedHolds}\n${k.out}|${fourth.out}${fourth.err}`)
 
-  // Two new waiters at once for one holder: one takes it over, the other exits 3 (one attempt each).
+  // A second taker while a first one's request is live: the first gets the lock, the second exits 3
+  // (one attempt each). The window is held open by stopping the holder (SIGSTOP), so its handler
+  // can't claim the request until the second taker has met it; a fixed pause can't promise that.
   const holder = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
-  await pause(1000)
+  const holderHolds = await holdsLock(ctx, holder)
+  holder.child.kill('SIGSTOP')
   const a = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '3'))
-  const b = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '3'))
-  const [h, ra, rb] = await Promise.all([holder.done, a.done, b.done])
-  const codes = [ra.code, rb.code].sort().join()
-  check('wait: two new waiters at once → the holder is taken over once; one waits, the other exits 3',
-    h.code === 4 && codes === '0,3' && [ra, rb].some((r) => /^WATCHER_RUNNING \d+\n$/.test(r.out)), `holder ${h.code} ${h.out}| ${ra.code} ${ra.out}| ${rb.code} ${rb.out}`)
+  const request = `${waitLock(ctx)}.takeover`
+  const aAsked = await until(() => {
+    try {
+      return readFileSync(request, 'utf8') === String(a.child.pid)
+    } catch {
+      return false
+    }
+  })
+  const rb = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '3')).done
+  holder.child.kill('SIGCONT')
+  const [h, ra] = await Promise.all([holder.done, a.done])
+  check('wait: a taker that meets another taker\'s live request → WATCHER_RUNNING <holder>, exit 3; the first taker gets the lock and waits (exit 0); the holder exits 4',
+    holderHolds && aAsked && rb.code === 3 && rb.out === `WATCHER_RUNNING ${holder.child.pid}\n` && ra.code === 0 && signals(ra.out).join() === 'NONE' &&
+      h.code === 4 && h.out === 'TAKEN_OVER\n',
+    `holder held the lock: ${holderHolds}, a's request seen: ${aAsked}\nholder ${h.code} ${h.out}| a ${ra.code} ${ra.out}${ra.err}| b ${rb.code} ${rb.out}${rb.err}`)
+
+  // A taker that arrives after a takeover has finished finds the new holder, and takes the lock over
+  // from it in turn: expected, not an error (the other order of "two at once").
+  const c1 = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
+  const c1Holds = await holdsLock(ctx, c1)
+  const c2 = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '30'))
+  const c2Holds = await holdsLock(ctx, c2)
+  const c3 = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2'))
+  const [r1, r2, r3] = await Promise.all([c1.done, c2.done, c3.done])
+  check('wait: a taker that arrives after a completed takeover takes the lock over from the new holder → both earlier waiters exit 4, the last waits (exit 0)',
+    c1Holds && c2Holds && r1.code === 4 && r2.code === 4 && r2.out === 'TAKEN_OVER\n' && r3.code === 0 && signals(r3.out).join() === 'NONE',
+    `held: ${c1Holds} ${c2Holds}\n${r1.code} ${r1.out}| ${r2.code} ${r2.out}| ${r3.code} ${r3.out}${r3.err}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
@@ -951,9 +1000,14 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   const stateFile = path.join(stateDir, WATCH_STATE)
   const lockFile = stateFile.replace(/\.json$/, '-wait.lock')
   const script = path.join(scripts, 'pr-watch.mjs')
-  // A stand-in that exits 9 on SIGUSR2 (so a signal shows), or ignores it.
-  const standIn = (args, ignore = false) =>
-    spawn('node', ['-e', `process.on('SIGUSR2',()=>{${ignore ? '' : 'process.exit(9)'}});setInterval(()=>{},1000)`, ...args], { env: ctx.env })
+  // A stand-in that exits 9 on SIGUSR2 (so a signal shows), or ignores it. It says "ready" once its
+  // handler is on: a signal before that would kill it by default and pass for a takeover.
+  const standIn = (args, ignore = false) => {
+    const proc = spawn('node', ['-e', `process.on('SIGUSR2',()=>{${ignore ? '' : 'process.exit(9)'}});process.stdout.write('ready');setInterval(()=>{},1000)`, ...args], { env: ctx.env })
+    proc.said = ''
+    proc.stdout.on('data', (d) => (proc.said += d))
+    return proc
+  }
   const alive = (pid) => {
     try {
       process.kill(pid, 0)
@@ -963,7 +1017,10 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
     }
   }
   const tryWith = async (proc, lock) => {
-    await pause(500)
+    if (!(await until(() => proc.said === 'ready'))) {
+      proc.kill('SIGKILL')
+      return { code: 'stand-in never ready', out: '', err: '', stillAlive: false }
+    }
     writeFileSync(lockFile, JSON.stringify({ pid: proc.pid, started: Date.now(), max: 3300, script, stateFile, ...lock }))
     const r = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
     const stillAlive = alive(proc.pid)
@@ -1007,34 +1064,36 @@ const watchArgs = (...extra) => ['--repo', REPO, ...extra]
   run(ctx, 'pr-watch.mjs', watchArgs(), watchReviewed)
   setFixture(ctx, { ...watchReviewed, delayMs: 2500 })
   const holder = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '12'))
-  await pause(1500)
+  // It takes the lock, then starts its first pass at once: the taker lands in that pass.
+  const slowHolds = await holdsLock(ctx, holder)
   const taker = await start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '2')).done
   const h = await holder.done
   check('wait: a takeover that lands during the holder\'s slow pass → the taker exits 3 after its grace, and the holder keeps waiting (never exit 4)',
-    taker.code === 3 && h.code === 0 && signals(h.out).join() === 'NONE', `taker ${taker.code} ${taker.out} | holder ${h.code} ${h.out}${h.err}`)
+    slowHolds && taker.code === 3 && h.code === 0 && signals(h.out).join() === 'NONE', `held the lock: ${slowHolds}\ntaker ${taker.code} ${taker.out} | holder ${h.code} ${h.out}${h.err}`)
   check('wait: … and the withdrawn request is gone',
     !existsSync(path.join(ctx.home, '.agent-loop', 'state', WATCH_STATE.replace(/\.json$/, '-wait.lock.takeover'))), '')
 
   // A request whose taker is gone (stopped after signalling, before withdrawing) is not honoured.
   setFixture(ctx, watchReviewed)
   const lone = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4'))
-  await pause(1000)
+  const loneHolds = await holdsLock(ctx, lone)
   const dead = spawnSync('node', ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).stdout
   writeFileSync(path.join(ctx.home, '.agent-loop', 'state', WATCH_STATE.replace(/\.json$/, '-wait.lock.takeover')), dead)
   lone.child.kill('SIGUSR2')
   const l = await lone.done
   check('wait: a takeover request whose taker is gone → the holder keeps waiting (NONE at --max), never exit 4',
-    l.code === 0 && signals(l.out).join() === 'NONE', `${l.code} ${l.out}${l.err}`)
+    loneHolds && l.code === 0 && signals(l.out).join() === 'NONE', `held the lock: ${loneHolds}\n${l.code} ${l.out}${l.err}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
   const ctx = makeEnv()
   setFixture(ctx, { fail: true })
   const w = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '15'))
-  await pause(1500)
+  // The API comes back only after the waiter has met (and logged) a failure.
+  const failedOnce = await until(() => /retrying/.test(w.output().err))
   setFixture(ctx, watchFx)
   const r = await w.done
-  check('wait: a transient API error is retried, not fatal', r.out === 'PENDING\n' && r.code === 0 && /retrying/.test(r.err), `code ${r.code}\n${r.out}${r.err}`)
+  check('wait: a transient API error is retried, not fatal', failedOnce && r.out === 'PENDING\n' && r.code === 0 && /retrying/.test(r.err), `saw a failure first: ${failedOnce}\ncode ${r.code}\n${r.out}${r.err}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
 {
