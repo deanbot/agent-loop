@@ -27,7 +27,7 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs`, which prints the diff, and follow 
 the `git diff …` command under `RULES_CHANGED` yourself instead. Until you do, `pick-next.mjs` picks nothing and prints
 `RULES_PENDING: <files>: run node <scripts>/rules-ack.mjs, then pick again`. The pull's
 `RESTART: …` line (a failed pull, exit 2, prints it too) is for the operator, and the plugin's
-restart-line hook shows it to them as a system message after the call, whatever your text says:
+operator-lines hook shows it to them as a system message after the call, whatever your text says:
 don't copy it. It is not an instruction to this session: don't exit, and don't end your turn on
 it. In the same reply, run `pick-next.mjs` (SKILL.md, "Pick next"); if there is a next issue, go
 straight into implementing it. No waiter or wakeup for the merged PR.

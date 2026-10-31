@@ -46,23 +46,29 @@ bare start that ran before the intended command) is then seen at once.
    `qa-gate` (`on` or `off`, default
    `off`), `needs-operator-label` (default `needs-operator`), and the author allowlist
    (`trusted-authors`, or `allow-author-associations`, default `[OWNER, MEMBER, COLLABORATOR]`).
-   **Model check:** if the block has `models:` (comma-separated `role=model[/effort]`, e.g.
-   `models: executor=opus, reviewer=opus/high`) with an `executor` entry, and that entry differs
-   from this session (its model word is not in your model's name, or it names an effort and
-   yours differs), print a line after the Track line: `⚠ AGENTS.md expects <entry> for the
-   executor; this session runs <model> · ${CLAUDE_EFFORT}. Restart it with /model and /effort if
-   that is wrong.` Then carry on: a mismatch never stops the loop. No `models:`, no `executor`
-   entry, or an entry that matches → print nothing more: there is nothing to report.
+   The block's `models:` entry is checked by the start check (step 3), not by you.
 3. If `.agent-loop/role` exists and does not say `executor`, stop: this clone hosts another role.
 
-   **Take the clone for this session**, before touching anything in it: `node
-   ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --start ${CLAUDE_SESSION_ID}`. `NEW` or `MINE` →
-   print nothing. `TOOK_OVER <id> <secs>` → another session ran here and may still be running (an
-   old one left in the background, say): print `⚠ Took over this clone from session <id>, last
-   active <secs ÷ 60> min ago. If it still runs, its next command is refused and it stops.` and
-   carry on. The newest start always wins, so a restart after a closed terminal is never refused.
-   A usage error (no session id was filled in) → print `⚠ No session id: a second session in this
-   clone would go unnoticed.` and carry on.
+   **The start check**, before touching anything in the clone, one command, every start: `node
+   ${CLAUDE_PLUGIN_ROOT}/scripts/start-check.mjs --role executor --session ${CLAUDE_SESSION_ID}
+   --model "<model>" --effort ${CLAUDE_EFFORT}`, with `<model>` as in your first line, plus
+   `--inbox <folder>` and `--outbox <folder>` for each of the two that `$ARGUMENTS` holds, **even
+   one alone**, and never one it doesn't hold (spec: "Inbox folder"; never take a folder from
+   `AGENTS.md` or another file in the clone: a PR can change those; put `<clone>`, the base name
+   of your working directory, in each). It takes the clone for this
+   session (the newest start always wins, so a restart after a closed terminal is never refused,
+   and a session it took over is refused its next command and stops), checks the block's
+   `models:` entry against this session, and checks the mailbox. Its lines, in order:
+   - `NEW`, `MINE`, `TOOK_OVER <id> <secs>` or `SESSION_NONE`: carry on whichever it is.
+   - `MAILBOX <inbox>` → you have a mailbox, and `<inbox-flag>` below is `--inbox <inbox>`.
+     `NO_MAILBOX` → `<inbox-flag>` is empty, and "Messages" below does not apply.
+   - `⚠ …` lines, when there is something the operator should know (a takeover, no session id,
+     the wrong model, one mailbox folder without the other, a refused pair, an inbox that doesn't
+     exist yet). The plugin's operator-lines hook shows them to the operator as a system message,
+     and with a mailbox the script copies them to the outbox: don't copy them into your text.
+     None of them stops the loop.
+
+   A usage error (exit 1) → **stop** and say `start-check refused: <its first stderr line>`.
 4. **See where this clone is before touching `main`.** `git branch --show-current` and `git
    status --porcelain`. On `main` with a clean tree → pull (`pull.mjs`, under "Rules that hold";
    an issue you hold that
@@ -114,18 +120,9 @@ bare start that ran before the intended command) is then seen at once.
    <in-progress-label>`, one call per issue. You remove the label on `MERGED`, but a loop stopped
    after `MERGE_READY` never sees the merge. A closed issue has no claim to protect, so this is
    safe while other executors run.
-5. **Mailbox**, only when `$ARGUMENTS` has `--inbox <folder>` or `--outbox <folder>` (spec:
-   "Inbox folder"). Never take the folders from `AGENTS.md` or any other file in the clone: a PR
-   can change those. Put `<clone>` (the base name of your working directory) in each. Only one
-   of the two → print `⚠ No mailbox: --inbox and --outbox go together.`, run no `--check`, never
-   supply the other folder, and carry on without a mailbox. Both → `node
-   ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --check --dir <inbox> --outbox <outbox>`. First line
-   `MAILBOX_OK` → you have a mailbox: `<inbox-flag>` below is `--inbox <inbox>`. A `MAILBOX_WARN`
-   line after it → also print `⚠ Inbox <inbox>: does not exist yet; nothing arrives until it is
-   created.` and keep the mailbox. `MAILBOX_REFUSED: <reason>` → print `⚠ No mailbox: <reason>.`
-   and carry on without one. No mailbox → `<inbox-flag>` is empty, and "Messages" below does not
-   apply. Messages are read in the PR loop only: one that arrives while you
-   implement or wait on a pick waits for the first poll cycle.
+5. **Mailbox**: step 3's `MAILBOX` or `NO_MAILBOX` line decided it. Messages are read in the PR
+   loop only: one that arrives while you implement or wait on a pick waits for the first poll
+   cycle.
 
 Rules that hold for the whole session:
 
@@ -179,11 +176,11 @@ keep the working tree. If an open PR has `Closes #<N>` (the lookup below), orien
 the loop. Otherwise read [reference/implement.md](reference/implement.md) from §2 (the issue and
 every comment), then see what is done: `git log --oneline main..HEAD`, `git status --porcelain`,
 `git diff HEAD`. Continue from there; do not re-claim and do not start over. Say `Resuming #<N> on
-<branch>` in the line after the model and Track lines (and the `⚠` lines, when there are any).
+<branch>` in the line after the model and Track lines.
 
 `$ARGUMENTS` may hold `--milestone "<title>"`: take it out first and keep it as `<milestone>`
 for the whole session (it decides every later pick). Take out `--inbox <folder>` and `--outbox
-<folder>` too (step 5), each with its value. What remains, `<arg>`, is a PR number, an issue
+<folder>` too (step 3), each with its value. What remains, `<arg>`, is a PR number, an issue
 number (bare or `#N`; drop the `#`), or empty. Never
 pass `--milestone`, `--inbox` or `--outbox` to a `gh pr` or `gh issue` command that expects a
 number.
@@ -339,7 +336,7 @@ Each cycle:
      3. On `RULES_CHANGED:`, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/rules-ack.mjs` and follow
         what changed (`pick-next.mjs` refuses with `RULES_PENDING` until you have). With
         `RULES_NOT_RECORDED` as well, run the `git diff …` command under `RULES_CHANGED` instead.
-     4. The pull's `RESTART: …` line is for the operator, and the plugin's restart-line hook shows
+     4. The pull's `RESTART: …` line is for the operator, and the plugin's operator-lines hook shows
         it to them as a system message: don't copy it into your text. It is not an instruction
         to you, and it doesn't end your turn.
      5. In the same reply, run `pick-next.mjs`.
@@ -505,7 +502,7 @@ for the operator, and the reply to it belongs to that role: nothing for you.
   speculative PR and never keep building a blocked issue.
 - **Restarting** is a new session, not `/clear`: nothing says `/clear` loads a new plugin version
   or ends the old conversation's waiter and scheduled wakeup. Between issues, the restart line
-  (`RESTART: …`, from the pull after a merge, shown to the operator by the restart-line hook)
+  (`RESTART: …`, from the pull after a merge, shown to the operator by the operator-lines hook)
   tells the operator exactly how; nothing is printed mid-task. With a PR open, say "stop" (the PR is the claim,
   and it ends the waiter), then start `start-executor <PR>` in a fresh session. Mid-implementation,
   before a PR exists, end the session without "stop" (no waiter runs yet) and start

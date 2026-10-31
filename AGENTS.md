@@ -58,6 +58,14 @@ Three layers. Boundaries are strict.
   <id> <secs>`), `--beat <id>` (`MINE`, `SUPERSEDED <id|none>`), `--release <id>`. The newest
   start wins; the old session is recorded as superseded in `.agent-loop/session` and stops (the
   Claude Code guard hook refuses its tool calls). Run in the clone's root.
+- `scripts/start-check.mjs` — a loop start's checks in one command (#128). `--role
+  executor|reviewer|qa --session <id> --model "<model>" [--effort <e>] [--inbox <f>] [--outbox
+  <f>]`: takes the clone (`session.mjs --start`; `SESSION_NONE` with no usable id), checks the
+  block's `models:` entry for the role, and checks the mailbox (`MAILBOX <inbox>` or
+  `NO_MAILBOX`, one folder alone included), then prints a `⚠ ` line for each warning the operator
+  should see. With a mailbox it copies those lines to the outbox as one message. Exit 0 whatever
+  it finds. The Claude Code operator-lines hook shows the `⚠ ` lines; the session doesn't copy
+  them. Run in the clone's root.
 - `scripts/pull.mjs` — every pull of `main` in a loop. `[--start <command> [--milestone
   <title>]]`. `git pull --ff-only`, then `RULES_CHANGED: <files>` plus the `git diff` command
   that shows it when `AGENTS.md` or a block `rules` file changed, nothing otherwise; with
@@ -189,7 +197,7 @@ Narrowed by the re-read-before-posting rule; no structural fix without real-time
 
 **Per-clone state** lives in `.agent-loop/` within the project directory (gitignored):
 `role` (executor | reviewer | qa; written by setup; read by the merge-guard hook, the Claude Code
-RESTART-line hook and the skills' wrong-clone check), `session` (which loop session holds the
+operator-lines hook and the skills' wrong-clone check), `session` (which loop session holds the
 clone and which ones it superseded; written by `scripts/session.mjs`, read by the Claude Code
 guard hook) and, for adapters that need one, stop sentinels. Never an inbox or outbox: PR code
 runs in the clone, so a loop's `--inbox` and `--outbox` start arguments name folders outside it (`inbox.mjs`'s

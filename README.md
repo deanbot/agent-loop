@@ -70,7 +70,8 @@ exempt them the same way: `scripts/pick-next.mjs`, `scripts/pr-poll.mjs`, `scrip
 fails, and the loop says so in a `⚠` line each time. `scripts/rules-ack.mjs` clears a record in
 the scripts' state folder, outside the clone, so exempt it too: a sandboxed run can't clear it, and
 `pick-next.mjs` then refuses every pick (`RULES_PENDING`). `scripts/inbox.mjs` writes its record to
-the same state folder, so a loop with a mailbox needs it exempt too.
+the same state folder, so a loop with a mailbox needs it exempt too, and so does
+`scripts/start-check.mjs`, which copies a start's warnings to the outbox, outside the clone.
 
 ---
 

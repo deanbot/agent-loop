@@ -20,7 +20,8 @@ adapters/claude-code/
   skills/start-qa/                  /agent-loop:start-qa          SKILL.md + reference/
   hooks/hooks.json, guard.mjs       PreToolUse: deny `gh pr merge` (and a non-pending commit status) in clones with .agent-loop/role,
                                     and every command from a session another one took over
-  hooks/restart-line.mjs            PostToolUse(Failure): show the operator pull.mjs's RESTART line in an executor clone
+  hooks/operator-lines.mjs          PostToolUse(Failure): show the operator pull.mjs's RESTART line (executor clone) and
+                                    start-check.mjs's ⚠ lines (any loop clone)
   setup-project.sh                  what the setup skill runs
   install.sh                        marketplace add + plugin install
 ```
@@ -236,9 +237,9 @@ clone has no marker, so nothing changes there. It is a safety net behind the pro
 security boundary: the same action through another program (a script, `sh -c`, the API from node)
 is not caught. A comment body that quotes the literal phrase `gh pr merge` is refused too; reword.
 
-## RESTART-line hook
+## Operator-lines hook
 
-`hooks/restart-line.mjs` runs after every Bash call (`PostToolUse`, and `PostToolUseFailure` for
+`hooks/operator-lines.mjs` runs after every Bash call (`PostToolUse`, and `PostToolUseFailure` for
 a failed pull, which exits 2 and still prints the line). In a clone whose `.agent-loop/role` says
 `executor`, after a `pull.mjs --start …` call, it returns the `RESTART: …` line from the output as
 a `systemMessage`, so the operator sees it even when the terminal collapses the tool's output or
@@ -247,6 +248,14 @@ blocks a call. It is the operator's copy: the executor doesn't write the line in
 live runs a session skipped that step however it was worded, and where nobody watches the
 terminal, the hook's message and the session's text reach the operator the same way, through the
 transcript.
+
+The same hook shows a start's warnings. Every start runs `scripts/start-check.mjs`, which takes
+the clone for the session, checks the `models:` entry and the mailbox folders, and prints a `⚠ `
+line for each thing the operator should know: a takeover, no session id, the wrong model, one
+mailbox folder without the other, a refused pair, an inbox that doesn't exist yet. In a clone whose
+role marker says `executor`, `reviewer` or `qa`, the hook returns all of those lines as one
+`systemMessage`, and the session doesn't copy them. With a mailbox, the script also writes them
+to the outbox as one message, for a deployment where nobody watches the terminal.
 
 ## Known limitations
 
