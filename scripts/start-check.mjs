@@ -46,18 +46,24 @@ function usageError(message) {
   process.exit(1)
 }
 
-// A value may be empty (an id the tool didn't fill in); a missing one is a usage error.
+// --session and --effort are filled in by the tool, unquoted: an empty fill leaves no word at all
+// (`--session --model …`), so these two take the next word only when it is not an option, and are
+// empty otherwise. Every other option needs its value.
+const OPTIONAL = ['--session', '--effort']
+const hasValue = (i) => process.argv[i + 1] !== undefined && !process.argv[i + 1].startsWith('--')
+
 function arg(name) {
   const i = process.argv.indexOf(name)
   if (i === -1) return null
-  const v = process.argv[i + 1]
-  if (v === undefined || v.startsWith('--')) usageError(`${name}: expected a value`)
-  return v
+  if (hasValue(i)) return process.argv[i + 1]
+  if (OPTIONAL.includes(name)) return ''
+  usageError(`${name}: expected a value`)
 }
 
 for (let i = 2; i < process.argv.length; i++) {
-  if (OPTIONS.includes(process.argv[i])) i++
-  else usageError(`unexpected argument "${process.argv[i]}"`)
+  if (OPTIONS.includes(process.argv[i])) {
+    if (hasValue(i)) i++
+  } else usageError(`unexpected argument "${process.argv[i]}"`)
 }
 
 const role = arg('--role')

@@ -2657,7 +2657,10 @@ const putMessage = (dir, id, extra, meta) => {
     shown({ cwd: reviewer, hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: startCmd }, error: `Exit code 1\n${warn1}` }) === warn1 &&
       shown(ok('node "/My Plugins/agent-loop/scripts/start-check.mjs" --role qa --session s --model m', startOut, qa)) === `${warn1}\n${warn2}`)
   check('start lines hook: no ⚠ line → silent', shown(ok(startCmd, 'MINE\nNO_MAILBOX\n', reviewer)) === 'SILENT')
-  check('start lines hook: a clone with no role marker → silent', shown(ok(startCmd, startOut, bare)) === 'SILENT')
+  const auditor = clone('auditor')
+  check('start lines hook: a clone with no role marker yet (a start runs there too) → the lines; another role\'s marker → silent',
+    shown(ok(startCmd, startOut, bare)) === `${warn1}\n${warn2}` && shown(ok(startCmd, startOut, auditor)) === 'SILENT', shown(ok(startCmd, startOut, bare)))
+  rmSync(auditor, { recursive: true, force: true })
   check('start lines hook: ⚠ lines from another command (session.mjs, inbox.mjs --check, a grep naming start-check.mjs) → silent',
     ['node /p/scripts/session.mjs --start s1', 'node /p/scripts/inbox.mjs --check --dir /a --outbox /b', 'grep -n x scripts/start-check.mjs.bak', 'node /p/scripts/restart-check.mjs']
       .every((c) => shown(ok(c, startOut, reviewer)) === 'SILENT'))
@@ -2693,6 +2696,16 @@ const putMessage = (dir, id, extra, meta) => {
     check(`start-check: session id ${JSON.stringify(id)} (not filled in) → SESSION_NONE and the ⚠ no-session line, exit 0`,
       none[0] === 'SESSION_NONE' && none.includes('⚠ No session id: a second session in this clone would go unnoticed.'), none.join('\n'))
   }
+
+  // The review of #128: the tool fills the id and the effort in unquoted, so an empty fill leaves no
+  // word at all. The start must still go on, never stop on a usage error.
+  const emptySession = lines(['--role', 'reviewer', '--session', '--model', 'Opus 5.5', '--effort', 'high'])
+  check('start-check: --session with nothing after it (an empty fill, followed by --model) → SESSION_NONE and the ⚠ line, exit 0',
+    emptySession[0] === 'SESSION_NONE' && emptySession.includes('⚠ No session id: a second session in this clone would go unnoticed.'), emptySession.join('\n'))
+  const emptyEffort = [lines(['--role', 'reviewer', '--session', 'sess-b', '--model', 'Opus 5.5', '--effort']),
+    lines(['--role', 'reviewer', '--session', 'sess-b', '--model', 'Opus 5.5', '--effort', '--inbox', inbox])]
+  check('start-check: --effort last, or followed by --inbox (an empty fill) → no usage error; the next option still read',
+    emptyEffort[0][0] === 'MINE' && emptyEffort[1][0] === 'MINE' && emptyEffort[1].includes('⚠ No mailbox: --inbox and --outbox go together.'), emptyEffort.map((l) => l.join('|')).join('\n'))
 
   agents('executor=opus, reviewer=sonnet')
   const wrong = lines(base('reviewer', 'sess-b'))

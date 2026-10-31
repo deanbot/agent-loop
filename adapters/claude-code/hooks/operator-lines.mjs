@@ -3,10 +3,10 @@
 // systemMessage, so they reach the terminal whether or not the session writes them into its own
 // text (a terminal can collapse a tool's output, and a session can skip the step that repeats it).
 //
-// Two sources, each in a loop clone only (its role marker, `.agent-loop/role`):
+// Two sources, told apart by the role marker (`.agent-loop/role`):
 //   - `scripts/pull.mjs --start`, run after a merge, in an executor clone: its `RESTART: …` line (#105).
-//   - `scripts/start-check.mjs`, run at every start, in an executor, reviewer or QA clone: its `⚠ `
-//     lines, all of them, in order (#128).
+//   - `scripts/start-check.mjs`, run at every start, in an executor, reviewer or QA clone or one with
+//     no marker yet: its `⚠ ` lines, all of them, in order (#128).
 // The filter is here rather than in an `if` on the hook entry, so it doesn't depend on how a
 // permission-rule glob matches, and one entry serves both: every hook entry costs a process per
 // Bash call.
@@ -36,7 +36,8 @@ let role = null
 try {
   role = readFileSync(path.join(input.cwd ?? process.cwd(), '.agent-loop', 'role'), 'utf8').trim()
 } catch {}
-if (restart ? role !== 'executor' : !['executor', 'reviewer', 'qa'].includes(role)) process.exit(0)
+// A start runs in a clone with no marker yet too (setup not run), and its lines have no other way out.
+if (restart ? role !== 'executor' : role !== null && !['executor', 'reviewer', 'qa'].includes(role)) process.exit(0)
 
 const response = input.tool_response
 const output = [

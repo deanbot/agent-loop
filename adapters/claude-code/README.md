@@ -21,7 +21,7 @@ adapters/claude-code/
   hooks/hooks.json, guard.mjs       PreToolUse: deny `gh pr merge` (and a non-pending commit status) in clones with .agent-loop/role,
                                     and every command from a session another one took over
   hooks/operator-lines.mjs          PostToolUse(Failure): show the operator pull.mjs's RESTART line (executor clone) and
-                                    start-check.mjs's ⚠ lines (any loop clone)
+                                    start-check.mjs's ⚠ lines (a loop clone, or one with no marker yet)
   setup-project.sh                  what the setup skill runs
   install.sh                        marketplace add + plugin install
 ```
@@ -253,8 +253,8 @@ The same hook shows a start's warnings. Every start runs `scripts/start-check.mj
 the clone for the session, checks the `models:` entry and the mailbox folders, and prints a `⚠ `
 line for each thing the operator should know: a takeover, no session id, the wrong model, one
 mailbox folder without the other, a refused pair, an inbox that doesn't exist yet. In a clone whose
-role marker says `executor`, `reviewer` or `qa`, the hook returns all of those lines as one
-`systemMessage`, and the session doesn't copy them. With a mailbox, the script also writes them
+role marker says `executor`, `reviewer` or `qa`, or that has no marker yet, the hook returns all
+of those lines as one `systemMessage`, and the session doesn't copy them. With a mailbox, the script also writes them
 to the outbox as one message, for a deployment where nobody watches the terminal.
 
 ## Known limitations
