@@ -75,7 +75,9 @@ label stays on, so post once). No label and a head new since your last `[reviewe
 posted on (the executor took the label off meanwhile) → post nothing. Wait ~120s.
 
 **`REVIEW:<n>`** → with `qa-gate: on`, require a `[qa] PASS` newer than the head commit; none →
-post nothing, wait ~120s. Otherwise the full review:
+post nothing, wait ~120s. With `review-waits-for-ci: on`, a head you already reviewed in this
+session with no findings and hold for CI → post nothing: `CI_DONE:<n>` brings you back (you
+can't tell → review it as below). Otherwise the full review:
 
 1. Gather: `gh pr view <n> --json title,body,headRefOid,headRefName`, `gh pr view <n>
    --comments`, `gh api repos/<repo>/pulls/<n>/comments`, `gh pr checks <n> --json

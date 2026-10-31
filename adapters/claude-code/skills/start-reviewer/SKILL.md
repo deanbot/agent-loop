@@ -188,7 +188,9 @@ those cycles still runs the watch, so news is seen within five minutes. A waiter
        between the watch and now) → post nothing: the executor is resolving it.
    - **`REVIEW:<n>`** (new commits, or a PR you have never posted on) → a full review. With
      `qa-gate: on`, first check for a `[qa] PASS` newer than the last commit; none yet → post
-     nothing this cycle. Otherwise read [reference/review.md](reference/review.md) the first time
+     nothing this cycle. With `review-waits-for-ci: on`, a head you already reviewed in this
+     session with no findings and hold for CI → post nothing: `CI_DONE:<n>` brings you back (you
+     can't tell → review it as below). Otherwise read [reference/review.md](reference/review.md) the first time
      and follow it: gather, verify the acceptance criteria, verify the code with probes, post one
      comment (findings, or `[reviewer] LGTM`).
    - **`REVIEW_COMMENTS:<n>`** (new executor, QA or operator comments, no new commits) → read the

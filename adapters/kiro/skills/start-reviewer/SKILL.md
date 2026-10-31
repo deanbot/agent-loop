@@ -97,6 +97,8 @@ Wait ~120 seconds before next cycle.
 - If no `[qa] PASS` found: **post nothing** — wait ~120s. Reviewer will be re-triggered via REVIEW_COMMENTS when QA posts its verdict.
 - If `[qa] PASS` found: proceed.
 
+**Held for CI** (only with `review-waits-for-ci: on`) — a head you already reviewed in this session with no findings and hold for CI → post nothing: `CI_DONE:<n>` brings you back (you can't tell → review it as below).
+
 Fetch in parallel:
 - `gh pr diff <n> --repo <repo>`
 - `gh pr view <n> --comments --repo <repo>`

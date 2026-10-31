@@ -962,7 +962,9 @@ const holdsLock = (ctx, w, state) => until(() => lockPid(ctx, state) === w.child
     const t = flatText(f) + (extra ? flatText(extra) : '')
     return !t.includes('`review-waits-for-ci` (`on` or `off`') && !t.includes('`review-waits-for-ci` (default `off`') && !t.includes('`review-waits-for-ci` — `on` or `off` (default `off`)') ||
       !/\*\*`CI_DONE:<n>`\*\* \(only with `review-waits-for-ci: on`/.test(t) || !t.includes('never an LGTM from nothing') ||
-      !t.includes('A check still `pending` → post nothing') || !/CI (is )?pending( \(everything else holds\))?, with `review-waits-for-ci: on` → no LGTM yet/.test(t)
+      !t.includes('A check still `pending` → post nothing') || !/CI (is )?pending( \(everything else holds\))?, with `review-waits-for-ci: on` → no LGTM yet/.test(t) ||
+      // A held first review keeps REVIEW standing: the REVIEW handler says so, or every wake re-reviews.
+      !/`REVIEW:<n>`\*\*[^]*?a head you already reviewed in this session with no findings and hold for CI → post nothing: `CI_DONE:<n>` brings you back \(you can't tell → review it as below\)[^]*?\*\*`REVIEW_COMMENTS:<n>`\*\*/.test(t)
   }).map(([f]) => f)
   check('reviewer texts (#131): every reviewer takes review-waits-for-ci, holds the LGTM with CI pending, and handles CI_DONE (never an LGTM from nothing)',
     unhandled.length === 0, unhandled.join('\n'))
