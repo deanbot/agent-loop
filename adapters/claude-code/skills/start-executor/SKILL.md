@@ -62,16 +62,25 @@ bare start that ran before the intended command) is then seen at once.
    - `NEW`, `MINE`, `TOOK_OVER <id> <secs>` or `SESSION_NONE`: carry on whichever it is.
    - `MAILBOX <inbox>` → you have a mailbox, and `<inbox-flag>` below is `--inbox <inbox>`.
      `NO_MAILBOX` → `<inbox-flag>` is empty, and "Messages" below does not apply.
+   - `BRANCH <name> CLEAN|DIRTY`, `BRANCH_DETACHED CLEAN|DIRTY` or `BRANCH_UNKNOWN`: where this
+     clone is, read by the script. Step 4 decides from it.
+   - `CLEARED <n> #a #b …`, `CLEARED_NONE` or `CLEARED_UNKNOWN`: the stale-claim clear, run by
+     the script (closed issues that still carried `<in-progress-label>`, which a loop stopped after
+     `MERGE_READY` leaves behind). Nothing for you to do whichever it is.
    - `⚠ …` lines, when there is something the operator should know (a takeover, no session id,
      the wrong model, one mailbox folder without the other, a refused pair, an inbox that doesn't
-     exist yet). The plugin's operator-lines hook shows them to the operator as a system message,
+     exist yet, git or gh failing). The plugin's operator-lines hook shows them to the operator as a system message,
      and with a mailbox the script copies them to the outbox: don't copy them into your text.
      None of them stops the loop.
 
    A usage error (exit 1) → **stop** and say `start-check refused: <its first stderr line>`.
-4. **See where this clone is before touching `main`.** `git branch --show-current` and `git
-   status --porcelain`. On `main` with a clean tree → pull (`pull.mjs`, under "Rules that hold"),
-   then clear stale claims (below). **No claim check runs on a clean `main`:** an issue number in
+4. **See where this clone is before touching `main`.** Step 3's `BRANCH` line says it, and
+   nothing else does: never the git status attached to this session's context (a snapshot from
+   the session's start, not a check), and never a branch or status you remember. Below, a clean
+   tree is the line's `CLEAN` and uncommitted changes are its `DIRTY`; `BRANCH_DETACHED` is a
+   branch whose name carries no issue number. `BRANCH_UNKNOWN` → **stop** and say `Could not read
+   this clone's branch: <the ⚠ line>. Restart when git works.` `BRANCH main CLEAN` → pull
+   (`pull.mjs`, under "Rules that hold"). **No claim check runs on a clean `main`:** an issue number in
    `$ARGUMENTS` goes to "Decide what you are working on", where the open-PR lookup
    (`pr-for-issue.mjs`) runs before any claim, and an issue you hold is resumed from
    reference/implement.md §1. Otherwise (another branch, or
@@ -117,13 +126,6 @@ bare start that ran before the intended command) is then seen at once.
      branch); with uncommitted changes, **stop** and say `<branch> has uncommitted changes and
      this clone does not hold #<N>: commit, stash or discard them, then restart.` Never switch
      branches over uncommitted work.
-
-   Then clear stale claims:
-   `gh issue list --repo <repo> --state closed --label <in-progress-label> --limit 100 --json
-   number --jq '.[].number'`, and for each number `gh issue edit <n> --repo <repo> --remove-label
-   <in-progress-label>`, one call per issue. You remove the label on `MERGED`, but a loop stopped
-   after `MERGE_READY` never sees the merge. A closed issue has no claim to protect, so this is
-   safe while other executors run.
 5. **Mailbox**: step 3's `MAILBOX` or `NO_MAILBOX` line decided it. Messages are read in the PR
    loop only: one that arrives while you implement or wait on a pick waits for the first poll
    cycle.
@@ -251,15 +253,31 @@ number, an issue number with a PR, `RESUME`, and step 4's resume. In order:
 1. `gh pr view <PR> --repo <repo>` and `gh pr view <PR> --comments --repo <repo>`: the
    description, the acceptance criteria table, every comment, any earlier `[executor] BLOCKED` or
    `Question` and the operator's replies.
-2. If the linked issue #<N> or the PR still carries `<blocked-label>` or `<needs-operator-label>`
-   from a park, remove them: you are resuming.
+2. **If #<N> carries `<in-progress-label>`, check whose it is first**, before any label write,
+   any branch switch or any work, never from the label alone: `node
+   ${CLAUDE_PLUGIN_ROOT}/scripts/claims.mjs --repo <repo> --issue <N> --clone <clone>
+   --in-progress-label <in-progress-label> --blocked-label <blocked-label>` (`<clone>` is the base
+   name of your working directory).
+   - `CLAIM_HELD`, or `CLAIM_NONE` (claimed before claim comments existed) when `$ARGUMENTS`
+     names #<N>, by its own number or by this PR → it is yours: go on, with no re-claim.
+   - `CLAIM_LOST <clone>`, or `CLAIM_NONE` when `$ARGUMENTS` doesn't name it → another executor
+     holds it, and `<clone>` is the winning clone: lost (below). Touch none of its labels.
+   - `CLAIM_RELEASED` (the label went meanwhile) → go on: step 3 claims it.
+   - `CLAIM_BLOCKED` or `CLAIM_CLOSED` → go on: the next sentence removes a park's labels, and
+     the loop handles a closed issue (`MERGED`).
+   - A failed run (exit 2, a `claims:` line) decides nothing: **stop** and say `Could not check
+     the claim on #<N>: <the claims: line>. Restart when gh works.`
+
+   Then, if the linked issue #<N> or the PR still carries `<blocked-label>` or
+   `<needs-operator-label>` from a park, remove them: you are resuming.
 3. If #<N> now carries no `<in-progress-label>` (it was parked, or released), claim it before
    any work, so one PR never gets two executors: the author check in
    [reference/implement.md](reference/implement.md) §1 (a claim comment is text anyone can post),
-   then steps 1–4 of the claim there. With the label on, do not re-claim. Turned down or lost →
-   after a pick (`RESUME`, `ISSUE`), add #<N> to your skip list and run the script again; when
-   `$ARGUMENTS` named it, stop and say `#<N> is claimed by <the winning clone>: PR #<PR> stays
-   with it.`
+   then steps 1–4 of the claim there. With the label on, step 2 already decided.
+
+   Turned down or lost (step 2 or 3) → after a pick (`RESUME`, `ISSUE`), add #<N> to your skip
+   list and run the script again; when `$ARGUMENTS` named it, **stop** and say `#<N> is claimed
+   by <the winning clone>: PR #<PR> stays with it.` Never switch to its branch.
 4. Be on the PR's branch: `gh pr view <PR> --repo <repo> --json headRefName`. Not on it → with a
    clean tree, `git fetch` when the branch is not in this clone, then `git switch <branch>`; with
    uncommitted changes, **stop** and say `<current branch> has uncommitted changes, and PR #<PR>
