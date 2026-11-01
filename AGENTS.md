@@ -90,10 +90,12 @@ Three layers. Boundaries are strict.
   run; while a run goes on, new heads get `pending` every `--wait` interval. One runner per repo
   and context (pid lock).
 - `scripts/local-ci-log.mjs` — the executor's lookup of a run's log on the runner's machine (#137).
-  `--repo owner/repo --pr <n> --sha <sha>` prints the path of that head's newest log under
-  `~/.agent-loop/local-ci/<slug>/`, or `NO_LOCAL_LOG`; exit 0 either way. Names only: it never
-  reads a log or writes anything. On `CI_FAILING` from the runner the executor reads the failure
-  there and runs only what confirms the fix, and runs the full gate only on `NO_LOCAL_LOG`.
+  `--repo owner/repo --pr <n> --sha <sha>` prints `LOG <path>` for that head's newest log under
+  `~/.agent-loop/local-ci/<slug>/`, its last 200 lines (indented, ANSI and control characters
+  removed) and `LOG_CUT` if it has more, or `NO_LOCAL_LOG`; exit 0 either way, writes nothing. The
+  session reads the log from that output, so it needs no access to the folder. On `CI_FAILING`
+  from the runner the executor reads the failure there and runs only what confirms the fix, and
+  runs the full gate only on `NO_LOCAL_LOG`.
 - `scripts/audit.mjs` — the auditor's numbers, read-only. `--repo owner/repo --since <date|Nd>
   [--until <date>] [--floor id,id] [--operators l,l] [--labels l,l] [--format md|json]`. For each
   control the loop ran over the period (a workflow on prose-only PRs, re-runs, cancelled runs, a
