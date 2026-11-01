@@ -2140,6 +2140,58 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- local-ci-log.mjs, a run's log on this machine (#137)
+{
+  // A failure in one browser test started a full gate just to read which test it was; the log was
+  // already on the machine. The lookup reads the runner's log names (as local-ci.mjs writes them).
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, '.agent-loop', 'local-ci', 'acme-widgets')
+  mkdirSync(dir, { recursive: true })
+  const SHA = 'abcdef0123456789abcdef0123456789abcdef01'
+  const OTHER = '1234567890abcdef1234567890abcdef12345678'
+  const logName = (pr, sha, t) => `${pr}-${sha.slice(0, 12)}-${t}.log`
+  const look = (args) => {
+    const r = spawnSync('node', [path.join(scripts, 'local-ci-log.mjs'), '--repo', REPO, ...args], { env: ctx.env, encoding: 'utf8' })
+    return { out: r.stdout.trim(), err: r.stderr, code: r.status }
+  }
+  writeFileSync(path.join(dir, logName(7, SHA, '2026-11-01T10-00-00-000Z')), 'older run\n')
+  writeFileSync(path.join(dir, logName(7, SHA, '2026-11-01T12-30-00-000Z')), 'newer run\n')
+  writeFileSync(path.join(dir, logName(7, OTHER, '2026-11-01T13-00-00-000Z')), 'another head\n')
+  writeFileSync(path.join(dir, logName(17, SHA, '2026-11-01T14-00-00-000Z')), 'another PR\n')
+  writeFileSync(path.join(dir, 'notes.txt'), 'not a log\n')
+  const newest = path.join(dir, logName(7, SHA, '2026-11-01T12-30-00-000Z'))
+  const hit = look(['--pr', '7', '--sha', SHA])
+  check('local-ci-log (#137): a head with logs → the newer run\'s path (two runs of one head), exit 0', hit.code === 0 && hit.out === newest, JSON.stringify(hit))
+  check('local-ci-log (#137): … a short sha (7 digits) or upper case finds the same log',
+    look(['--pr', '7', '--sha', SHA.slice(0, 7)]).out === newest && look(['--pr', '7', '--sha', SHA.toUpperCase()]).out === newest)
+  const otherHead = look(['--pr', '7', '--sha', 'fedcba9876543210fedcba9876543210fedcba98'])
+  check('local-ci-log (#137): a head with no log (the PR\'s newest log is for another sha) → NO_LOCAL_LOG', otherHead.out === 'NO_LOCAL_LOG' && otherHead.code === 0, JSON.stringify(otherHead))
+  check('local-ci-log (#137): another PR\'s log for the same sha is not this PR\'s → NO_LOCAL_LOG', look(['--pr', '70', '--sha', SHA]).out === 'NO_LOCAL_LOG')
+  const noDir = spawnSync('node', [path.join(scripts, 'local-ci-log.mjs'), '--repo', 'acme/other', '--pr', '7', '--sha', SHA], { env: ctx.env, encoding: 'utf8' })
+  check('local-ci-log (#137): no log folder for the repo (the runner is elsewhere) → NO_LOCAL_LOG, exit 0', noDir.stdout.trim() === 'NO_LOCAL_LOG' && noDir.status === 0, noDir.stdout + noDir.stderr)
+  const bad = [['--pr', 'x', '--sha', SHA], ['--pr', '7', '--sha', 'abc'], ['--pr', '7', '--sha', '../../etc'], ['--pr', '7'], ['--pr', '7', '--sha', SHA, 'extra']].map(look)
+  const badRepo = spawnSync('node', [path.join(scripts, 'local-ci-log.mjs'), '--repo', '../../x/y', '--pr', '7', '--sha', SHA], { env: ctx.env, encoding: 'utf8' })
+  check('local-ci-log (#137): a PR or sha that is not one, a repo outside GitHub\'s name characters, a missing or stray argument → exit 1',
+    bad.every((r) => r.code === 1) && badRepo.status === 1, bad.map((r) => r.err).join(''))
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // Every executor finds the log before it would run the gate, and runs the gate only without one.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const flatText = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+  const lookups = { 'claude-code/skills/start-executor/reference/signals.md': 'node ${CLAUDE_PLUGIN_ROOT}/scripts/local-ci-log.mjs --repo <repo> --pr <PR> --sha <head sha>',
+    'generic/executor.md': 'node scripts/local-ci-log.mjs --repo <repo> --pr <PR> --sha <head sha>',
+    'kiro/skills/start-executor/SKILL.md': 'node scripts/local-ci-log.mjs --repo <repo> --pr <PR> --sha <head sha>' }
+  const noLookup = Object.entries(lookups).filter(([f, cmd]) => {
+    const t = flatText(f)
+    const at = t.indexOf(cmd)
+    const local = t.slice(at, at + 900)
+    return at === -1 || !local.includes('never the full gate just to read the failure') || !/`NO_LOCAL_LOG`[^.]*→ run `<gate>`/.test(local) ||
+      /its log on the runner's machine: run `<gate>`/.test(t) || /Its log is on the runner's machine, so run `<gate>`/.test(t)
+  }).map(([f]) => f)
+  check('local-ci-log (#137): every executor\'s CI_FAILING for the local runner finds the log first, reads the failure there, and runs the gate only on NO_LOCAL_LOG',
+    noLookup.length === 0, noLookup.join('\n'))
+}
+
 // ---------------------------------------------------------------- inbox.mjs (#77)
 // Needs no gh. Each case gets a fresh HOME (the record) and a folder; `cwd` is a clone stand-in.
 function inbox(ctx, args, cwd = ctx.home) {

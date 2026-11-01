@@ -225,6 +225,24 @@ patterns; files are changed with Edit and Write, since a heredoc or `sed -i` mat
 prefix-approvable either, which is one reason the stop-sentinel mechanism was dropped in favour
 of `ScheduleWakeup({ stop: true })`.
 
+**Local CI.** When the executor runs on the local runner's machine, it reads a failing run's log
+instead of re-running the gate (#137). `scripts/local-ci-log.mjs` finds it under
+`~/.agent-loop/local-ci/<owner>-<repo>/`. The session needs read access to that folder and no
+write access, granted in the executor clone's `.claude/settings.local.json` with the folder
+written out in full:
+
+```json
+{
+  "permissions": {
+    "additionalDirectories": ["/home/<user>/.agent-loop/local-ci/<owner>-<repo>"],
+    "deny": ["Edit(//home/<user>/.agent-loop/local-ci/<owner>-<repo>/**)"]
+  }
+}
+```
+
+Without it, or with the runner on another machine or under another user, the script prints
+`NO_LOCAL_LOG`, and the executor runs the gate to read the failure, as before.
+
 ## Guard hook
 
 `hooks/guard.mjs` runs on every `PreToolUse` for Bash, Edit, Write and NotebookEdit. When the
