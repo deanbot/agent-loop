@@ -2933,9 +2933,12 @@ const putMessage = (dir, id, extra, meta) => {
     const orient = start === -1 || end === -1 ? '' : t.slice(start, end)
     return !orient.includes(cmd) || !orient.includes('`CLAIM_LOST <clone>`') || !orient.includes('`#<N> is claimed by <') ||
       !orient.includes(': PR #<PR> stays with it.`') || !orient.includes('`Could not check the claim on #<N>: <the claims: line>. Restart when gh works.`') ||
-      !orient.includes('Never switch to its branch.') || /With the label on, do not re-claim\./.test(t)
+      !orient.includes('Never switch to its branch.') || /With the label on, do not re-claim\./.test(t) ||
+      // the review of #145: before any label write on the PR, the park labels' removal included
+      (orient.includes('still carries `<blocked-label>` or `<needs-operator-label>`') &&
+        orient.indexOf(cmd) > orient.indexOf('still carries `<blocked-label>` or `<needs-operator-label>`'))
   }).map(([f]) => f)
-  check('claim check (#143): every executor\'s orient runs claims.mjs before the branch switch, stops on CLAIM_LOST with the claimed-by line, and the bare "With the label on, do not re-claim" is gone',
+  check('claim check (#143): every executor\'s orient runs claims.mjs before any label write and the branch switch, stops on CLAIM_LOST with the claimed-by line, and the bare "With the label on, do not re-claim" is gone',
     noHolder.length === 0, noHolder.join('\n'))
 
   // #128: a Claude Code start's ⚠ lines come from start-check.mjs, which the hook shows; live starts
