@@ -32,3 +32,30 @@ export function blockValue(agents, key) {
   const v = blockLine(agents, key)?.replace(/^(["'`])(.*)\1$/, '$2').trim()
   return v ? v : null
 }
+
+// A key's list value (`[a, "@b"]` or `a, b`), each item with its quotes and a leading @ removed;
+// [] when the key is absent or empty.
+export function blockList(agents, key) {
+  return (blockLine(agents, key) ?? '')
+    .replace(/^\[|\]$/g, '')
+    .split(',')
+    .map((s) => s.trim().replace(/^['"@]+|['"]+$/g, ''))
+    .filter(Boolean)
+}
+
+export const DEFAULT_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
+
+// Whom the project trusts, from its block (spec: "Security"): `trusted-authors` when it lists
+// anyone, else `allow-author-associations` (default OWNER, MEMBER, COLLABORATOR). Returns a test of a
+// REST comment or issue ({ user: { login }, author_association }). Logins compare without case, as
+// GitHub's do.
+export function trustTest(agents) {
+  const logins = blockList(agents, 'trusted-authors').map((l) => l.toLowerCase())
+  if (logins.length > 0) return (c) => logins.includes(String(c?.user?.login ?? '').toLowerCase())
+  const listed = blockList(agents, 'allow-author-associations').map((a) => a.toUpperCase())
+  const associations = listed.length > 0 ? listed : DEFAULT_ASSOCIATIONS
+  return (c) => associations.includes(String(c?.author_association ?? '').toUpperCase())
+}
+
+// owner/repo in GitHub's own name characters: fetchAgents puts it on a gh command line.
+export const REPO_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/

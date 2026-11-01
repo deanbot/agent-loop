@@ -19,11 +19,17 @@
  *   CLAIM_NONE            open, in progress, and no claim comment at all (claimed before claim
  *                         comments existed): the caller's own word decides
  * A losing claim is deleted (spec: "Claim comments"), so the newest one left is the holder's.
+ * Only a trusted author's claim counts (#134): `trusted-authors` in the `## Agent loop` block of
+ * AGENTS.md on the default branch (the contents API, never the clone's copy), or, when it lists
+ * nobody, `allow-author-associations` (default OWNER, MEMBER, COLLABORATOR). Anyone else's claim is
+ * ignored as if it weren't there; an executor whose own login isn't trusted never sees its claim.
+ * A block that can't be read is a failed call (exit 2).
  * Labels default to in-progress and is-blocked. A failed gh call (an issue that doesn't exist
  * included): `claims: <message>` on stderr, exit 2. A usage error: exit 1.
  */
 
-import { execFileSync } from 'child_process'
+import { execFileSync, execSync } from 'child_process'
+import { fetchAgents, trustTest, REPO_NAME } from './lib/block.mjs'
 
 const USAGE = 'claims.mjs --repo owner/repo --issue <N> --clone <clone> [--in-progress-label <l>] [--blocked-label <l>]'
 const OPTIONS = ['--repo', '--issue', '--clone', '--in-progress-label', '--blocked-label']
@@ -47,7 +53,7 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 
 const repo = arg('--repo')
-if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) usageError(repo ? `--repo: expected owner/repo, got "${repo}"` : '--repo is required')
+if (!repo || !REPO_NAME.test(repo)) usageError(repo ? `--repo: expected owner/repo, got "${repo}"` : '--repo is required')
 const issueArg = arg('--issue')
 if (!issueArg || !/^#?\d+$/.test(issueArg)) usageError(issueArg ? `--issue: expected an issue number, got "${issueArg}"` : '--issue is required')
 const issue = issueArg.replace(/^#/, '')
@@ -67,8 +73,11 @@ function decide() {
   if (found?.state !== 'open') return 'CLAIM_CLOSED'
   if (labels.includes(blocked)) return 'CLAIM_BLOCKED'
   if (!labels.includes(inProgress)) return 'CLAIM_RELEASED'
+  // A claim is text anyone who can comment can post: only a trusted author's counts (#134), whom the
+  // block on the default branch names, never the clone's copy. An unreadable block decides nothing.
+  const trusted = trustTest(fetchAgents((cmd, opts) => execSync(cmd, { ...opts, encoding: 'utf8' }), repo))
   const comments = gh('api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments`).flat()
-  const newest = comments.filter((c) => (c.body ?? '').startsWith(MARKER)).sort((a, b) => a.id - b.id).at(-1)
+  const newest = comments.filter((c) => (c.body ?? '').startsWith(MARKER) && trusted(c)).sort((a, b) => a.id - b.id).at(-1)
   if (!newest) return 'CLAIM_NONE'
   const holder = newest.body.slice(MARKER.length).trim()
   if (holder === clone) return 'CLAIM_HELD'
