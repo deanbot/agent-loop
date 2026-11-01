@@ -3156,6 +3156,27 @@ const putMessage = (dir, id, extra, meta) => {
     .filter((f) => !/unless (`node \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/claims\.mjs [^`]*`|the claim check \(`claims\.mjs`, above\)) prints `CLAIM_HELD`/.test(flat(read(f))))
   check('claim check (#129): the claim step\'s "in progress, unless it is yours" also asks claims.mjs', heldOnly.length === 0, heldOnly.join('\n'))
 
+  // #143: orienting on an open PR whose issue carried the label never asked whose label it was, so
+  // a start on another clone's issue or PR worked that clone's PR. Every orient runs claims.mjs
+  // before the branch switch, and a lost claim stops a start that named it.
+  const orients = { 'claude-code/skills/start-executor/SKILL.md': ['**Orient on an existing PR.**', '4. Be on the PR\'s branch:', claimCmd('node ${CLAUDE_PLUGIN_ROOT}/scripts/')],
+    'generic/executor.md': ['**Orient checks who holds the issue.**', '- PR number → orient', claimCmd('node scripts/')],
+    'kiro/skills/start-executor/SKILL.md': ['## Orient on existing PR (step 6b)', '1. `gh pr view <PR> --repo <repo>`', claimCmd('node scripts/')] }
+  const noHolder = Object.entries(orients).filter(([f, [from, before, cmd]]) => {
+    const t = flat(read(f))
+    const start = t.indexOf(from)
+    const end = t.indexOf(before, start)
+    const orient = start === -1 || end === -1 ? '' : t.slice(start, end)
+    return !orient.includes(cmd) || !orient.includes('`CLAIM_LOST <clone>`') || !orient.includes('`#<N> is claimed by <') ||
+      !orient.includes(': PR #<PR> stays with it.`') || !orient.includes('`Could not check the claim on #<N>: <the claims: line>. Restart when gh works.`') ||
+      !orient.includes('Never switch to its branch.') || /With the label on, do not re-claim\./.test(t) ||
+      // the review of #145: before any label write on the PR, the park labels' removal included
+      (orient.includes('still carries `<blocked-label>` or `<needs-operator-label>`') &&
+        orient.indexOf(cmd) > orient.indexOf('still carries `<blocked-label>` or `<needs-operator-label>`'))
+  }).map(([f]) => f)
+  check('claim check (#143): every executor\'s orient runs claims.mjs before any label write and the branch switch, stops on CLAIM_LOST with the claimed-by line, and the bare "With the label on, do not re-claim" is gone',
+    noHolder.length === 0, noHolder.join('\n'))
+
   // #128: a Claude Code start's ⚠ lines come from start-check.mjs, which the hook shows; live starts
   // dropped the ones the text asked the session to print, the literal one-folder line included.
   const startCmd = (r) => `node \${CLAUDE_PLUGIN_ROOT}/scripts/start-check.mjs --role ${r} --session \${CLAUDE_SESSION_ID} --model "<model>" --effort \${CLAUDE_EFFORT}`
