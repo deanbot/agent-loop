@@ -128,6 +128,7 @@ let headCheck = 60
 {
   const v = arg('--head-check')
   if (v !== null) {
+    if (finishSuperseded) usageError('--head-check and --finish-superseded go apart: with --finish-superseded nothing is checked')
     if (/^\d+(\.\d+)?$/.test(v) && Number(v) > 0) headCheck = Number(v)
     else usageError(`--head-check: expected seconds, got "${v}"`)
   }
@@ -305,7 +306,12 @@ function watchHead(pr) {
       return
     }
     const head = now?.head?.sha
-    if (now?.state !== 'open') state.stop = { closed: true }
+    // An answer that names neither state is no answer: a failed look, never a stop.
+    if (now?.state !== 'open' && now?.state !== 'closed') {
+      process.stderr.write(`${new Date().toISOString()} local-ci: #${pr.number} head check failed: no state in the answer\n`)
+      return
+    }
+    if (now.state === 'closed') state.stop = { closed: true }
     else if (head && head !== pr.headRefOid) state.stop = { by: head }
     if (state.stop) state.stopping = stopGroup(group)
   }, headCheck * 1000)

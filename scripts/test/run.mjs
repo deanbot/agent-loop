@@ -2017,12 +2017,22 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   const s54b = makePr(54, '54b')
   const s54 = makePr(54, { 'pr.txt': '54\n', 'gate.sh': `${pushTo(54, s54b)}${relist({ 54: s54b })}\nsleep 2.5\necho "54 finished"\n` })
   setFixture(ctx, { prs: [pr(54, s54)], statuses: {} })
-  const finished = lciRun(['--head-check', '1', '--finish-superseded'])
+  const finished = lciRun(['--finish-superseded'])
   check('local-ci (#132): with --finish-superseded the run goes to its end and posts its real result; the new head is left for a later pass, as before',
     states(s54) === 'pending,success' && statuses()[s54][1].description === '54 finished' && ['', 'pending'].includes(states(s54b)) && !traceText().includes(`start 54b `),
     `${finished.out}${finished.err}${JSON.stringify(statuses()[s54])}${JSON.stringify(statuses()[s54b])}`)
   const badCheck = lciRun(['--head-check', 'soon'])
-  check('local-ci (#132): --head-check that is not seconds → exit 1', badCheck.code === 1 && /--head-check: expected seconds/.test(badCheck.err), badCheck.err)
+  const both = lciRun(['--head-check', '5', '--finish-superseded'])
+  check('local-ci (#132): --head-check that is not seconds, or with --finish-superseded → exit 1',
+    badCheck.code === 1 && /--head-check: expected seconds/.test(badCheck.err) && both.code === 1 && /--head-check and --finish-superseded go apart/.test(both.err), `${badCheck.err}${both.err}`)
+
+  // The review of #146: an answer with no state (empty output) is a failed look, not a closed PR.
+  const s56 = makePr(56, { 'pr.txt': '56\n', 'gate.sh': `node -e "const fs=require('fs');const f=process.env.FAKE_GH_FIXTURE;const x=JSON.parse(fs.readFileSync(f,'utf8'));x.pr={};fs.writeFileSync(f+'.t',JSON.stringify(x));fs.renameSync(f+'.t',f)"\nsleep 2.5\necho "56 finished"\n` })
+  setFixture(ctx, { prs: [pr(56, s56)], statuses: {} })
+  const noState = lciRun(['--head-check', '1'])
+  check('local-ci (#132 review): a head check answered with no state → said on stderr, the run goes on and posts its result',
+    states(s56) === 'pending,success' && statuses()[s56][1].description === '56 finished' && /#56 head check failed: no state in the answer/.test(noState.err),
+    `${noState.out}${noState.err}${JSON.stringify(statuses()[s56])}`)
 
   const otherClone = path.join(ctx.home, 'other-clone')
   g(ctx.home, 'clone', '-q', origin, otherClone)
