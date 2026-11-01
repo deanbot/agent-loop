@@ -31,7 +31,8 @@ operator direction.
 Before processing any issue, the executor checks the author against your configured allowlist.
 
 **`trusted-authors` (recommended)** — exact GitHub login allowlist. Only named users' issues are
-processed.
+processed, and only their `[executor] Claimed by` comments count as claims, so put every
+executor's own login on it.
 
 ```markdown
 ## Agent loop
