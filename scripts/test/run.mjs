@@ -1798,6 +1798,67 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   await new Promise((r) => (wp.exitCode !== null ? r() : wp.on('close', r)))
   check('local-ci --wait: … and runs in a later pass, once (no second pending)', states(s45b) === 'pending,success' && traceText().includes(`start 45b ${s45b}`), JSON.stringify(statuses()[s45b]))
 
+  // #132: a head replaced while its own gate runs. The gate starts a child that ignores SIGTERM
+  // (so only the SIGKILL after the grace period ends it), records both pids, moves its PR to a new
+  // head and waits. --head-check 1: the runner looks every second.
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // A push, as the gate stands for it: origin's pull ref moves too, so the new head can be fetched.
+  const pushTo = (n, sha) => (sha === 'closed' ? '' : `git --git-dir="${origin}" update-ref refs/pull/${n}/head ${sha}\n`)
+  const stubborn = (n, edits) => ({
+    'pr.txt': `${n}\n`,
+    'gate.sh': `(trap '' TERM; sleep 30) &\necho $! > "$TRACE.child${n}"\necho $$ > "$TRACE.gate${n}"\n${pushTo(n, edits[n])}${relist(edits)}\nwait\necho "${n} finished"\n`,
+  })
+  const lciRun = (args, extraEnv = {}) => {
+    const t0 = Date.now()
+    const r = spawnSync('node', [path.join(scripts, 'local-ci.mjs'), '--repo', REPO, '--gate', 'sh gate.sh', ...args], { cwd: runner, env: { ...env, ...extraEnv }, encoding: 'utf8' })
+    return { out: r.stdout, err: r.stderr, code: r.status, ms: Date.now() - t0 }
+  }
+  const logOf = (n, sha) => {
+    const dir = path.join(ctx.home, '.agent-loop', 'local-ci', 'acme-widgets')
+    const f = readdirSync(dir).filter((x) => x.startsWith(`${n}-${sha.slice(0, 12)}-`)).sort().at(-1)
+    return f ? readFileSync(path.join(dir, f), 'utf8') : ''
+  }
+  const s50b = makePr(50, '50b')
+  const s50 = makePr(50, stubborn(50, { 50: s50b }))
+  setFixture(ctx, { prs: [pr(50, s50)], statuses: {} })
+  const stopped = lciRun(['--head-check', '1'], { AGENT_LOOP_STOP_GRACE_MS: '500' })
+  const child50 = Number(readFileSync(`${trace}.child50`, 'utf8'))
+  const gate50 = Number(readFileSync(`${trace}.gate50`, 'utf8'))
+  check('local-ci (#132): a head replaced while its gate runs is stopped within the interval → error "superseded by <sha>: stopped", well before the gate would end',
+    states(s50) === 'pending,error' && statuses()[s50][1].description === `superseded by ${s50b.slice(0, 7)}: stopped` && stopped.ms < 12000 &&
+      stopped.out.includes(`#50 ${s50.slice(0, 7)} error: superseded by ${s50b.slice(0, 7)}: stopped`), `${stopped.ms} ms\n${stopped.out}${stopped.err}${JSON.stringify(statuses()[s50])}`)
+  check('local-ci (#132): … the whole process group is gone, a child that ignores SIGTERM included (SIGKILL after the grace period)',
+    child50 > 0 && gate50 > 0 && !alive(child50) && !alive(gate50), `${child50} ${alive(child50)} ${gate50} ${alive(gate50)}`)
+  check('local-ci (#132): … the new head is the next one run, in the same pass, on a clean checkout',
+    states(s50b) === 'pending,success' && traceText().includes(`start 50b ${s50b}`) && stopped.out.indexOf(`#50 ${s50b.slice(0, 7)} success`) > stopped.out.indexOf(`#50 ${s50.slice(0, 7)} error`),
+    `${stopped.out}${JSON.stringify(statuses()[s50b])}`)
+  check('local-ci (#132): … and the stopped run\'s log ends with the reason', logOf(50, s50).trimEnd().endsWith(`local-ci: stopped: superseded by ${s50b}`), logOf(50, s50).slice(-200))
+
+  const s52 = makePr(52, stubborn(52, { 52: 'closed' }))
+  setFixture(ctx, { prs: [pr(52, s52)], statuses: {} })
+  const closedRun = lciRun(['--head-check', '1'], { AGENT_LOOP_STOP_GRACE_MS: '500' })
+  const child52 = Number(readFileSync(`${trace}.child52`, 'utf8'))
+  check('local-ci (#132): a PR closed while its gate runs → the run is stopped, its group gone, no post (it stays pending), a stderr line',
+    states(s52) === 'pending' && !alive(child52) && closedRun.ms < 12000 && /#52 closed while [0-9a-f]{7} ran; stopped, no post/.test(closedRun.err) &&
+      logOf(52, s52).trimEnd().endsWith('local-ci: stopped: the pull request closed'), `${closedRun.ms} ms\n${closedRun.out}${closedRun.err}`)
+
+  const s54b = makePr(54, '54b')
+  const s54 = makePr(54, { 'pr.txt': '54\n', 'gate.sh': `${pushTo(54, s54b)}${relist({ 54: s54b })}\nsleep 2.5\necho "54 finished"\n` })
+  setFixture(ctx, { prs: [pr(54, s54)], statuses: {} })
+  const finished = lciRun(['--head-check', '1', '--finish-superseded'])
+  check('local-ci (#132): with --finish-superseded the run goes to its end and posts its real result; the new head is left for a later pass, as before',
+    states(s54) === 'pending,success' && statuses()[s54][1].description === '54 finished' && ['', 'pending'].includes(states(s54b)) && !traceText().includes(`start 54b `),
+    `${finished.out}${finished.err}${JSON.stringify(statuses()[s54])}${JSON.stringify(statuses()[s54b])}`)
+  const badCheck = lciRun(['--head-check', 'soon'])
+  check('local-ci (#132): --head-check that is not seconds → exit 1', badCheck.code === 1 && /--head-check: expected seconds/.test(badCheck.err), badCheck.err)
+
   const otherClone = path.join(ctx.home, 'other-clone')
   g(ctx.home, 'clone', '-q', origin, otherClone)
   g(otherClone, 'remote', 'set-url', 'origin', 'https://github.com/acme/widgets-fork.git')

@@ -6,7 +6,8 @@
  * Usage, from the root of a clone kept for it (no role marker):
  *   node scripts/local-ci.mjs --repo owner/repo --gate "<command>" [--context local-ci]
  *                             [--install "<command>" [--lockfiles a,b]]
- *                             [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]
+ *                             [--trusted-authors a,b] [--log-url <base>]
+ *                             [--head-check <secs> | --finish-superseded] [--wait [secs]]
  *
  * Each pass:
  *   - lists open pull requests whose author is trusted and whose head branch is in the repository
@@ -27,7 +28,17 @@
  *     the gate does not run.
  *   - while an install or a gate runs, every --wait interval (30 seconds one-shot), lists the open
  *     pull requests and posts `pending` on any head with no status, as at the start of a pass: a
- *     push during a run shows CI at once. The run itself is never stopped for it.
+ *     push during a run shows CI at once.
+ *   - while an install or a gate runs, every --head-check interval (default 60 seconds), asks for
+ *     its PR's head (one `gh api repos/<repo>/pulls/<n>` call). When the head has moved or the PR
+ *     has closed, it stops the run: the whole process group (the install and gate start as its
+ *     leader), SIGTERM, then SIGKILL for whatever is left after 10 seconds, and it waits until
+ *     nothing in the group runs. A moved head gets `error`, `superseded by <sha>: stopped`; a
+ *     closed PR gets no post. The log ends `local-ci: stopped: …`, and the pass lists the pull
+ *     requests again, so the new head runs next. A failed look is said on stderr and tried again.
+ *     --finish-superseded turns this off: a run goes to its end and posts its result. A gate that
+ *     starts its own process groups (a daemon that calls setsid) escapes the stop: a gate should
+ *     keep its children in its group.
  * Lockfiles are the tracked files with one of LOCKFILES' names, in any folder, or --lockfiles: a
  * name without a slash matches in any folder, one with a slash is a path from the clone's root.
  * The install record (local-ci-install-<hash of the clone's path>.json, next to the lock) holds a
@@ -54,14 +65,14 @@
  */
 
 import { execFileSync, spawn } from 'child_process'
-import { openSync, closeSync, writeFileSync, readFileSync, unlinkSync, renameSync, mkdirSync, existsSync, realpathSync, statSync } from 'fs'
+import { openSync, closeSync, writeFileSync, appendFileSync, readFileSync, unlinkSync, renameSync, mkdirSync, existsSync, realpathSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { createHash } from 'crypto'
 import path from 'path'
 import { blockLine } from './lib/block.mjs'
 
 const USAGE =
-  'local-ci.mjs --repo owner/repo --gate "<command>" [--context <name>] [--install "<command>" [--lockfiles a,b]] [--trusted-authors a,b] [--log-url <base>] [--wait [secs]]'
+  'local-ci.mjs --repo owner/repo --gate "<command>" [--context <name>] [--install "<command>" [--lockfiles a,b]] [--trusted-authors a,b] [--log-url <base>] [--head-check <secs> | --finish-superseded] [--wait [secs]]'
 
 // Dependency lockfiles by name, matched in any folder.
 const LOCKFILES = [
@@ -112,6 +123,17 @@ const lockfiles = lockfilesArg === null ? LOCKFILES : lockfilesArg.split(',').ma
 if (lockfiles.length === 0) usageError('--lockfiles: expected file names or paths, a,b')
 const trustedArg = arg('--trusted-authors')
 const logUrl = arg('--log-url')
+const finishSuperseded = process.argv.includes('--finish-superseded')
+let headCheck = 60
+{
+  const v = arg('--head-check')
+  if (v !== null) {
+    if (/^\d+(\.\d+)?$/.test(v) && Number(v) > 0) headCheck = Number(v)
+    else usageError(`--head-check: expected seconds, got "${v}"`)
+  }
+}
+// How long a stopped run's process group gets between SIGTERM and SIGKILL.
+const STOP_GRACE_MS = Number(process.env.AGENT_LOOP_STOP_GRACE_MS) > 0 ? Number(process.env.AGENT_LOOP_STOP_GRACE_MS) : 10000
 let wait = null
 {
   const i = process.argv.indexOf('--wait')
@@ -210,10 +232,12 @@ if (holder) {
 // dependency folder), so an earlier run's record no longer holds.
 if (install === null) forgetInstall()
 
-// The install or gate running now, if any.
+// The install or gate running now, if any, and its process group, kept until the group is gone (a
+// child can outlive the shell that started it).
 let child = null
+let group = null
 process.on('exit', () => {
-  if (child) killChild()
+  if (child || group) killChild()
   try {
     if (JSON.parse(readFileSync(LOCK_FILE, 'utf8')).pid === process.pid) unlinkSync(LOCK_FILE)
   } catch {
@@ -227,10 +251,65 @@ for (const [sig, code] of Object.entries(signalCodes)) process.on(sig, () => pro
 // test runner's workers).
 function killChild() {
   try {
-    process.kill(-child.pid, 'SIGTERM')
+    process.kill(-(group ?? child.pid), 'SIGTERM')
   } catch {
     // already exited
   }
+}
+
+const groupAlive = (pgid) => {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+const pause = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Stops a run's whole process group: SIGTERM, then SIGKILL for whatever is left after the grace
+// period. Resolves once nothing in the group runs, so a lock its members held is released before
+// the next run starts.
+async function stopGroup(pgid) {
+  try {
+    process.kill(-pgid, 'SIGTERM')
+  } catch {
+    // already gone
+  }
+  const termUntil = Date.now() + STOP_GRACE_MS
+  while (groupAlive(pgid) && Date.now() < termUntil) await pause(100)
+  if (groupAlive(pgid)) {
+    try {
+      process.kill(-pgid, 'SIGKILL')
+    } catch {
+      // gone meanwhile
+    }
+    const killUntil = Date.now() + 5000
+    while (groupAlive(pgid) && Date.now() < killUntil) await pause(100)
+  }
+}
+
+// While an install or a gate runs (unless --finish-superseded), every --head-check interval: is the
+// head still its PR's head? One gh call, the PR alone. A moved head or a closed PR stops the run;
+// a failed look is said on stderr and tried again at the next tick. `stop` holds why, once set.
+function watchHead(pr) {
+  const state = { stop: null, stopping: null }
+  if (finishSuperseded) return { state, done: () => {} }
+  const timer = setInterval(() => {
+    if (state.stop || !child) return
+    let now
+    try {
+      now = gh('api', `repos/${repo}/pulls/${pr.number}`)
+    } catch (e) {
+      process.stderr.write(`${new Date().toISOString()} local-ci: #${pr.number} head check failed: ${detailOf(e)}\n`)
+      return
+    }
+    const head = now?.head?.sha
+    if (now?.state !== 'open') state.stop = { closed: true }
+    else if (head && head !== pr.headRefOid) state.stop = { by: head }
+    if (state.stop) state.stopping = stopGroup(group)
+  }, headCheck * 1000)
+  return { state, done: () => clearInterval(timer) }
 }
 
 class SetupError extends Error {}
@@ -282,8 +361,10 @@ function runShell(command, logFile) {
   const fd = openSync(logFile, 'a')
   return new Promise((resolve) => {
     child = spawn(command, { shell: true, cwd: root, stdio: ['ignore', fd, fd], detached: true })
+    group = child.pid ?? null
     child.on('error', (e) => {
       child = null
+      group = null
       closeSync(fd)
       resolve({ code: null, signal: null, error: e })
     })
@@ -434,14 +515,41 @@ async function runOne(pr, trusted) {
   writeFileSync(logFile, '')
   const targetUrl = logUrl ? `${logUrl.replace(/\/+$/, '')}/${logName}` : null
   const stopPolling = whileRunning(trusted)
+  const watch = watchHead(pr)
+  let line
   try {
-    return await installAndGate(pr, logFile, targetUrl)
+    line = await installAndGate(pr, logFile, targetUrl, watch.state)
   } finally {
     stopPolling()
+    watch.done()
   }
+  const stop = watch.state.stop
+  if (!stop) return line
+  // Stopped: a final status for the old head (none for a closed PR, as for one closed while
+  // queued), the log marked, and the pass lists the pull requests again for the next run.
+  await watch.state.stopping
+  group = null
+  relist = true
+  const why = stop.closed ? 'the pull request closed' : `superseded by ${stop.by}`
+  try {
+    appendFileSync(logFile, `\nlocal-ci: stopped: ${why}\n`)
+  } catch {
+    // the log is a convenience
+  }
+  if (stop.closed) {
+    process.stderr.write(`${new Date().toISOString()} local-ci: #${pr.number} closed while ${short} ran; stopped, no post\n`)
+    return null
+  }
+  const description = `superseded by ${stop.by.slice(0, 7)}: stopped`
+  post(sha, 'error', description, targetUrl)
+  return `#${pr.number} ${short} error: ${description}`
 }
 
-async function installAndGate(pr, logFile, targetUrl) {
+// Set when a run was stopped for a moved head: the pass lists the pull requests again before its
+// next run, so the new head is the next one run.
+let relist = false
+
+async function installAndGate(pr, logFile, targetUrl, stop) {
   const sha = pr.headRefOid
   const short = sha.slice(0, 7)
   if (install !== null) {
@@ -458,6 +566,8 @@ async function installAndGate(pr, logFile, targetUrl) {
       // install leaves no record, so the next head installs again.
       forgetInstall()
       const installed = await runShell(install, logFile)
+      if (stop.stop) return null
+      group = null
       if (installed.code !== 0) {
         const description = `install failed: ${lastLine(logFile) || failedRun(installed, 'install')}`
         post(sha, 'error', description, targetUrl)
@@ -468,6 +578,8 @@ async function installAndGate(pr, logFile, targetUrl) {
   }
   const gateFrom = sizeOf(logFile)
   const result = await runShell(gate, logFile)
+  if (stop.stop) return null
+  group = null
   const last = lastLine(logFile, gateFrom)
   const ok = result.code === 0
   const description = last || (ok ? 'gate passed' : failedRun(result, 'gate'))
@@ -478,13 +590,20 @@ async function installAndGate(pr, logFile, targetUrl) {
 async function pass() {
   const trusted = new Set(trustedAuthors())
   if (trusted.size === 0) throw new SetupError('no trusted authors: pass --trusted-authors or set trusted-authors in AGENTS.md on the default branch')
-  const queue = markPending(listPrs(trusted))
+  let queue = markPending(listPrs(trusted))
   const lines = []
-  for (const pr of queue) {
-    const line = await runOne(pr, trusted)
+  for (let i = 0; i < queue.length; i++) {
+    relist = false
+    const line = await runOne(queue[i], trusted)
     if (line) {
       lines.push(line)
       process.stdout.write(`${line}\n`)
+    }
+    // A stopped run's head now has a final status (or its PR closed), so the fresh queue holds only
+    // heads still to run, the new one included.
+    if (relist) {
+      queue = markPending(listPrs(trusted))
+      i = -1
     }
   }
   return lines
