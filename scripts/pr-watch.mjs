@@ -11,7 +11,8 @@
  * A role prefix counts only from a trusted author (#148): `trusted-authors`, else
  * `allow-author-associations`, in the block on the default branch. A role-prefixed comment from anyone
  * else is dropped before anything reads the thread: it is no reviewer post, no claim, and no operator
- * comment. A run that can't read the block prints NONE and keeps its state (everything withheld).
+ * comment. A run that can't read the block prints NONE and keeps its state (everything withheld,
+ * CLOSED and a standing MERGE_CONFLICT included); a waiter logs it and retries.
  *
  * Only [reviewer] comments are suppressed. All other comments (including [executor]) are
  * treated as meaningful signals. The exception: an [executor] comment older than the reviewer's
@@ -159,14 +160,16 @@ function holderOf(gh, number, trusted) {
 }
 
 // The default branch's AGENTS.md text, or null when it can't be read. Kept once read: the block
-// changes rarely, and a waiter would otherwise fetch it every interval.
+// changes rarely, and a waiter would otherwise fetch it every interval. A waiter's pass (dry) throws
+// instead, so the failure is logged and retried like any other API error, never a silent NONE.
 let agentsText
 function readAgents(gh, dry) {
   if (agentsText !== undefined) return agentsText
   try {
     agentsText = fetchAgents(gh, repo)
   } catch (e) {
-    if (!dry) process.stderr.write(`pr-watch: could not read the Agent loop block (signals withheld): ${e.message}\n`)
+    if (dry) throw e
+    process.stderr.write(`pr-watch: could not read the Agent loop block (signals withheld): ${e.message}\n`)
     return null
   }
   return agentsText

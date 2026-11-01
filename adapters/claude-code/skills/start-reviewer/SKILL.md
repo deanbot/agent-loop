@@ -311,7 +311,8 @@ still waiting for `[qa] PASS`. One command per call:
 
 1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> --reviewer <clone> --check-claim
    <n>` prints `MINE`, `THEIRS <clone>` or `OPEN`. `MINE` → go on. `THEIRS` → drop the PR this
-   cycle; it is another reviewer's.
+   cycle; it is another reviewer's. A failed run (exit 2, a `pr-watch:` line and nothing else:
+   it could not read whom the block trusts) → drop the PR this cycle too; never claim on it.
 2. `OPEN` → `gh pr comment <n> --repo <repo> --body "[reviewer] Reviewing (<clone>)"`. The number
    after `#issuecomment-` in the URL it prints is your claim's id.
 3. Run step 1 again. `MINE` → go on. Anything else → you lost a race: `gh api -X DELETE
