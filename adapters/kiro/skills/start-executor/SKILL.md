@@ -108,6 +108,10 @@ Run `gh pr view $ARGUMENTS --repo <repo>` first (skip it when $ARGUMENTS is empt
 
 ## Orient on existing PR (step 6b)
 
+0. **Check who holds the linked issue #<N>**, before you switch to the PR's branch and before any work: `node scripts/claims.mjs --repo <repo> --issue <N> --clone <clone> --in-progress-label <in-progress-label> --blocked-label <blocked-label>` (`<clone>` is the base name of your working directory).
+   - `CLAIM_LOST <clone>`, or `CLAIM_NONE` when $ARGUMENTS doesn't name #<N> (by its own number or by this PR) → another executor holds it: STOP and say `#<N> is claimed by <clone>: PR #<PR> stays with it.` (after a pick: add #<N> to the skip list and pick again). Never switch to its branch.
+   - A failed run (exit 2, a `claims:` line) → STOP and say `Could not check the claim on #<N>: <the claims: line>. Restart when gh works.`
+   - Any other line (`CLAIM_HELD`, `CLAIM_NONE` that $ARGUMENTS names, `CLAIM_RELEASED`, `CLAIM_BLOCKED`, `CLAIM_CLOSED`) → go on.
 1. `gh pr view <PR> --repo <repo>` — PR description, acceptance criteria
 2. `gh pr view <PR> --comments --repo <repo>` — full thread; note any `[executor] BLOCKED` or `[executor] Question` entries and any operator responses
 3. If the linked issue or the PR still carries `<blocked-label>` or `<needs-operator-label>` from a prior park, remove them now — `gh issue edit <N> --remove-label <blocked-label> --remove-label <needs-operator-label> --repo <repo>` and `gh pr edit <PR> --remove-label <blocked-label> --remove-label <needs-operator-label> --repo <repo>` — you are resuming.

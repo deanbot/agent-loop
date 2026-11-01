@@ -131,6 +131,18 @@ Tell a PR from an issue with `gh pr view <n> --repo <repo> --json number,body`. 
 PR. It fails with `Could not resolve to a PullRequest` → an issue. Any other failure (network,
 auth) → stop and say `Could not tell whether <n> is a PR: <the error>. Restart when gh works.`
 
+**Orient checks who holds the issue.** Every orient on an open PR whose body closes #<N> (a PR
+number, an issue number with a PR, a resume), before you switch to the PR's branch and before any
+work, runs `node scripts/claims.mjs --repo <repo> --issue <N> --clone <clone> --in-progress-label
+<l> --blocked-label <l>` (`<clone>` is the base name of your working directory):
+- `CLAIM_LOST <clone>`, or `CLAIM_NONE` when the input doesn't name #<N> (by its own number or by
+  this PR) → another executor holds it: stop and say `#<N> is claimed by <clone>: PR #<PR> stays
+  with it.` (after a pick: add #<N> to the skip list and pick again). Never switch to its branch.
+- A failed run (exit 2, a `claims:` line) → stop and say `Could not check the claim on #<N>: <the
+  claims: line>. Restart when gh works.`
+- Any other line (`CLAIM_HELD`, `CLAIM_NONE` the input names, `CLAIM_RELEASED`, `CLAIM_BLOCKED`,
+  `CLAIM_CLOSED`) → go on as below.
+
 - PR number → orient (read the description and the whole thread; you are resuming, so remove a
   lingering `blocked-label` or `needs-operator-label` from the issue and the PR), enter the poll
   loop.

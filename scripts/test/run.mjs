@@ -1963,6 +1963,77 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   await new Promise((r) => (wp.exitCode !== null ? r() : wp.on('close', r)))
   check('local-ci --wait: … and runs in a later pass, once (no second pending)', states(s45b) === 'pending,success' && traceText().includes(`start 45b ${s45b}`), JSON.stringify(statuses()[s45b]))
 
+  // #132: a head replaced while its own gate runs. The gate starts a child that ignores SIGTERM
+  // (so only the SIGKILL after the grace period ends it), records both pids, moves its PR to a new
+  // head and waits. --head-check 1: the runner looks every second.
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // A push, as the gate stands for it: origin's pull ref moves too, so the new head can be fetched.
+  const pushTo = (n, sha) => (sha === 'closed' ? '' : `git --git-dir="${origin}" update-ref refs/pull/${n}/head ${sha}\n`)
+  const stubborn = (n, edits) => ({
+    'pr.txt': `${n}\n`,
+    'gate.sh': `(trap '' TERM; sleep 30) &\necho $! > "$TRACE.child${n}"\necho $$ > "$TRACE.gate${n}"\n${pushTo(n, edits[n])}${relist(edits)}\nwait\necho "${n} finished"\n`,
+  })
+  const lciRun = (args, extraEnv = {}) => {
+    const t0 = Date.now()
+    const r = spawnSync('node', [path.join(scripts, 'local-ci.mjs'), '--repo', REPO, '--gate', 'sh gate.sh', ...args], { cwd: runner, env: { ...env, ...extraEnv }, encoding: 'utf8' })
+    return { out: r.stdout, err: r.stderr, code: r.status, ms: Date.now() - t0 }
+  }
+  const logOf = (n, sha) => {
+    const dir = path.join(ctx.home, '.agent-loop', 'local-ci', 'acme-widgets')
+    const f = readdirSync(dir).filter((x) => x.startsWith(`${n}-${sha.slice(0, 12)}-`)).sort().at(-1)
+    return f ? readFileSync(path.join(dir, f), 'utf8') : ''
+  }
+  const s50b = makePr(50, '50b')
+  const s50 = makePr(50, stubborn(50, { 50: s50b }))
+  setFixture(ctx, { prs: [pr(50, s50)], statuses: {} })
+  const stopped = lciRun(['--head-check', '1'], { AGENT_LOOP_STOP_GRACE_MS: '500' })
+  const child50 = Number(readFileSync(`${trace}.child50`, 'utf8'))
+  const gate50 = Number(readFileSync(`${trace}.gate50`, 'utf8'))
+  check('local-ci (#132): a head replaced while its gate runs is stopped within the interval → error "superseded by <sha>: stopped", well before the gate would end',
+    states(s50) === 'pending,error' && statuses()[s50][1].description === `superseded by ${s50b.slice(0, 7)}: stopped` && stopped.ms < 12000 &&
+      stopped.out.includes(`#50 ${s50.slice(0, 7)} error: superseded by ${s50b.slice(0, 7)}: stopped`), `${stopped.ms} ms\n${stopped.out}${stopped.err}${JSON.stringify(statuses()[s50])}`)
+  check('local-ci (#132): … the whole process group is gone, a child that ignores SIGTERM included (SIGKILL after the grace period)',
+    child50 > 0 && gate50 > 0 && !alive(child50) && !alive(gate50), `${child50} ${alive(child50)} ${gate50} ${alive(gate50)}`)
+  check('local-ci (#132): … the new head is the next one run, in the same pass, on a clean checkout',
+    states(s50b) === 'pending,success' && traceText().includes(`start 50b ${s50b}`) && stopped.out.indexOf(`#50 ${s50b.slice(0, 7)} success`) > stopped.out.indexOf(`#50 ${s50.slice(0, 7)} error`),
+    `${stopped.out}${JSON.stringify(statuses()[s50b])}`)
+  check('local-ci (#132): … and the stopped run\'s log ends with the reason', logOf(50, s50).trimEnd().endsWith(`local-ci: stopped: superseded by ${s50b}`), logOf(50, s50).slice(-200))
+
+  const s52 = makePr(52, stubborn(52, { 52: 'closed' }))
+  setFixture(ctx, { prs: [pr(52, s52)], statuses: {} })
+  const closedRun = lciRun(['--head-check', '1'], { AGENT_LOOP_STOP_GRACE_MS: '500' })
+  const child52 = Number(readFileSync(`${trace}.child52`, 'utf8'))
+  check('local-ci (#132): a PR closed while its gate runs → the run is stopped, its group gone, no post (it stays pending), a stderr line',
+    states(s52) === 'pending' && !alive(child52) && closedRun.ms < 12000 && /#52 closed while [0-9a-f]{7} ran; stopped, no post/.test(closedRun.err) &&
+      logOf(52, s52).trimEnd().endsWith('local-ci: stopped: the pull request closed'), `${closedRun.ms} ms\n${closedRun.out}${closedRun.err}`)
+
+  const s54b = makePr(54, '54b')
+  const s54 = makePr(54, { 'pr.txt': '54\n', 'gate.sh': `${pushTo(54, s54b)}${relist({ 54: s54b })}\nsleep 2.5\necho "54 finished"\n` })
+  setFixture(ctx, { prs: [pr(54, s54)], statuses: {} })
+  const finished = lciRun(['--finish-superseded'])
+  check('local-ci (#132): with --finish-superseded the run goes to its end and posts its real result; the new head is left for a later pass, as before',
+    states(s54) === 'pending,success' && statuses()[s54][1].description === '54 finished' && ['', 'pending'].includes(states(s54b)) && !traceText().includes(`start 54b `),
+    `${finished.out}${finished.err}${JSON.stringify(statuses()[s54])}${JSON.stringify(statuses()[s54b])}`)
+  const badCheck = lciRun(['--head-check', 'soon'])
+  const both = lciRun(['--head-check', '5', '--finish-superseded'])
+  check('local-ci (#132): --head-check that is not seconds, or with --finish-superseded → exit 1',
+    badCheck.code === 1 && /--head-check: expected seconds/.test(badCheck.err) && both.code === 1 && /--head-check and --finish-superseded go apart/.test(both.err), `${badCheck.err}${both.err}`)
+
+  // The review of #146: an answer with no state (empty output) is a failed look, not a closed PR.
+  const s56 = makePr(56, { 'pr.txt': '56\n', 'gate.sh': `node -e "const fs=require('fs');const f=process.env.FAKE_GH_FIXTURE;const x=JSON.parse(fs.readFileSync(f,'utf8'));x.pr={};fs.writeFileSync(f+'.t',JSON.stringify(x));fs.renameSync(f+'.t',f)"\nsleep 2.5\necho "56 finished"\n` })
+  setFixture(ctx, { prs: [pr(56, s56)], statuses: {} })
+  const noState = lciRun(['--head-check', '1'])
+  check('local-ci (#132 review): a head check answered with no state → said on stderr, the run goes on and posts its result',
+    states(s56) === 'pending,success' && statuses()[s56][1].description === '56 finished' && /#56 head check failed: no state in the answer/.test(noState.err),
+    `${noState.out}${noState.err}${JSON.stringify(statuses()[s56])}`)
+
   const otherClone = path.join(ctx.home, 'other-clone')
   g(ctx.home, 'clone', '-q', origin, otherClone)
   g(otherClone, 'remote', 'set-url', 'origin', 'https://github.com/acme/widgets-fork.git')
@@ -3223,6 +3294,27 @@ const putMessage = (dir, id, extra, meta) => {
   const heldOnly = ['claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
     .filter((f) => !/unless (`node \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/claims\.mjs [^`]*`|the claim check \(`claims\.mjs`, above\)) prints `CLAIM_HELD`/.test(flat(read(f))))
   check('claim check (#129): the claim step\'s "in progress, unless it is yours" also asks claims.mjs', heldOnly.length === 0, heldOnly.join('\n'))
+
+  // #143: orienting on an open PR whose issue carried the label never asked whose label it was, so
+  // a start on another clone's issue or PR worked that clone's PR. Every orient runs claims.mjs
+  // before the branch switch, and a lost claim stops a start that named it.
+  const orients = { 'claude-code/skills/start-executor/SKILL.md': ['**Orient on an existing PR.**', '4. Be on the PR\'s branch:', claimCmd('node ${CLAUDE_PLUGIN_ROOT}/scripts/')],
+    'generic/executor.md': ['**Orient checks who holds the issue.**', '- PR number → orient', claimCmd('node scripts/')],
+    'kiro/skills/start-executor/SKILL.md': ['## Orient on existing PR (step 6b)', '1. `gh pr view <PR> --repo <repo>`', claimCmd('node scripts/')] }
+  const noHolder = Object.entries(orients).filter(([f, [from, before, cmd]]) => {
+    const t = flat(read(f))
+    const start = t.indexOf(from)
+    const end = t.indexOf(before, start)
+    const orient = start === -1 || end === -1 ? '' : t.slice(start, end)
+    return !orient.includes(cmd) || !orient.includes('`CLAIM_LOST <clone>`') || !orient.includes('`#<N> is claimed by <') ||
+      !orient.includes(': PR #<PR> stays with it.`') || !orient.includes('`Could not check the claim on #<N>: <the claims: line>. Restart when gh works.`') ||
+      !orient.includes('Never switch to its branch.') || /With the label on, do not re-claim\./.test(t) ||
+      // the review of #145: before any label write on the PR, the park labels' removal included
+      (orient.includes('still carries `<blocked-label>` or `<needs-operator-label>`') &&
+        orient.indexOf(cmd) > orient.indexOf('still carries `<blocked-label>` or `<needs-operator-label>`'))
+  }).map(([f]) => f)
+  check('claim check (#143): every executor\'s orient runs claims.mjs before any label write and the branch switch, stops on CLAIM_LOST with the claimed-by line, and the bare "With the label on, do not re-claim" is gone',
+    noHolder.length === 0, noHolder.join('\n'))
 
   // #128: a Claude Code start's ⚠ lines come from start-check.mjs, which the hook shows; live starts
   // dropped the ones the text asked the session to print, the literal one-folder line included.
