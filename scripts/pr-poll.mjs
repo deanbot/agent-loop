@@ -86,7 +86,7 @@ import { readFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
-import { blockValue } from './lib/block.mjs'
+import { blockValue, fetchAgents } from './lib/block.mjs'
 
 const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--local-ci <context>] [--local-ci-window <secs>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
@@ -138,16 +138,9 @@ let agentsText
 function readAgents(gh, dry) {
   if (agentsText !== undefined) return agentsText
   try {
-    const file = JSON.parse(gh(`gh api "repos/${repo}/contents/AGENTS.md"`, { stdio: ['ignore', 'pipe', 'pipe'] }))
-    // Over 1 MB the API sends no content (encoding "none"): unreadable, never an empty block.
-    if (file.encoding !== 'base64') throw new Error(`AGENTS.md came back with encoding "${file.encoding}"`)
-    agentsText = Buffer.from(file.content ?? '', 'base64').toString('utf8')
+    agentsText = fetchAgents(gh, repo)
   } catch (e) {
-    const stderr = String(e?.stderr ?? '')
-    // A project that runs the loop has a block, so a missing file (a misnamed one included: the API
-    // is case-sensitive) is a fault to show, not a block with no keys.
-    const why = /HTTP 404|Not Found/.test(stderr) ? 'no AGENTS.md on the default branch' : stderr.trim() || e?.message
-    if (!dry) process.stderr.write(`pr-poll: could not read the Agent loop block (MERGE_READY withheld): ${why}\n`)
+    if (!dry) process.stderr.write(`pr-poll: could not read the Agent loop block (MERGE_READY withheld): ${e.message}\n`)
     return null
   }
   return agentsText

@@ -832,6 +832,171 @@ const lockPid = (ctx, state) => {
 // A waiter holds the lock once the lock names it; it takes the lock before its first pass, and
 // its signal handlers are on before anything else can run.
 const holdsLock = (ctx, w, state) => until(() => lockPid(ctx, state) === w.child.pid)
+
+// ---------------------------------------------------------------- pr-watch CI_DONE (#131)
+{
+  // With review-waits-for-ci: on, a check on a watched head reaching a final state since the last
+  // run gives CI_DONE:<n>, so a reviewer holding its verdict for CI is woken.
+  const ciOn = '## Agent loop\n\nrepo: acme/widgets\nreview-waits-for-ci: on\n'
+  const ciOff = '## Agent loop\n\nrepo: acme/widgets\n'
+  const status = (context, state) => ({ __typename: 'StatusContext', context, state })
+  const checkRun = (name, st, conclusion = '') => ({ __typename: 'CheckRun', workflowName: 'CI', name, status: st, conclusion })
+  const ciFx = (rollup, { sha = 'abc123', agents = ciOn, base = watchReviewed } = {}) =>
+    ({ ...base, agents, prs: [{ number: 7, headRefOid: sha, mergeable: 'MERGEABLE', statusCheckRollup: rollup }] })
+  const watch = (ctx, fx) => run(ctx, 'pr-watch.mjs', watchArgs(), fx)
+  const seeded = (fx) => {
+    const ctx = makeEnv()
+    watch(ctx, fx)
+    return ctx
+  }
+  const line = (out) => out.split('\n')[0]
+
+  let ctx = seeded(ciFx([status('local-ci', 'PENDING')]))
+  const done = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
+  const again = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
+  check('watch CI_DONE: a status going pending → success on a watched head → CI_DONE:7 once; the next run → NONE',
+    line(done) === 'CI_DONE:7' && /^NONE /.test(again), `${done}|${again}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  ctx = seeded(ciFx([status('local-ci', 'PENDING')]))
+  const failed = watch(ctx, ciFx([status('local-ci', 'FAILURE')]))
+  const errored = (() => {
+    const c = seeded(ciFx([status('local-ci', 'PENDING')]))
+    const out = watch(c, ciFx([status('local-ci', 'ERROR')]))
+    rmSync(c.home, { recursive: true, force: true })
+    return out
+  })()
+  check('watch CI_DONE: a status going pending → failure, or → error, also gives CI_DONE:7 (the reviewer reads the checks)',
+    line(failed) === 'CI_DONE:7' && line(errored) === 'CI_DONE:7', `${failed}|${errored}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  ctx = seeded(ciFx([checkRun('test (node 22)', 'IN_PROGRESS'), checkRun('lint', 'COMPLETED', 'SUCCESS')]))
+  const runDone = watch(ctx, ciFx([checkRun('test (node 22)', 'COMPLETED', 'SUCCESS'), checkRun('lint', 'COMPLETED', 'SUCCESS')]))
+  const runAgain = watch(ctx, ciFx([checkRun('test (node 22)', 'COMPLETED', 'SUCCESS'), checkRun('lint', 'COMPLETED', 'SUCCESS')]))
+  check('watch CI_DONE: a check run is treated like a status (a name with spaces included) → CI_DONE:7 once',
+    line(runDone) === 'CI_DONE:7' && /^NONE /.test(runAgain), `${runDone}|${runAgain}`)
+  const stillRunning = (() => {
+    const c = seeded(ciFx([checkRun('a', 'QUEUED'), checkRun('b', 'IN_PROGRESS')]))
+    const out = watch(c, ciFx([checkRun('a', 'IN_PROGRESS'), checkRun('b', 'IN_PROGRESS'), status('x', 'EXPECTED')]))
+    rmSync(c.home, { recursive: true, force: true })
+    return out
+  })()
+  check('watch CI_DONE: checks moving between non-final states (queued, in progress, a status expected) → NONE', /^NONE /.test(stillRunning), stillRunning)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  ctx = seeded(ciFx([status('local-ci', 'PENDING')]))
+  const pushed = watch(ctx, ciFx([status('local-ci', 'SUCCESS')], { sha: 'def456' }))
+  const afterPush = watch(ctx, ciFx([status('local-ci', 'SUCCESS')], { sha: 'def456' }))
+  check('watch CI_DONE: a head pushed between runs → REVIEW:7 and no CI_DONE (the new head\'s checks are recorded silently); the next run → NONE',
+    line(pushed) === 'REVIEW:7' && /^NONE /.test(afterPush), `${pushed}|${afterPush}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // A first review held for CI: the PR has no reviewer post, so REVIEW stands every run.
+  ctx = seeded(ciFx([status('local-ci', 'PENDING')], { base: watchFx }))
+  const standing = watch(ctx, ciFx([status('local-ci', 'SUCCESS')], { base: watchFx }))
+  check('watch CI_DONE: a standing REVIEW (no reviewer post yet) does not hide it → REVIEW:7 CI_DONE:7', line(standing) === 'REVIEW:7 CI_DONE:7', standing)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // A rerun on the same head: red, re-run (pending), green. Each finish counts.
+  ctx = seeded(ciFx([status('local-ci', 'FAILURE')]))
+  const rerunPending = watch(ctx, ciFx([status('local-ci', 'PENDING')]))
+  const rerunGreen = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
+  check('watch CI_DONE: a check re-run on the same head (failure → pending → success) → NONE, then CI_DONE:7',
+    /^NONE /.test(rerunPending) && line(rerunGreen) === 'CI_DONE:7', `${rerunPending}|${rerunGreen}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // The key off (absent): today's output, the transition included.
+  ctx = seeded(ciFx([status('local-ci', 'PENDING')], { agents: ciOff }))
+  const off = watch(ctx, ciFx([status('local-ci', 'SUCCESS')], { agents: ciOff }))
+  const offStanding = (() => {
+    const c = seeded(ciFx([status('local-ci', 'PENDING')], { agents: ciOff, base: watchFx }))
+    const out = watch(c, ciFx([status('local-ci', 'SUCCESS')], { agents: ciOff, base: watchFx }))
+    rmSync(c.home, { recursive: true, force: true })
+    return out
+  })()
+  check('watch CI_DONE: without review-waits-for-ci: on, no CI_DONE ever → NONE, and a standing REVIEW:7 alone',
+    /^NONE \S+\n$/.test(off) && offStanding === 'REVIEW:7\n', `${off}|${offStanding}`)
+  // … and turning it on later reports only what finishes after (seeded silently when it turns on).
+  const turnedOn = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
+  check('watch CI_DONE: … turning the key on later reports nothing that finished before', /^NONE /.test(turnedOn), turnedOn)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // State written before this signal existed (no ci field): recorded silently, never a CI_DONE.
+  ctx = makeEnv()
+  mkdirSync(path.join(ctx.home, '.agent-loop', 'state'), { recursive: true })
+  writeFileSync(path.join(ctx.home, '.agent-loop', 'state', WATCH_STATE), JSON.stringify({ 7: { sha: 'abc123', lastComment: 999999, lastReviewComment: 0 } }))
+  const upgraded = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
+  check('watch CI_DONE: a state from before CI_DONE (no ci field) → NONE, the checks recorded', /^NONE /.test(upgraded) && JSON.parse(stateText(ctx, WATCH_STATE))[7].ci?.['status:local-ci'] === 'SUCCESS', `${upgraded}\n${stateText(ctx, WATCH_STATE)}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // The block can't be read on the run that sees the finish: withheld, with a line, and reported
+  // on the next run that reads it.
+  ctx = seeded(ciFx([status('local-ci', 'PENDING')]))
+  writeFileSync(ctx.fixture, JSON.stringify(ciFx([status('local-ci', 'SUCCESS')], { agents: 'error' })))
+  const blind = spawnSync('node', [path.join(scripts, 'pr-watch.mjs'), ...watchArgs()], { env: ctx.env, encoding: 'utf8' })
+  const seen = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
+  check('watch CI_DONE: an unreadable block withholds it (NONE, a pr-watch: line on stderr); the next run that reads the block → CI_DONE:7',
+    /^NONE /.test(blind.stdout) && /^pr-watch: could not read the Agent loop block \(CI_DONE withheld\): HTTP 502/.test(blind.stderr) && line(seen) === 'CI_DONE:7',
+    `${blind.stdout}${blind.stderr}|${seen}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // The waiter wakes on it like on the other signals.
+  ctx = seeded(ciFx([status('local-ci', 'PENDING')]))
+  watch(ctx, ciFx([status('local-ci', 'PENDING')]))
+  const w = start(ctx, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '15'))
+  const waiting = await holdsLock(ctx, w)
+  setFixture(ctx, ciFx([status('local-ci', 'SUCCESS')]))
+  const woke = await w.done
+  const delivered = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
+  check('watch CI_DONE: a waiter wakes on a check finishing → PENDING, and the one-shot run that follows → CI_DONE:7',
+    waiting && woke.out === 'PENDING\n' && woke.code === 0 && woke.ms < 10000 && line(delivered) === 'CI_DONE:7', `held: ${waiting}\n${woke.ms}ms ${woke.code} ${woke.out}${woke.err}|${delivered}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // The review of #141: a check change must not touch the state unless it is a finish the key
+  // reports. A state change wakes a waiter and resets the idle count, so storing every check change
+  // gave a standing REVIEW a wake on each one and pushed the idle wait back, with the key off too.
+  const quietWaiter = async (agents, before, after) => {
+    const c = seeded(ciFx(before, { agents, base: watchFx }))
+    watch(c, ciFx(before, { agents, base: watchFx }))
+    const waiter = start(c, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4'))
+    const held = await holdsLock(c, waiter)
+    setFixture(c, ciFx(after, { agents, base: watchFx }))
+    const res = await waiter.done
+    rmSync(c.home, { recursive: true, force: true })
+    return { held, ...res }
+  }
+  const [offWait, onWait] = await Promise.all([
+    quietWaiter(ciOff, [status('local-ci', 'PENDING')], [status('local-ci', 'SUCCESS')]),
+    quietWaiter(ciOn, [status('local-ci', 'SUCCESS')], [status('local-ci', 'SUCCESS'), status('other-ci', 'PENDING')]),
+  ])
+  check('watch CI_DONE (review of #141): key off, a standing REVIEW:7 and a check that finishes → the waiter is not woken (NONE at --max)',
+    offWait.held && /^NONE \S+\n$/.test(offWait.out) && offWait.ms >= 3500, `held: ${offWait.held} ${offWait.ms}ms ${offWait.out}${offWait.err}`)
+  check('watch CI_DONE (review of #141): key on, a held REVIEW:7 and a new check that is only pending → the waiter is not woken (NONE at --max)',
+    onWait.held && /^NONE \S+\n$/.test(onWait.out) && onWait.ms >= 3500, `held: ${onWait.held} ${onWait.ms}ms ${onWait.out}${onWait.err}`)
+  ctx = makeEnv()
+  const idleRun = (state) => run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '2'), ciFx([status('local-ci', state)], { agents: ciOff }))
+  const idleOuts = ['PENDING', 'PENDING', 'PENDING', 'PENDING', 'SUCCESS', 'SUCCESS'].map(idleRun)
+  check('watch CI_DONE (review of #141): key off, a check that finishes on a reviewed PR → the IDLE count keeps rising (IDLE 4, IDLE 5)',
+    idleOuts[4].trimEnd().endsWith('IDLE 4') && idleOuts[5].trimEnd().endsWith('IDLE 5'), idleOuts.join('|'))
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // Every reviewer adapter takes the key, holds an LGTM on it, and handles CI_DONE without ever
+  // posting an LGTM it never reviewed for.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const flatText = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+  const reviewers = { 'claude-code/skills/start-reviewer/SKILL.md': 'claude-code/skills/start-reviewer/reference/review.md', 'generic/reviewer.md': null,
+    'kiro/skills/start-reviewer/SKILL.md': null }
+  const unhandled = Object.entries(reviewers).filter(([f, extra]) => {
+    const t = flatText(f) + (extra ? flatText(extra) : '')
+    return !t.includes('`review-waits-for-ci` (`on` or `off`') && !t.includes('`review-waits-for-ci` (default `off`') && !t.includes('`review-waits-for-ci` — `on` or `off` (default `off`)') ||
+      !/\*\*`CI_DONE:<n>`\*\* \(only with `review-waits-for-ci: on`/.test(t) || !t.includes('never an LGTM from nothing') ||
+      !t.includes('A check still `pending` → post nothing') || !/CI (is )?pending( \(everything else holds\))?, with `review-waits-for-ci: on` → no LGTM yet/.test(t) ||
+      // A held first review keeps REVIEW standing: the REVIEW handler says so, or every wake re-reviews.
+      !/`REVIEW:<n>`\*\*[^]*?a head you already reviewed in this session with no findings and hold for CI → post nothing: `CI_DONE:<n>` brings you back \(you can't tell → review it as below\)[^]*?\*\*`REVIEW_COMMENTS:<n>`\*\*/.test(t)
+  }).map(([f]) => f)
+  check('reviewer texts (#131): every reviewer takes review-waits-for-ci, holds the LGTM with CI pending, and handles CI_DONE (never an LGTM from nothing)',
+    unhandled.length === 0, unhandled.join('\n'))
+}
 {
   const ctx = makeEnv()
   setFixture(ctx, watchFx)

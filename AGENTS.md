@@ -22,7 +22,9 @@ Three layers. Boundaries are strict.
   <clone>] [--needs-operator-label <name>]`. One line, exits. With `--reviewer` (several
   reviewers) it honours review claims and keeps state per reviewer; `--check-claim <n>` prints who
   holds a PR. A PR labelled needs-operator that falls into conflict is reported as a standing
-  `MERGE_CONFLICT:<n>`.
+  `MERGE_CONFLICT:<n>`. With `review-waits-for-ci: on` in the block on the default branch (read
+  as `pr-poll.mjs` reads it), a check on a watched head reaching a final state since the last run
+  gives `CI_DONE:<n>`, so a reviewer holding its LGTM for CI is woken (#131).
 - `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]
   [--require-gate] [--local-ci <context>] [--local-ci-window <secs>]`. Signals then content
   blocks, exits. It reads `qa-gate`, `gate` and `local-ci` from the `## Agent loop` block of
