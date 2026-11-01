@@ -81,14 +81,18 @@ Three layers. Boundaries are strict.
   and the loop runs the printed `git diff` itself.
 - `scripts/local-ci.mjs` — a local CI runner, no agent's. `--repo owner/repo --gate "<command>"
   [--context local-ci] [--install "<command>" [--lockfiles a,b]] [--trusted-authors a,b]
-  [--log-url <base>] [--wait [secs]]`, from the root of a clone of its own (it refuses one with a
+  [--log-url <base>] [--head-check <secs> | --finish-superseded] [--wait [secs]]`, from the root
+  of a clone of its own (it refuses one with a
   role marker). Runs the gate once per trusted, same-repository PR head, one at a time, and posts
   the result as a commit status, which `gh pr checks` and `pr-poll.mjs` read as CI. With
   `--install`, it runs the install command first whenever the head's lockfiles differ from those of
   the clone's last successful install, and posts `error` when the install fails. A head that is no
   longer its PR's head when its turn comes gets `error` (`superseded by <sha>: not run`) and no
-  run; while a run goes on, new heads get `pending` every `--wait` interval. One runner per repo
-  and context (pid lock).
+  run; while a run goes on, new heads get `pending` every `--wait` interval, and every
+  `--head-check` interval (60 s) a run whose head has moved or whose PR has closed is stopped,
+  its whole process group, SIGTERM then SIGKILL (`error`, `superseded by <sha>: stopped`; none
+  for a closed PR), unless `--finish-superseded` (#132). One runner per repo and context (pid
+  lock).
 - `scripts/audit.mjs` — the auditor's numbers, read-only. `--repo owner/repo --since <date|Nd>
   [--until <date>] [--floor id,id] [--operators l,l] [--labels l,l] [--format md|json]`. For each
   control the loop ran over the period (a workflow on prose-only PRs, re-runs, cancelled runs, a

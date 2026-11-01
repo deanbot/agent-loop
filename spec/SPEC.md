@@ -670,10 +670,19 @@ node scripts/local-ci.mjs --repo owner/repo --gate "<command>" [--context local-
   one-shot run) and posts `pending` on any head with no status, as at the start of a pass. A push
   during a run then shows CI within the interval, so no reader takes the new head for one with no
   CI. That look reuses the pass's trusted authors and runs no git, since the clone belongs to the
-  run. A failed look is said on stderr and tried again at the next tick. The run in progress is
-  never stopped for a newer head: a project's gate may hold locks or start services that a stop
-  would not release cleanly, so it finishes, and its status lands on a commit that is no longer
-  the head.
+  run. A failed look is said on stderr and tried again at the next tick.
+- While an install or a gate runs, every `--head-check` interval (default 60 seconds) it asks for
+  that PR's head, one call. When the head has moved or the PR has closed, it stops the run: the
+  install and the gate run as their own process group's leader, and the group gets SIGTERM, then
+  SIGKILL for whatever is left after a grace period (10 seconds). The runner waits until nothing in
+  the group runs, so a lock a member held (a machine-wide lock for browser tests, say) is released
+  before the next run. A moved head gets `error`, `superseded by <sha>: stopped`, with no gate
+  output; a closed PR gets no post. The run's log ends with the reason. The pass then lists the
+  open PRs again, so the new head runs next, and the next run's forced checkout and clean leave
+  the clone as every run finds it. A failed look is said on stderr and tried again. A gate must
+  keep its children in its process group: one that starts its own (a daemon that calls `setsid`)
+  escapes the stop. `--finish-superseded` turns this off for a project that prefers a run to end:
+  it finishes, and its status lands on a commit that is no longer the head.
 - With `--install "<command>"`, the project's dependencies follow the head. The tree is cleaned
   without `-x`, so ignored folders such as `node_modules` stay from one head to the next. After
   the checkout, when the head's lockfiles differ from those of the clone's last successful
@@ -1055,7 +1064,9 @@ refusal of a path that is not a folder or lies under a file. Later in 0.2, addit
 behaves as before. Later in 0.2, adapter rules only, no script or signal change: no cycle ends
 without a waiter or a short timer ("Waiting for events"). Later in 0.2: `local-ci.mjs` skips a
 superseded head (`error`, `superseded by <sha>: not run`) and marks new heads `pending` while a
-run goes on; the status contexts and states are unchanged. Later in 0.2, additive: a waiter takes
+run goes on; the status contexts and states are unchanged. Later in 0.2: `local-ci.mjs` stops a
+run whose head is no longer its PR's head (`error`, `superseded by <sha>: stopped`), unless
+`--finish-superseded`; the states are unchanged (#132). Later in 0.2, additive: a waiter takes
 the lock over from a verified waiter, which prints `TAKEN_OVER` and exits 4 (its own output,
 never a signal line). The lock records the script and the state file; a lock without them, from
 an older waiter, is never taken over. An adapter prompt that predates this reads exit 4 as a
