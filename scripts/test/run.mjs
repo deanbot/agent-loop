@@ -1963,6 +1963,77 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   await new Promise((r) => (wp.exitCode !== null ? r() : wp.on('close', r)))
   check('local-ci --wait: … and runs in a later pass, once (no second pending)', states(s45b) === 'pending,success' && traceText().includes(`start 45b ${s45b}`), JSON.stringify(statuses()[s45b]))
 
+  // #132: a head replaced while its own gate runs. The gate starts a child that ignores SIGTERM
+  // (so only the SIGKILL after the grace period ends it), records both pids, moves its PR to a new
+  // head and waits. --head-check 1: the runner looks every second.
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // A push, as the gate stands for it: origin's pull ref moves too, so the new head can be fetched.
+  const pushTo = (n, sha) => (sha === 'closed' ? '' : `git --git-dir="${origin}" update-ref refs/pull/${n}/head ${sha}\n`)
+  const stubborn = (n, edits) => ({
+    'pr.txt': `${n}\n`,
+    'gate.sh': `(trap '' TERM; sleep 30) &\necho $! > "$TRACE.child${n}"\necho $$ > "$TRACE.gate${n}"\n${pushTo(n, edits[n])}${relist(edits)}\nwait\necho "${n} finished"\n`,
+  })
+  const lciRun = (args, extraEnv = {}) => {
+    const t0 = Date.now()
+    const r = spawnSync('node', [path.join(scripts, 'local-ci.mjs'), '--repo', REPO, '--gate', 'sh gate.sh', ...args], { cwd: runner, env: { ...env, ...extraEnv }, encoding: 'utf8' })
+    return { out: r.stdout, err: r.stderr, code: r.status, ms: Date.now() - t0 }
+  }
+  const logOf = (n, sha) => {
+    const dir = path.join(ctx.home, '.agent-loop', 'local-ci', 'acme-widgets')
+    const f = readdirSync(dir).filter((x) => x.startsWith(`${n}-${sha.slice(0, 12)}-`)).sort().at(-1)
+    return f ? readFileSync(path.join(dir, f), 'utf8') : ''
+  }
+  const s50b = makePr(50, '50b')
+  const s50 = makePr(50, stubborn(50, { 50: s50b }))
+  setFixture(ctx, { prs: [pr(50, s50)], statuses: {} })
+  const stopped = lciRun(['--head-check', '1'], { AGENT_LOOP_STOP_GRACE_MS: '500' })
+  const child50 = Number(readFileSync(`${trace}.child50`, 'utf8'))
+  const gate50 = Number(readFileSync(`${trace}.gate50`, 'utf8'))
+  check('local-ci (#132): a head replaced while its gate runs is stopped within the interval → error "superseded by <sha>: stopped", well before the gate would end',
+    states(s50) === 'pending,error' && statuses()[s50][1].description === `superseded by ${s50b.slice(0, 7)}: stopped` && stopped.ms < 12000 &&
+      stopped.out.includes(`#50 ${s50.slice(0, 7)} error: superseded by ${s50b.slice(0, 7)}: stopped`), `${stopped.ms} ms\n${stopped.out}${stopped.err}${JSON.stringify(statuses()[s50])}`)
+  check('local-ci (#132): … the whole process group is gone, a child that ignores SIGTERM included (SIGKILL after the grace period)',
+    child50 > 0 && gate50 > 0 && !alive(child50) && !alive(gate50), `${child50} ${alive(child50)} ${gate50} ${alive(gate50)}`)
+  check('local-ci (#132): … the new head is the next one run, in the same pass, on a clean checkout',
+    states(s50b) === 'pending,success' && traceText().includes(`start 50b ${s50b}`) && stopped.out.indexOf(`#50 ${s50b.slice(0, 7)} success`) > stopped.out.indexOf(`#50 ${s50.slice(0, 7)} error`),
+    `${stopped.out}${JSON.stringify(statuses()[s50b])}`)
+  check('local-ci (#132): … and the stopped run\'s log ends with the reason', logOf(50, s50).trimEnd().endsWith(`local-ci: stopped: superseded by ${s50b}`), logOf(50, s50).slice(-200))
+
+  const s52 = makePr(52, stubborn(52, { 52: 'closed' }))
+  setFixture(ctx, { prs: [pr(52, s52)], statuses: {} })
+  const closedRun = lciRun(['--head-check', '1'], { AGENT_LOOP_STOP_GRACE_MS: '500' })
+  const child52 = Number(readFileSync(`${trace}.child52`, 'utf8'))
+  check('local-ci (#132): a PR closed while its gate runs → the run is stopped, its group gone, no post (it stays pending), a stderr line',
+    states(s52) === 'pending' && !alive(child52) && closedRun.ms < 12000 && /#52 closed while [0-9a-f]{7} ran; stopped, no post/.test(closedRun.err) &&
+      logOf(52, s52).trimEnd().endsWith('local-ci: stopped: the pull request closed'), `${closedRun.ms} ms\n${closedRun.out}${closedRun.err}`)
+
+  const s54b = makePr(54, '54b')
+  const s54 = makePr(54, { 'pr.txt': '54\n', 'gate.sh': `${pushTo(54, s54b)}${relist({ 54: s54b })}\nsleep 2.5\necho "54 finished"\n` })
+  setFixture(ctx, { prs: [pr(54, s54)], statuses: {} })
+  const finished = lciRun(['--finish-superseded'])
+  check('local-ci (#132): with --finish-superseded the run goes to its end and posts its real result; the new head is left for a later pass, as before',
+    states(s54) === 'pending,success' && statuses()[s54][1].description === '54 finished' && ['', 'pending'].includes(states(s54b)) && !traceText().includes(`start 54b `),
+    `${finished.out}${finished.err}${JSON.stringify(statuses()[s54])}${JSON.stringify(statuses()[s54b])}`)
+  const badCheck = lciRun(['--head-check', 'soon'])
+  const both = lciRun(['--head-check', '5', '--finish-superseded'])
+  check('local-ci (#132): --head-check that is not seconds, or with --finish-superseded → exit 1',
+    badCheck.code === 1 && /--head-check: expected seconds/.test(badCheck.err) && both.code === 1 && /--head-check and --finish-superseded go apart/.test(both.err), `${badCheck.err}${both.err}`)
+
+  // The review of #146: an answer with no state (empty output) is a failed look, not a closed PR.
+  const s56 = makePr(56, { 'pr.txt': '56\n', 'gate.sh': `node -e "const fs=require('fs');const f=process.env.FAKE_GH_FIXTURE;const x=JSON.parse(fs.readFileSync(f,'utf8'));x.pr={};fs.writeFileSync(f+'.t',JSON.stringify(x));fs.renameSync(f+'.t',f)"\nsleep 2.5\necho "56 finished"\n` })
+  setFixture(ctx, { prs: [pr(56, s56)], statuses: {} })
+  const noState = lciRun(['--head-check', '1'])
+  check('local-ci (#132 review): a head check answered with no state → said on stderr, the run goes on and posts its result',
+    states(s56) === 'pending,success' && statuses()[s56][1].description === '56 finished' && /#56 head check failed: no state in the answer/.test(noState.err),
+    `${noState.out}${noState.err}${JSON.stringify(statuses()[s56])}`)
+
   const otherClone = path.join(ctx.home, 'other-clone')
   g(ctx.home, 'clone', '-q', origin, otherClone)
   g(otherClone, 'remote', 'set-url', 'origin', 'https://github.com/acme/widgets-fork.git')
@@ -2981,7 +3052,7 @@ const putMessage = (dir, id, extra, meta) => {
   const qa = clone('qa')
   const startCmd = 'node /plugins/agent-loop/scripts/start-check.mjs --role reviewer --session s1 --model "Opus 5.5" --effort high --inbox /m/in'
   const warn1 = '⚠ No mailbox: --inbox and --outbox go together.'
-  const warn2 = '⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it with /model and /effort if that is wrong.'
+  const warn2 = '⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it on that model and effort if that is wrong.'
   const startOut = `NEW\nNO_MAILBOX\n${warn1}\n${warn2}\n`
   check('start lines hook: start-check.mjs in a reviewer, executor or QA clone → all its ⚠ lines, in order, as one systemMessage, and nothing else',
     [reviewer, exec, qa].every((d) => shown(ok(startCmd, startOut, d)) === `${warn1}\n${warn2}`), shown(ok(startCmd, startOut, reviewer)))
@@ -3042,7 +3113,8 @@ const putMessage = (dir, id, extra, meta) => {
   agents('executor=opus, reviewer=sonnet')
   const wrong = lines(base('reviewer', 'sess-b'))
   check('start-check: the models entry names another model → the ⚠ model line, with the entry and this session',
-    wrong.includes('⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it with /model and /effort if that is wrong.'), wrong.join('\n'))
+    wrong.includes('⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it on that model and effort if that is wrong.') &&
+      !wrong.some((l) => l.includes('/model') || l.includes('/effort')), wrong.join('\n'))
   agents('reviewer=opus/max')
   check('start-check: … the same model, another effort → the ⚠ model line', lines(base('reviewer', 'sess-b')).some((l) => l.startsWith('⚠ AGENTS.md expects opus/max for the reviewer')))
   check('start-check: … an effort not filled in is not compared → no line',
@@ -3080,6 +3152,144 @@ const putMessage = (dir, id, extra, meta) => {
   const usage = [start(['--role', 'boss', '--session', 's', '--model', 'm']), start(['--role', 'qa', '--session', 's']), start([...base(), 'extra'])]
   check('start-check: an unknown role, no --model, or a stray argument → exit 1', usage.every((r) => r.status === 1), usage.map((r) => r.stderr).join('\n'))
   rmSync(home, { recursive: true, force: true })
+}
+
+// ---------------------------------------------------------------- start-check.mjs: the executor's branch and stale claims (#142)
+{
+  // A live resume took the branch and the tree from the context's start snapshot and never ran the
+  // stale-claim clear: both are now this script's output.
+  const ctx = makeEnv()
+  const root = path.join(ctx.home, 'app-exec')
+  mkdirSync(root)
+  const g = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  g('init', '-q', '-b', 'main')
+  // The clone's copy names another label: the clear's label comes from the default branch's block
+  // (the fixture's `agents`), never the clone's, which on a PR's branch is the PR's.
+  writeFileSync(path.join(root, 'AGENTS.md'), '# App\n\n## Agent loop\n\nrepo: acme/widgets\nin-progress-label: branch-label\n')
+  writeFileSync(path.join(root, '.gitignore'), '.agent-loop/\n')
+  g('add', 'AGENTS.md', '.gitignore')
+  g('commit', '-q', '-m', 'init')
+  const MAIN_BLOCK = '# App\n\n## Agent loop\n\nrepo: acme/widgets\nin-progress-label: claimed\n'
+  const fx = (issues, more = {}) => writeFileSync(ctx.fixture, JSON.stringify({ issues, agents: MAIN_BLOCK, ...more }))
+  const closed = (number, labels) => ({ number, state: 'CLOSED', labels: labels.map((name) => ({ name })) })
+  const ghCalls = () => (existsSync(ctx.log) ? readFileSync(ctx.log, 'utf8').trim().split('\n').filter(Boolean) : [])
+  const startIn = (dir, role = 'executor', env = {}) => {
+    rmSync(ctx.log, { force: true })
+    const r = spawnSync('node', [path.join(scripts, 'start-check.mjs'), '--role', role, '--session', 'sess-x', '--model', 'Opus 5.5', '--effort', 'high'],
+      { cwd: dir, encoding: 'utf8', env: { ...ctx.env, ...env } })
+    return { status: r.status, lines: r.stdout.trimEnd().split('\n'), err: r.stderr, ms: 0 }
+  }
+
+  fx([closed(3, ['claimed']), { number: 4, state: 'OPEN', labels: [{ name: 'claimed' }] }, closed(5, ['bug']), closed(9, ['claimed', 'bug'])])
+  const two = startIn(root)
+  const calls = ghCalls()
+  check('start-check (#142): executor on a clean main → BRANCH main CLEAN, after the session and mailbox lines',
+    two.status === 0 && two.lines[0] === 'NEW' && two.lines[1] === 'NO_MAILBOX' && two.lines[2] === 'BRANCH main CLEAN', two.lines.join('\n'))
+  check('start-check (#142): two stale claims → CLEARED 2 #3 #9, the label removed from each with one gh issue edit, the open one left alone, no ⚠ line',
+    two.lines[3] === 'CLEARED 2 #3 #9' && two.lines.length === 4 &&
+      calls[1] === 'issue list --repo acme/widgets --state closed --label claimed --limit 100 --json number' &&
+      calls.slice(2).join('|') === 'issue edit 3 --repo acme/widgets --remove-label claimed|issue edit 9 --repo acme/widgets --remove-label claimed', `${two.lines.join('\n')}\n${calls.join('\n')}`)
+  check('start-check (#144 review): the clear reads the block from the default branch first (the contents API, no ref), and uses its label, never the clone\'s',
+    calls[0] === 'api repos/acme/widgets/contents/AGENTS.md' && !calls.some((c) => c.includes('branch-label')), calls.join('\n'))
+  fx([closed(5, ['bug'])])
+  const none = startIn(root)
+  check('start-check (#142): no stale claims → CLEARED_NONE, and only the block read and the list call', none.lines[3] === 'CLEARED_NONE' && ghCalls().length === 2, none.lines.join('\n'))
+  fx([closed(3, ['claimed'])], { agents: 'error' })
+  const unread = startIn(root)
+  check('start-check (#144 review): the default branch\'s block unreadable → CLEARED_UNKNOWN and a ⚠ line, no list and no edit (never the clone\'s copy instead)',
+    unread.status === 0 && unread.lines[3] === 'CLEARED_UNKNOWN' && unread.lines.includes('⚠ Stale claims not cleared: could not read the default branch\'s block: HTTP 502: Bad Gateway (https://api.github.com/).') &&
+      ghCalls().length === 1, `${unread.lines.join('\n')}\n${ghCalls().join('\n')}`)
+  fx([closed(3, ['claimed'])], { agents: '# App\n\n## Agent loop\n\nrepo: other/place\nin-progress-label: claimed\n' })
+  const elsewhere = startIn(root)
+  check('start-check (#144 review): the default branch\'s block names another repo → CLEARED_UNKNOWN and a ⚠ line, no list and no edit',
+    elsewhere.lines[3] === 'CLEARED_UNKNOWN' && elsewhere.lines.some((l) => l.startsWith('⚠ Stale claims not cleared: could not read the default branch\'s block: the default branch\'s block names other/place, not acme/widgets')) &&
+      ghCalls().length === 1, `${elsewhere.lines.join('\n')}\n${ghCalls().join('\n')}`)
+  fx([closed(3, ['in-progress'])], { agents: '# App\n\n## Agent loop\n\nrepo: acme/widgets\n' })
+  const byDefault = startIn(root)
+  check('start-check (#142): no in-progress-label on the default branch → the default label in-progress (the clone\'s label never counts)',
+    byDefault.lines[3] === 'CLEARED 1 #3' && ghCalls()[1]?.includes('--label in-progress '), `${byDefault.lines.join('\n')}\n${ghCalls().join('\n')}`)
+
+  writeFileSync(path.join(root, 'scratch.txt'), 'x')
+  check('start-check (#142): an untracked file → DIRTY', startIn(root).lines[2] === 'BRANCH main DIRTY')
+  rmSync(path.join(root, 'scratch.txt'))
+  writeFileSync(path.join(root, 'AGENTS.md'), '# App\n\n## Agent loop\n\nrepo: acme/widgets\nin-progress-label: branch-label\n\nedited\n')
+  check('start-check (#142): a changed tracked file → DIRTY', startIn(root).lines[2] === 'BRANCH main DIRTY')
+  g('checkout', '-q', '--', 'AGENTS.md')
+  g('switch', '-q', '-c', 'issue-42-thing')
+  check('start-check (#142): on an issue branch → BRANCH issue-42-thing CLEAN', startIn(root).lines[2] === 'BRANCH issue-42-thing CLEAN')
+  g('checkout', '-q', '--detach')
+  check('start-check (#142): detached HEAD → BRANCH_DETACHED CLEAN', startIn(root).lines[2] === 'BRANCH_DETACHED CLEAN')
+  g('switch', '-q', 'main')
+  // A clone that doesn't ignore .agent-loop/: the session file the start writes must not count.
+  const bare = path.join(ctx.home, 'app-exec2')
+  mkdirSync(bare)
+  const g2 = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: bare, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  g2('init', '-q', '-b', 'main')
+  writeFileSync(path.join(bare, 'AGENTS.md'), '# App\n\n## Agent loop\n\nrepo: acme/widgets\n')
+  g2('add', 'AGENTS.md')
+  g2('commit', '-q', '-m', 'init')
+  const firstStart = startIn(bare)
+  check('start-check (#142): the tree is read before the start writes .agent-loop/session → a first start in a clone that does not ignore it reads CLEAN',
+    firstStart.lines[2] === 'BRANCH main CLEAN' && existsSync(path.join(bare, '.agent-loop', 'session')), firstStart.lines.join('\n'))
+
+  const plain = path.join(ctx.home, 'not-a-repo')
+  mkdirSync(plain)
+  writeFileSync(path.join(plain, 'AGENTS.md'), '# App\n\n## Agent loop\n\nrepo: acme/widgets\n')
+  const nogit = startIn(plain)
+  check('start-check (#142): git failing (not a checkout) → BRANCH_UNKNOWN and a ⚠ line, exit 0; the clear still runs',
+    nogit.status === 0 && nogit.lines[2] === 'BRANCH_UNKNOWN' && nogit.lines.some((l) => l.startsWith('⚠ Could not read the branch or the working tree: ')) &&
+      ghCalls()[1]?.startsWith('issue list '), `${nogit.lines.join('\n')}\n${ghCalls().join('\n')}`)
+
+  fx([closed(3, ['claimed'])], { closedListFail: true })
+  const listDown = startIn(root)
+  check('start-check (#142): the closed-issue list failing → CLEARED_UNKNOWN and ⚠ Stale claims not cleared: <gh\'s line>, no edit',
+    listDown.lines[3] === 'CLEARED_UNKNOWN' && listDown.lines.includes('⚠ Stale claims not cleared: HTTP 502: Bad Gateway (https://api.github.com/).') && ghCalls().length === 2,
+    `${listDown.lines.join('\n')}\n${ghCalls().join('\n')}`)
+  fx([closed(3, ['claimed'])], { fail: true })
+  const down = startIn(root)
+  check('start-check (#142): gh failing → CLEARED_UNKNOWN and ⚠ Stale claims not cleared: <gh\'s line>, exit 0, the branch line still there',
+    down.status === 0 && down.lines[2] === 'BRANCH main CLEAN' && down.lines[3] === 'CLEARED_UNKNOWN' &&
+      down.lines.includes('⚠ Stale claims not cleared: could not read the default branch\'s block: HTTP 502: Bad Gateway (https://api.github.com/).'), down.lines.join('\n'))
+  fx([closed(3, ['claimed']), closed(7, ['claimed'])], { editFail: [3] })
+  const part = startIn(root)
+  check('start-check (#142): one edit failing → CLEARED 1 #7, and a ⚠ line naming #3 and why',
+    part.lines[3] === 'CLEARED 1 #7' && part.lines.includes('⚠ Stale claims not cleared on #3: HTTP 403: Resource not accessible by integration.'), part.lines.join('\n'))
+  fx([closed(3, ['claimed'])], { delayMs: 3000 })
+  const t0 = Date.now()
+  const slow = startIn(root, 'executor', { AGENT_LOOP_START_GH_TIMEOUT_MS: '500' })
+  const slowMs = Date.now() - t0
+  check('start-check (#142): a gh call that hangs is cut off by the timeout → CLEARED_UNKNOWN and ⚠ … timed out, exit 0, well before gh would answer',
+    slow.status === 0 && slow.lines[3] === 'CLEARED_UNKNOWN' && slow.lines.includes('⚠ Stale claims not cleared: could not read the default branch\'s block: gh timed out after 0.5 s.') && slowMs < 2500,
+    `${slowMs} ms\n${slow.lines.join('\n')}`)
+  fx([3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => closed(n, ['claimed'])), { delayMs: 200 })
+  const t1 = Date.now()
+  const many = startIn(root, 'executor', { AGENT_LOOP_START_GH_TIMEOUT_MS: '600' })
+  const manyMs = Date.now() - t1
+  check('start-check (#142): many slow edits stop at the overall bound (three calls\' worth) → the ones cleared, the rest named in a ⚠ line',
+    /^CLEARED \d+ #3 /.test(many.lines[3]) && many.lines.some((l) => /^⚠ Stale claims not cleared on (#\d+ ?)+: gh timed out after 0\.6 s\.$/.test(l)) && manyMs < 5000,
+    `${manyMs} ms\n${many.lines.join('\n')}`)
+
+  // The repo name goes into a gh command line: only GitHub's name characters pass.
+  for (const bad of ['acme/$(touch pwned)', 'acme/`touch pwned`', 'acme/w;touch pwned', 'acme/w"x']) {
+    writeFileSync(path.join(plain, 'AGENTS.md'), `# App\n\n## Agent loop\n\nrepo: ${bad}\n`)
+    fx([closed(3, ['in-progress'])])
+    const hostile = startIn(plain)
+    check(`start-check (#144 review): a repo of ${JSON.stringify(bad)} in the clone's block → refused, no gh call, nothing run`,
+      hostile.lines[3] === 'CLEARED_UNKNOWN' && ghCalls().length === 0 && !existsSync(path.join(plain, 'pwned')), `${hostile.lines.join('\n')}\n${ghCalls().join('\n')}`)
+  }
+  writeFileSync(path.join(plain, 'AGENTS.md'), '# App\n\n## Agent loop\n\nqa-gate: off\n')
+  fx([closed(3, ['in-progress'])])
+  const noRepo = startIn(plain)
+  check('start-check (#142): no repo in the block → CLEARED_UNKNOWN and a ⚠ line, and no gh call',
+    noRepo.lines[3] === 'CLEARED_UNKNOWN' && noRepo.lines.includes('⚠ Stale claims not cleared: the ## Agent loop block names no repo (owner/repo).') && ghCalls().length === 0, noRepo.lines.join('\n'))
+
+  fx([closed(3, ['claimed'])])
+  for (const role of ['reviewer', 'qa']) {
+    const other = startIn(root, role)
+    check(`start-check (#142): --role ${role} → no branch or clear line, and no gh call`,
+      other.lines.join('|') === 'MINE|NO_MAILBOX' && ghCalls().length === 0, `${other.lines.join('\n')}\n${ghCalls().join('\n')}`)
+  }
+  rmSync(ctx.home, { recursive: true, force: true })
 }
 
 // ---------------------------------------------------------------- loop texts' command forms (#90, #91)
@@ -3178,6 +3388,27 @@ const putMessage = (dir, id, extra, meta) => {
     .filter((f) => !/unless (`node \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/claims\.mjs [^`]*`|the claim check \(`claims\.mjs`, above\)) prints `CLAIM_HELD`/.test(flat(read(f))))
   check('claim check (#129): the claim step\'s "in progress, unless it is yours" also asks claims.mjs', heldOnly.length === 0, heldOnly.join('\n'))
 
+  // #143: orienting on an open PR whose issue carried the label never asked whose label it was, so
+  // a start on another clone's issue or PR worked that clone's PR. Every orient runs claims.mjs
+  // before the branch switch, and a lost claim stops a start that named it.
+  const orients = { 'claude-code/skills/start-executor/SKILL.md': ['**Orient on an existing PR.**', '4. Be on the PR\'s branch:', claimCmd('node ${CLAUDE_PLUGIN_ROOT}/scripts/')],
+    'generic/executor.md': ['**Orient checks who holds the issue.**', '- PR number → orient', claimCmd('node scripts/')],
+    'kiro/skills/start-executor/SKILL.md': ['## Orient on existing PR (step 6b)', '1. `gh pr view <PR> --repo <repo>`', claimCmd('node scripts/')] }
+  const noHolder = Object.entries(orients).filter(([f, [from, before, cmd]]) => {
+    const t = flat(read(f))
+    const start = t.indexOf(from)
+    const end = t.indexOf(before, start)
+    const orient = start === -1 || end === -1 ? '' : t.slice(start, end)
+    return !orient.includes(cmd) || !orient.includes('`CLAIM_LOST <clone>`') || !orient.includes('`#<N> is claimed by <') ||
+      !orient.includes(': PR #<PR> stays with it.`') || !orient.includes('`Could not check the claim on #<N>: <the claims: line>. Restart when gh works.`') ||
+      !orient.includes('Never switch to its branch.') || /With the label on, do not re-claim\./.test(t) ||
+      // the review of #145: before any label write on the PR, the park labels' removal included
+      (orient.includes('still carries `<blocked-label>` or `<needs-operator-label>`') &&
+        orient.indexOf(cmd) > orient.indexOf('still carries `<blocked-label>` or `<needs-operator-label>`'))
+  }).map(([f]) => f)
+  check('claim check (#143): every executor\'s orient runs claims.mjs before any label write and the branch switch, stops on CLAIM_LOST with the claimed-by line, and the bare "With the label on, do not re-claim" is gone',
+    noHolder.length === 0, noHolder.join('\n'))
+
   // #128: a Claude Code start's ⚠ lines come from start-check.mjs, which the hook shows; live starts
   // dropped the ones the text asked the session to print, the literal one-folder line included.
   const startCmd = (r) => `node \${CLAUDE_PLUGIN_ROOT}/scripts/start-check.mjs --role ${r} --session \${CLAUDE_SESSION_ID} --model "<model>" --effort \${CLAUDE_EFFORT}`
@@ -3191,6 +3422,39 @@ const putMessage = (dir, id, extra, meta) => {
   })
   check('start lines (#128): every Claude Code start runs start-check.mjs with each mailbox folder it was given, branches on its lines, and leaves the ⚠ lines to the hook',
     noStart.length === 0, noStart.join('\n'))
+
+  // #142: a live resume decided the branch and the tree from the context's start snapshot and
+  // passed the stale-claim clear by. Both are start-check.mjs's lines now, in every executor.
+  // The review of #144: generic and Kiro pass the effort too, or the model check loses its effort half.
+  const execStart = { 'claude-code/skills/start-executor/SKILL.md': startCmd('executor'), 'generic/executor.md': 'node scripts/start-check.mjs --role executor --model "<model>" --effort "<effort>"',
+    'kiro/skills/start-executor/SKILL.md': 'node scripts/start-check.mjs --role executor --model "<model>" --effort "<effort>"' }
+  const noBranch = Object.entries(execStart).filter(([f, cmd]) => {
+    const t = flat(read(f))
+    const at = (s) => t.indexOf(s)
+    const claimRun = at('claims.mjs --repo <repo> --issue <N>')
+    const cleanMain = at('No claim check runs on a clean `main`:')
+    return at(cmd) === -1 ||
+      // the script's lines are listed, the clear's before the claim check and the clean-main route
+      !t.includes('`BRANCH <name> CLEAN|DIRTY`, `BRANCH_DETACHED CLEAN|DIRTY` or `BRANCH_UNKNOWN`') ||
+      at('`CLEARED <n> #a #b …`, `CLEARED_NONE` or `CLEARED_UNKNOWN`') === -1 || at('`CLEARED <n> #a #b …`') > claimRun || at('`CLEARED <n> #a #b …`') > cleanMain ||
+      at(cmd) > claimRun ||
+      // the resume decides from the BRANCH line, never the attached snapshot, and stops without one
+      !/`BRANCH` line says (it|where this clone is), and nothing else does: never (the|a) git status/.test(t) ||
+      !t.includes('a clean tree is the line\'s `CLEAN` and uncommitted changes are its `DIRTY`') ||
+      !t.includes('`BRANCH_UNKNOWN` → **stop** and say `Could not read this clone\'s branch: <the ⚠ line>. Restart when git works.`'.replace(f.startsWith('claude-code') ? '' : '**stop**', f.startsWith('claude-code') ? '' : 'stop')) ||
+      at('`BRANCH main CLEAN` →') === -1 || at('`BRANCH main CLEAN` →') > cleanMain ||
+      // the old steps are gone: no git status of the session's own, no clear by hand
+      t.includes('`git branch --show-current` and `git status --porcelain`') || t.includes('--state closed --label <in-progress-label>')
+  }).map(([f]) => f)
+  check('start lines (#142): every executor runs start-check.mjs, decides its resume from the BRANCH line, and leaves the stale-claim clear to it, listed before the claim check and the clean-main route',
+    noBranch.length === 0, noBranch.join('\n'))
+  const selfPrinted = ['generic/executor.md', 'kiro/skills/start-executor/SKILL.md'].filter((f) => {
+    const t = flat(read(f))
+    return t.includes('add `⚠ AGENTS.md expects <entry> for the executor') || !t.includes('repeat each one in your reply, after the Track line. With no hook to show them, your text is the only copy.')
+  })
+  check('start lines (#142): generic and Kiro leave the model check to start-check.mjs and repeat its ⚠ lines, having no hook', selfPrinted.length === 0, selfPrinted.join('\n'))
+  check('start lines (#142): no executor text clears stale claims by hand any more',
+    !['claude-code/skills/start-executor/reference/implement.md', 'claude-code/skills/start-executor/reference/signals.md'].some((f) => flat(read(f)).includes('--state closed --label <in-progress-label>')))
 }
 
 // ---------------------------------------------------------------- the RESTART line: the hook's in Claude Code (#105)
