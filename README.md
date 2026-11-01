@@ -64,14 +64,15 @@ A sandbox can let named commands out (in Claude Code, `sandbox.excludedCommands`
 the network. The skills run `gh` and `git push|fetch|pull` as commands on their own, with `--repo
 owner/repo` instead of `cd … && gh …`, so an entry for them matches. These scripts call `gh`, so
 exempt them the same way: `scripts/pick-next.mjs`, `scripts/pr-poll.mjs`, `scripts/pr-watch.mjs`,
-`scripts/pr-qa.mjs` (through `scripts/lib/wait.mjs`), `scripts/pr-for-issue.mjs`, `scripts/claims.mjs` and
-`adapters/claude-code/setup-project.sh`.
+`scripts/pr-qa.mjs` (through `scripts/lib/wait.mjs`), `scripts/pr-for-issue.mjs`, `scripts/claims.mjs`,
+`scripts/start-check.mjs` (an executor's start clears stale claims through `gh`; sandboxed, the
+clear fails and the start says so in a `⚠` line) and `adapters/claude-code/setup-project.sh`.
 `scripts/pull.mjs` runs `git pull`, so it needs the same exemption: without it every loop pull
 fails, and the loop says so in a `⚠` line each time. `scripts/rules-ack.mjs` clears a record in
 the scripts' state folder, outside the clone, so exempt it too: a sandboxed run can't clear it, and
 `pick-next.mjs` then refuses every pick (`RULES_PENDING`). `scripts/inbox.mjs` writes its record to
-the same state folder, so a loop with a mailbox needs it exempt too, and so does
-`scripts/start-check.mjs`, which copies a start's warnings to the outbox, outside the clone.
+the same state folder, so a loop with a mailbox needs it exempt too. `scripts/start-check.mjs` also
+copies a start's warnings to the outbox, outside the clone: one more reason to exempt it.
 
 ---
 

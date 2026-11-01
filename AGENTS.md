@@ -47,7 +47,7 @@ Three layers. Boundaries are strict.
   comment); exit 2 on a failed `gh` call. The resume branches on its line, so the check can't be
   skipped.
 - `scripts/lib/block.mjs` — reads a key from the `## Agent loop` block of an `AGENTS.md` text
-  (`pr-poll.mjs`, `pull.mjs`, `local-ci.mjs`).
+  (`pr-poll.mjs`, `pull.mjs`, `local-ci.mjs`, `start-check.mjs`).
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
 - `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
   [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n] [--clone <clone>]`. Prints
@@ -65,8 +65,12 @@ Three layers. Boundaries are strict.
   <f>]`: takes the clone (`session.mjs --start`; `SESSION_NONE` with no usable id), checks the
   block's `models:` entry for the role, and checks the mailbox (`MAILBOX <inbox>` or
   `NO_MAILBOX`, one folder alone included), then prints a `⚠ ` line for each warning the operator
-  should see. With a mailbox it copies those lines to the outbox as one message. Exit 0 whatever
-  it finds. The Claude Code operator-lines hook shows the `⚠ ` lines; the session doesn't copy
+  should see. For the executor it also prints `BRANCH <name> CLEAN|DIRTY` (or `BRANCH_DETACHED`,
+  `BRANCH_UNKNOWN`), read before it writes anything, and clears stale claims (`CLEARED <n> …`,
+  `CLEARED_NONE`, `CLEARED_UNKNOWN`), with the repo and label from the block on the default branch
+  (`lib/block.mjs`'s `fetchAgents`), never the clone's copy: its one network call, each `gh` call
+  bounded (#142). With a
+  mailbox it copies the `⚠ ` lines to the outbox as one message. Exit 0 whatever it finds. The Claude Code operator-lines hook shows the `⚠ ` lines; the session doesn't copy
   them. Run in the clone's root.
 - `scripts/pull.mjs` — every pull of `main` in a loop. `[--start <command> [--milestone
   <title>]]`. `git pull --ff-only`, then `RULES_CHANGED: <files>` plus the `git diff` command
