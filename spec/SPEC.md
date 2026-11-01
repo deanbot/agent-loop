@@ -399,7 +399,10 @@ implements this, every path that puts an executor on an open PR (a pick, or the 
 it on the PR or the issue) checks and claims the linked issue the same way when it carries no
 `in-progress-label`, so one parked PR never gets two executors. The Claude Code
 adapter does; the generic and Kiro adapters don't yet (they pass no `--clone`, and the operator
-re-runs the executor on the PR as before).
+re-runs the executor on the PR as before). When the linked issue does carry `in-progress-label`,
+the label alone never makes it the executor's: in every adapter, orienting on an open PR runs
+`claims.mjs` first, before switching to the PR's branch, and a claim another clone holds (`CLAIM_LOST
+<clone>`) stops a start that named the issue or the PR, and is skipped after a pick (#143).
 
 **Milestone track.** An executor started with a milestone (`--milestone "<title>"` in the adapters
 that take arguments) picks only open issues in that milestone. Several executors can run separate
