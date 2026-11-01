@@ -253,7 +253,8 @@ transcript.
 The same hook shows a start's warnings. Every start runs `scripts/start-check.mjs`, which takes
 the clone for the session, checks the `models:` entry and the mailbox folders, and prints a `⚠ `
 line for each thing the operator should know: a takeover, no session id, the wrong model, one
-mailbox folder without the other, a refused pair, an inbox that doesn't exist yet. In a clone whose
+mailbox folder without the other, a refused pair, an inbox that doesn't exist yet, and, for the
+executor, git or the stale-claim clear failing. In a clone whose
 role marker says `executor`, `reviewer` or `qa`, or that has no marker yet, the hook returns all
 of those lines as one `systemMessage`, and the session doesn't copy them. With a mailbox, the script also writes them
 to the outbox as one message, for a deployment where nobody watches the terminal.

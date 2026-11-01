@@ -3,7 +3,8 @@
 // FAKE_GH_FIXTURE. Every call is appended to FAKE_GH_LOG (one line of args per call).
 //
 // Fixture shape (all keys optional):
-//   pr        → gh api repos/o/r/pulls/N                    (object: { merged, head: { sha }, mergeable, mergeable_state })
+//   pr        → gh api repos/o/r/pulls/N                    (object: { merged, head: { sha }, mergeable, mergeable_state });
+//               without it, N as `prs` lists it ({ state: 'open', head: { sha: headRefOid } }), or closed
 //   comments  → gh api repos/o/r/issues/N/comments           (array; issueComments: { N: array } serves
 //               one issue's own list, for scripts that read several issues)
 //   reviews   → gh api repos/o/r/pulls/N/reviews             (array)
@@ -30,6 +31,9 @@
 //               'error' → HTTP 502;
 //               'too-large' → encoding "none" and no content, as for a file over 1 MB)
 //   A query string (`?per_page=100`) on a path is ignored.
+//               gh issue list --state closed [--label L] serves the CLOSED ones (carrying L), as { number }
+//   closedListFail → that closed-issue list fails like a network error (true)
+//   editFail  → gh issue edit N … fails for these numbers (array); otherwise it succeeds
 //   fail      → every call fails like a network error         (true)
 //   delayMs   → every call takes this long before answering    (number)
 import { readFileSync, appendFileSync, writeFileSync, renameSync } from 'fs'
@@ -127,6 +131,11 @@ if (args[0] === 'api') {
   if (/\/pulls\/\d+\/reviews$/.test(target)) outList('reviews')
   if (/\/pulls\/\d+\/comments$/.test(target)) outList('inline')
   if (/\/pulls\/\d+\/commits$/.test(target)) outList('commits')
+  if (/\/pulls\/\d+$/.test(target) && fixture.pr === undefined && Array.isArray(fixture.prs)) {
+    // No `pr` given: the PR as `prs` lists it (open, its head), or closed when it is not listed.
+    const listed = fixture.prs.find((p) => String(p.number) === target.split('/').at(-1))
+    out(listed ? { number: listed.number, state: 'open', head: { sha: listed.headRefOid } } : { state: 'closed', head: { sha: null } })
+  }
   if (/\/pulls\/\d+$/.test(target)) out(fixture.pr)
   if (/\/milestones(\?|$)/.test(target)) out(fixture.milestones)
   if (/\/issues\/\d+$/.test(target)) {
@@ -154,6 +163,27 @@ if (args[0] === 'pr' && args[1] === 'checks') {
 }
 if (args[0] === 'pr' && args[1] === 'list') out(fixture.prs)
 if (args[0] === 'pr' && args[1] === 'view') out(fixture.prView)
+if (args[0] === 'issue' && args[1] === 'list' && args[args.indexOf('--state') + 1] === 'closed') {
+  if (fixture.closedListFail) {
+    process.stderr.write('HTTP 502: Bad Gateway (https://api.github.com/)\n')
+    process.exit(1)
+  }
+  const label = args.includes('--label') ? args[args.indexOf('--label') + 1] : null
+  out(
+    (fixture.issues ?? [])
+      .filter((i) => i.state === 'CLOSED')
+      .filter((i) => label === null || (i.labels ?? []).some((l) => (l?.name ?? l) === label))
+      .map(({ number }) => ({ number }))
+  )
+}
+if (args[0] === 'issue' && args[1] === 'edit') {
+  if ((fixture.editFail ?? []).includes(Number(args[2]))) {
+    process.stderr.write('HTTP 403: Resource not accessible by integration\n')
+    process.exit(1)
+  }
+  process.stdout.write(`https://github.com/acme/widgets/issues/${args[2]}\n`)
+  process.exit(0)
+}
 if (args[0] === 'issue' && args[1] === 'list') {
   const mi = args.indexOf('--milestone')
   const title = mi === -1 ? null : args[mi + 1]
