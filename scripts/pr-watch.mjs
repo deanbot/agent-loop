@@ -37,6 +37,13 @@
  *                                 is off or the conflict is gone, whether or not an executor holds the PR.
  *   REVIEW_COMMENTS:<n>           PR has new operator (unprefixed) comments or inline review comments
  *   CLOSED:<n>                    PR the script was tracking is no longer open (merged or closed); emitted once
+ *   CI_DONE:<n>                   only with `review-waits-for-ci: on` in the Agent loop block of AGENTS.md on the
+ *                                 default branch: a check on the PR's head (any commit status or check run)
+ *                                 reached a final state since the last run (success, failure, error, cancelled,
+ *                                 skipped, …; a rerun that finishes again counts again). Not for a head first
+ *                                 seen this run: REVIEW covers a push. The reviewer reads the checks itself.
+ *                                 A block that can't be read withholds it for that run (a pr-watch: line on
+ *                                 stderr) and reports it on the next run that reads the block.
  *
  * Multiple signals are space-separated on one line. With --idle-after <n>, a run that is the n-th or
  * later in a row to bring nothing new (no state change, the same signals as the run before) adds a
@@ -44,7 +51,9 @@
  * REVIEW:<n> takes precedence over REVIEW_COMMENTS:<n> for the same PR.
  *
  * State persisted to ~/.agent-loop/state/<owner>-<repo>-pr-state.json across sessions.
- * State format: { [prNumber]: { sha: string, lastComment: number | null, lastReviewComment: number | undefined } }
+ * State format: { [prNumber]: { sha: string, lastComment: number | null, lastReviewComment: number | undefined,
+ *   ci: { [check]: state } | undefined } }
+ *   ci                — the head's check states at the last run (CI_DONE)
  *   lastComment       — cursor for issues/{n}/comments (timeline comments)
  *   lastReviewComment — cursor for pulls/{n}/comments (inline diff review comments)
  *
@@ -59,6 +68,7 @@ import { execSync } from 'child_process'
 import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
+import { blockValue, fetchAgents } from './lib/block.mjs'
 
 const USAGE =
   'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
@@ -135,7 +145,40 @@ function holderOf(gh, number) {
   )
 }
 
-function pass({ gh, save }) {
+// The default branch's AGENTS.md text, or null when it can't be read. Kept once read: the block
+// changes rarely, and a waiter would otherwise fetch it every interval.
+let agentsText
+function readAgents(gh, dry) {
+  if (agentsText !== undefined) return agentsText
+  try {
+    agentsText = fetchAgents(gh, repo)
+  } catch (e) {
+    if (!dry) process.stderr.write(`pr-watch: could not read the Agent loop block (CI_DONE withheld): ${e.message}\n`)
+    return null
+  }
+  return agentsText
+}
+
+// The head's checks as { key: state }: every commit status by context and every check run by
+// workflow and name, from the PR list's statusCheckRollup. A check run that isn't completed, and a
+// status that is PENDING or EXPECTED, is PENDING; any other state is final. Two entries under one
+// key (the same job name twice in a workflow) give their states sorted and joined.
+function ciStates(rollup) {
+  const byKey = {}
+  for (const c of rollup ?? []) {
+    const run = c.__typename === 'CheckRun'
+    const key = run ? `check:${c.workflowName ?? ''}/${c.name}` : `status:${c.context}`
+    const s = run ? (c.status === 'COMPLETED' ? c.conclusion || 'COMPLETED' : 'PENDING') : c.state === 'EXPECTED' ? 'PENDING' : c.state || 'PENDING'
+    ;(byKey[key] ??= []).push(s)
+  }
+  return Object.fromEntries(Object.entries(byKey).map(([k, v]) => [k, v.sort().join(',')]))
+}
+const isFinal = (s) => !s.split(',').includes('PENDING')
+
+function pass({ gh, save, dry }) {
+  // review-waits-for-ci: on → CI_DONE (the header). null: the block couldn't be read this run.
+  const agents = readAgents(gh, dry)
+  const waitsForCi = agents === null ? null : blockValue(agents, 'review-waits-for-ci')?.toLowerCase() === 'on'
   let state = {}
   try {
     state = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
@@ -151,14 +194,15 @@ function pass({ gh, save }) {
   }
 
   const prs = JSON.parse(
-    gh(`gh pr list --repo ${repo} --json number,headRefOid,mergeable,labels --limit 50`)
+    gh(`gh pr list --repo ${repo} --json number,headRefOid,mergeable,labels,statusCheckRollup --limit 50`)
   )
 
   const toReview = []
   const mergeConflicts = []
   const reviewComments = []
+  const ciDone = []
 
-  for (const { number, headRefOid, mergeable, labels } of prs) {
+  for (const { number, headRefOid, mergeable, labels, statusCheckRollup } of prs) {
     if (skip.has(number)) {
       state[number] = { sha: headRefOid, lastComment: state[number]?.lastComment ?? null }
       continue
@@ -259,6 +303,23 @@ function pass({ gh, save }) {
         }
       }
     }
+
+    // CI_DONE: a check on the head reached a final state since the last run. A new head, a PR seen
+    // for the first time and a state from before this signal existed are recorded silently: REVIEW
+    // covers a push. A standing REVIEW (no reviewer post yet) does not suppress it: a first review
+    // held for CI is the case it exists for. Only final states are stored, so a check that appears
+    // or stays pending changes no state (a state change wakes a waiter and resets the idle count),
+    // while a re-run drops its key and its next finish counts again. With the key off nothing is
+    // stored, so the state is what it was before this signal existed, and turning the key on seeds
+    // silently: only what finishes after is reported. Left as it was when the block couldn't be
+    // read, so the next run still reports it; a new head is seeded even then.
+    const ci = Object.fromEntries(Object.entries(ciStates(statusCheckRollup)).filter(([, s]) => isFinal(s)))
+    if (waitsForCi === false) delete entry.ci
+    else if (shaChanged || entry.ci === undefined) entry.ci = ci
+    else if (waitsForCi) {
+      if (Object.entries(ci).some(([k, s]) => entry.ci[k] !== s)) ciDone.push(number)
+      entry.ci = ci
+    }
   }
 
   // PRs the script was tracking that are no longer open (merged or closed): say so once, then forget
@@ -279,6 +340,7 @@ function pass({ gh, save }) {
     ...mergeConflicts.map((n) => `MERGE_CONFLICT:${n}`),
     ...toReview.map((n) => `REVIEW:${n}`),
     ...reviewComments.map((n) => `REVIEW_COMMENTS:${n}`),
+    ...ciDone.map((n) => `CI_DONE:${n}`),
   ]
 
   return signals.length === 0 ? `NONE ${new Date().toISOString()}\n` : signals.join(' ') + '\n'

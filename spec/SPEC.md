@@ -52,6 +52,7 @@ is the project's conventions, which the agents follow.
 | `gate` | no | — | the command that stands in for CI when a PR has none (no checks reported, or every check skipped), for a project that can turn CI off: the executor runs it before each push and the reviewer on the head before an LGTM, each quoting its last line, and `MERGE_READY` then requires the reviewer's quote (Merge policy). It may be the same command as `quality-gates`. A local runner can run it for them ("Local CI runner") |
 | `local-ci` | no | — | the context a local runner (`local-ci.mjs`) posts the gate's result under, such as `local-ci`: the runner gates every head, so the executor never runs the gate before opening a PR, and a new head with no checks is waiting for CI, not without it, until the runner's check appears or the poll's window passes (`NO_LOCAL_CI`; "Local CI runner"). Added later in 0.2 |
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |
+| `review-waits-for-ci` | no | `off` | `on`: the reviewer holds an LGTM while a check on the head is pending, and `pr-watch` wakes it when one finishes (`CI_DONE:<n>`), for a project whose operator merges on the LGTM itself. `off`: the reviewer notes a pending check in the LGTM line, as before. Added later in 0.2, additive |
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
 | `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status) |
 | `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
@@ -209,6 +210,7 @@ waiter: see "Waiting for events" below.)
 | `MERGE_CONFLICT:<n>` | PR #n has new commits but conflicts with base; or (standing) it carries `needs-operator-label` and conflicts with base, whatever its head, repeated every run while both hold |
 | `REVIEW_COMMENTS:<n>` | PR #n has new non-reviewer comments (timeline or inline) since last check |
 | `CLOSED:<n>` | PR #n, which the script was tracking, is no longer open (merged or closed); emitted once |
+| `CI_DONE:<n>` | Only with `review-waits-for-ci: on` (read from the block on the default branch): a check on PR #n's head, any commit status or check run, reached a final state (anything but pending, queued, in progress or expected) since the last run. Once per finish: a check re-run on the same head that finishes again gives it again. A head first seen in a run (a push, a new PR) records its checks silently, since `REVIEW` covers it; a standing `REVIEW:<n>` does not hide it. A block that can't be read withholds it for that run, with a `pr-watch:` line on stderr, and the next run that reads the block reports it |
 
 Multiple signals space-separated on one line. `REVIEW:<n>` subsumes `REVIEW_COMMENTS:<n>` for the
 same PR. On first encounter of a PR with a `CHANGES_REQUESTED` formal review the signal is
@@ -242,9 +244,10 @@ lands between that re-read and the post is still reported.
   verify code findings with evidence the reviewer produced (probes, adversarial inputs); post one
   comment: numbered findings, or `[reviewer] LGTM` (with a "Before you merge" note for anything
   only the operator can check by hand), or a standalone `[reviewer] Question` when a decision is
-  needed first. The reviewer does not wait for CI: nothing re-triggers it when a check finishes,
-  and the executor's poll gates `MERGE_READY` on CI. A red check caused by the PR is a
-  finding; a pending check is noted in the LGTM line. With `gate` set and no CI on the PR, the
+  needed first. By default the reviewer does not wait for CI: the executor's poll gates
+  `MERGE_READY` on CI. A red check caused by the PR is a finding; a pending check is noted in the
+  LGTM line. With `review-waits-for-ci: on` the reviewer holds instead: a review with no findings
+  on a head with a check still pending posts nothing, and `CI_DONE:<n>` brings it back. With `gate` set and no CI on the PR, the
   reviewer runs the gate on the head (a clean checkout of it) before an LGTM: a failure is a
   finding, and a pass goes into the LGTM as the line `Gate on <short sha>: <the gate's last
   line>`.
@@ -253,6 +256,14 @@ lands between that re-read and the post is still reported.
   follow up on the executor's or operator's replies: `LGTM`, a further finding, or a clarification,
   and only if it says something new. Any LGTM with `gate` set and no CI on the PR, a follow-up
   one included, runs the gate on the head first and carries its `Gate on` line.
+- `CI_DONE:<n>` (only with `review-waits-for-ci: on`) — read the head's checks. One still pending →
+  post nothing. A red check caused by the PR → findings. All green (every check passing or
+  skipped) and no `[reviewer]` verdict of its own on this head yet → the LGTM, when this session
+  reviewed this head with no findings and held it; otherwise (it never reviewed this head, or
+  can't tell, after a restart) a full review as for `REVIEW:<n>`, never an LGTM from nothing.
+  Anything else (a verdict already posted on this head, a red check the PR didn't cause) → post
+  nothing. With the key on, a standing `REVIEW:<n>` for a head the reviewer reviewed clean and is
+  holding is nothing new.
 - Immediately before posting, re-read the thread and confirm the head has not moved.
 - The reviewer does not relay CI status or echo operator comments; the executor receives both
   directly.
@@ -1055,4 +1066,7 @@ ignores it and runs the gate as before. Later in 0.2: `pr-poll` reads `qa-gate`,
 whether or not the caller passes the flags (a caller that passes them sees no change), and
 `--local-ci-window` no longer needs `--local-ci`. `claims.mjs` gives the executor's resume its
 claim check as one line (`CLAIM_HELD`, `CLAIM_LOST <clone>`, `CLAIM_NONE`, `CLAIM_RELEASED`,
-`CLAIM_CLOSED`, `CLAIM_BLOCKED`); the claim protocol itself is unchanged.
+`CLAIM_CLOSED`, `CLAIM_BLOCKED`); the claim protocol itself is unchanged. Later in 0.2, additive:
+the `review-waits-for-ci` key and `pr-watch`'s `CI_DONE:<n>` signal; without the key `pr-watch`
+prints what it did before, and a reviewer prompt that predates the key never holds an LGTM, so it
+has nothing to be woken for.

@@ -88,7 +88,7 @@ Three scripts emit signals. Agents handle signals and post prefixed comments. Lo
 
 ```
 pr-poll.mjs   (executor)  →  NEW_COMMENT, NEW_INLINE_COMMENT, NEW_REVIEW_SUBMISSION, CI_FAILING, MERGE_CONFLICT, MERGE_READY, MERGED, NONE
-pr-watch.mjs  (reviewer)  →  REVIEW:<n>, REVIEW_COMMENTS:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NONE
+pr-watch.mjs  (reviewer)  →  REVIEW:<n>, REVIEW_COMMENTS:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, CI_DONE:<n>, NONE
 pr-qa.mjs     (QA)        →  QA_READY:<n>, MERGE_CONFLICT:<n>, CLOSED:<n>, NONE
 ```
 
@@ -153,7 +153,9 @@ models: executor=opus, reviewer=opus/high
 second `⚠` line says so when they differ from that role's entry here (a role without an entry
 gets no `⚠` line). It never stops a loop. `gate: <command>` is optional too, for a project that
 can turn CI off: on a PR with no CI, the executor runs it before each push and the reviewer on the
-head before an LGTM (spec: `gate`).
+head before an LGTM (spec: `gate`). `review-waits-for-ci: on` is for a project whose operator
+merges on the reviewer's LGTM itself: the reviewer then holds its LGTM until CI is green, and is
+woken when a check finishes (spec: `review-waits-for-ci`).
 
 **Local CI.** With a `gate`, you can run it once per head instead, outside the agents. Give it a
 clone of its own (no setup, no role) and leave this running in a terminal or as a login item:
