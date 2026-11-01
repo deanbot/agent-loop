@@ -66,6 +66,9 @@
  * <context> appears on one of them, which makes it CI again and the next head unmarked gets a window.
  * --local-ci-window applies to a context from either the flag or the block.
  *
+ * Every [executor], [reviewer] and [qa] comment counts only from a trusted author (#148): `trusted-authors`,
+ * else `allow-author-associations`, in the block on the default branch. Anyone else's is dropped as if
+ * it weren't there (no verdict, finding or revocation, and no operator direction either).
  * A role's verdict is its NEWEST [role] comment posted after the last commit: a later finding revokes
  * an earlier LGTM/PASS without a push. Reviewer comment kinds by prefix: "[reviewer] LGTM" (verdict),
  * "[reviewer] Question" (for the operator; not actionable for the executor), anything else is a
@@ -86,7 +89,7 @@ import { readFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
-import { blockValue, fetchAgents } from './lib/block.mjs'
+import { blockValue, fetchAgents, trustTest, ROLE_PREFIX, REPO_NAME } from './lib/block.mjs'
 
 const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--local-ci <context>] [--local-ci-window <secs>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
@@ -104,6 +107,7 @@ const requireQaFlag = flag('--require-qa')
 const requireGateFlag = flag('--require-gate')
 
 if (!repo || !prNumber) usageError(USAGE)
+if (!REPO_NAME.test(repo)) usageError(USAGE, `--repo: expected owner/repo, got "${repo}"`)
 if (!/^\d+$/.test(prNumber)) usageError(USAGE, `--pr: expected a PR number, got "${prNumber}"`)
 const localCiFlag = arg('--local-ci')
 if (flag('--local-ci') && (!localCiFlag || localCiFlag.startsWith('--'))) usageError(USAGE, '--local-ci: expected the check\'s context')
@@ -174,11 +178,19 @@ function pass({ gh, save, dry, mark }) {
   // Fetch all three signal sources via REST API
   // A reviewer's "[reviewer] Reviewing (<clone>)" claim (several reviewers, pr-watch.mjs) is neither a
   // verdict nor a finding: nothing for the executor, so it is dropped before anything reads the thread.
+  // A role's prefix counts only from a trusted author (#148): anyone who can comment can type
+  // "[reviewer] LGTM". A role-prefixed comment from anyone else is dropped here, before anything reads
+  // the thread: no verdict, no finding, no revocation, no "answered", and no operator direction
+  // either (an untrusted login is not the operator). With the block unreadable nobody is trusted,
+  // so every role comment waits for a run that can read it (MERGE_READY is withheld then anyway).
+  // Verdicts and live findings are read fresh each run, so a dropped one counts again then.
+  const trusted = agents === null ? () => false : trustTest(agents)
+  const fromTrusted = (c) => !ROLE_PREFIX.test(c.body ?? '') || trusted(c)
   const issueComments = ghApiAll(gh, `repos/${repo}/issues/${prNumber}/comments`).filter(
-    (c) => !/^\[reviewer\] Reviewing \(/.test(c.body ?? '')
+    (c) => !/^\[reviewer\] Reviewing \(/.test(c.body ?? '') && fromTrusted(c)
   )
   const reviewSubmissions = ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/reviews`)
-  const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/comments`)
+  const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/comments`).filter(fromTrusted)
 
   // CI checks. bucket is gh's normalised status: pass | fail | pending | skipping | cancel.
   // `gh pr checks` exits non-zero with "no checks reported" when the PR has none — that is "no CI

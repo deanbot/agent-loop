@@ -16,7 +16,8 @@ const REPO = 'acme/widgets'
 const T = (iso) => iso
 const user = (login) => ({ login })
 let nextId = 100
-const comment = (body, created_at, login = 'acme') => ({ id: nextId++, body, created_at, user: user(login) })
+// The repository's owner by default: with no trusted-authors list, OWNER is trusted (#134, #148).
+const comment = (body, created_at, login = 'acme', association = 'OWNER') => ({ id: nextId++, body, created_at, user: user(login), author_association: association })
 const commit = (date) => ({ commit: { committer: { date } } })
 
 const BASE = {
@@ -948,7 +949,7 @@ const holdsLock = (ctx, w, state) => until(() => lockPid(ctx, state) === w.child
   const blind = spawnSync('node', [path.join(scripts, 'pr-watch.mjs'), ...watchArgs()], { env: ctx.env, encoding: 'utf8' })
   const seen = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
   check('watch CI_DONE: an unreadable block withholds it (NONE, a pr-watch: line on stderr); the next run that reads the block → CI_DONE:7',
-    /^NONE /.test(blind.stdout) && /^pr-watch: could not read the Agent loop block \(CI_DONE withheld\): HTTP 502/.test(blind.stderr) && line(seen) === 'CI_DONE:7',
+    /^NONE /.test(blind.stdout) && /^pr-watch: could not read the Agent loop block \(signals withheld\): HTTP 502/.test(blind.stderr) && line(seen) === 'CI_DONE:7',
     `${blind.stdout}${blind.stderr}|${seen}`)
   rmSync(ctx.home, { recursive: true, force: true })
 

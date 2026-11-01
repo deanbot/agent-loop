@@ -57,5 +57,9 @@ export function trustTest(agents) {
   return (c) => associations.includes(String(c?.author_association ?? '').toUpperCase())
 }
 
+// A comment that speaks as one of the loop's roles. Its prefix counts only from a trusted author
+// (#148): a role-prefixed comment from anyone else is no agent's and no operator's.
+export const ROLE_PREFIX = /^\[(executor|reviewer|qa)\]/
+
 // owner/repo in GitHub's own name characters: fetchAgents puts it on a gh command line.
 export const REPO_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
