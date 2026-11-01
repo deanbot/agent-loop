@@ -256,10 +256,23 @@ number, an issue number with a PR, `RESUME`, and step 4's resume. In order:
 3. If #<N> now carries no `<in-progress-label>` (it was parked, or released), claim it before
    any work, so one PR never gets two executors: the author check in
    [reference/implement.md](reference/implement.md) §1 (a claim comment is text anyone can post),
-   then steps 1–4 of the claim there. With the label on, do not re-claim. Turned down or lost →
-   after a pick (`RESUME`, `ISSUE`), add #<N> to your skip list and run the script again; when
-   `$ARGUMENTS` named it, stop and say `#<N> is claimed by <the winning clone>: PR #<PR> stays
-   with it.`
+   then steps 1–4 of the claim there. **With the label on, check whose it is** before step 4 and
+   before any work, never from the label alone: `node ${CLAUDE_PLUGIN_ROOT}/scripts/claims.mjs
+   --repo <repo> --issue <N> --clone <clone> --in-progress-label <in-progress-label>
+   --blocked-label <blocked-label>` (`<clone>` is the base name of your working directory).
+   - `CLAIM_HELD`, or `CLAIM_NONE` (claimed before claim comments existed) when `$ARGUMENTS`
+     names #<N>, by its own number or by this PR → it is yours: go on, with no re-claim.
+   - `CLAIM_LOST <clone>`, or `CLAIM_NONE` when `$ARGUMENTS` doesn't name it → another executor
+     holds it, and `<clone>` is the winning clone: lost, as below.
+   - `CLAIM_RELEASED` (the label went meanwhile) → claim it as above.
+   - `CLAIM_BLOCKED` or `CLAIM_CLOSED` → go on: step 2 removed a park's labels, and the loop
+     handles a closed issue (`MERGED`).
+   - A failed run (exit 2, a `claims:` line) decides nothing: **stop** and say `Could not check
+     the claim on #<N>: <the claims: line>. Restart when gh works.`
+
+   Turned down or lost → after a pick (`RESUME`, `ISSUE`), add #<N> to your skip list and run
+   the script again; when `$ARGUMENTS` named it, **stop** and say `#<N> is claimed by <the
+   winning clone>: PR #<PR> stays with it.` Never switch to its branch.
 4. Be on the PR's branch: `gh pr view <PR> --repo <repo> --json headRefName`. Not on it → with a
    clean tree, `git fetch` when the branch is not in this clone, then `git switch <branch>`; with
    uncommitted changes, **stop** and say `<current branch> has uncommitted changes, and PR #<PR>
