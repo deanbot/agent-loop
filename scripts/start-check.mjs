@@ -10,6 +10,10 @@
  *                                [--effort <effort>] [--inbox <folder>] [--outbox <folder>]
  *
  * What it does, in order:
+ *   0. Executor only: reads the branch and the working tree (`git branch --show-current`, `git
+ *      status --porcelain`), before step 1 writes anything: `BRANCH <name> CLEAN|DIRTY`,
+ *      `BRANCH_DETACHED CLEAN|DIRTY` (no branch checked out), or `BRANCH_UNKNOWN` and a ⚠ line when
+ *      git fails. The start decides where the clone is from this line alone (#142).
  *   1. Takes the clone for the session (`session.mjs --start <id>`) and prints that script's line
  *      (NEW, MINE, TOOK_OVER <id> <secs>), or `SESSION_NONE` when no usable id was given. A
  *      takeover and a missing id each add a ⚠ line.
@@ -20,11 +24,18 @@
  *   3. The mailbox, from whichever of --inbox and --outbox were given: `MAILBOX <inbox>` (folders
  *      as given, ~ expanded) when both are and the pair is acceptable, else `NO_MAILBOX`. One folder
  *      without the other, a refused pair and an inbox that does not exist yet each add a ⚠ line.
- *   4. With a mailbox and at least one ⚠ line, the ⚠ lines go to the outbox as one message to the
+ *   4. Executor only: clears stale claims. It lists the closed issues that still carry the block's
+ *      `in-progress-label` (default `in-progress`) in its `repo`, and removes the label from each,
+ *      one `gh issue edit` per issue: `CLEARED <n> #a #b …` (the ones cleared), `CLEARED_NONE`
+ *      (none to clear), or `CLEARED_UNKNOWN` (nothing cleared: no repo in the block, or gh
+ *      failed). Each gh call times out after 10 s, all of them together after 30 s; a failure or
+ *      a timeout adds a ⚠ line and never stops the start.
+ *   5. With a mailbox and at least one ⚠ line, the ⚠ lines go to the outbox as one message to the
  *      operator as well, for a deployment where nobody watches the terminal. A failed send adds a
  *      ⚠ line of its own.
- * Lines: the session line, then the mailbox line, then the ⚠ lines. Exit 0 whatever it found (a
- * start carries on through every warning); exit 1 on a usage error.
+ * Lines: the session line, the mailbox line, for the executor the branch line and the clear's
+ * line, then the ⚠ lines. Exit 0 whatever it found (a start carries on through every warning);
+ * exit 1 on a usage error.
  *
  * Text that comes from a file in the clone (the models entry) is printed with control characters
  * removed and cut to 80 characters: on a PR's branch the file is the PR's.
@@ -78,6 +89,25 @@ const outbox = arg('--outbox')
 
 const clean = (s) => [...String(s).replace(/[\u0000-\u001f\u007f-\u009f]/g, '')].slice(0, 80).join('')
 const warnings = []
+
+// 0. The executor's branch and tree, read by this script so the start never decides them from a
+// status it remembers or a context snapshot (#142). Read before session.mjs writes
+// .agent-loop/session, which a clone without the ignore would otherwise show as a change.
+const LOCAL_TIMEOUT_MS = 10000
+let branchLine = null
+let branchWarning = null
+if (role === 'executor') {
+  const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: LOCAL_TIMEOUT_MS })
+  try {
+    const name = git('branch', '--show-current').trim()
+    const tree = git('status', '--porcelain').trim() === '' ? 'CLEAN' : 'DIRTY'
+    // A branch name holds no spaces or control characters (git refuses them); stripped anyway.
+    branchLine = name ? `BRANCH ${name.replace(/[\s\u0000-\u001f\u007f-\u009f]/g, '')} ${tree}` : `BRANCH_DETACHED ${tree}`
+  } catch (e) {
+    branchLine = 'BRANCH_UNKNOWN'
+    branchWarning = `⚠ Could not read the branch or the working tree: ${clean(String(e?.stderr || e?.message).trim().split('\n')[0])}`
+  }
+}
 
 // 1. The session.
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -136,7 +166,56 @@ if ((inbox === null) !== (outbox === null)) {
   }
 }
 
-// 4. The outbox copy.
+// 4. The executor's stale claims: closed issues that still carry the in-progress label (a loop
+// stopped after MERGE_READY never sees the merge that would remove it). A closed issue has no claim
+// to protect, so this is safe while other executors run. It is the script's only network call: each
+// gh call is bounded, all of them together too, and a failure warns and never stops the start.
+let clearedLine = null
+if (role === 'executor') {
+  if (branchWarning) warnings.push(branchWarning)
+  const callMs = Number(process.env.AGENT_LOOP_START_GH_TIMEOUT_MS) > 0 ? Number(process.env.AGENT_LOOP_START_GH_TIMEOUT_MS) : 10000
+  const deadline = Date.now() + 3 * callMs
+  const ghFailure = (e) => (e?.code === 'ETIMEDOUT' || e?.signal ? `gh timed out after ${callMs / 1000} s` : clean(String(e?.stderr || e?.message).trim().split('\n')[0]))
+  const gh = (...args) => {
+    const left = deadline - Date.now()
+    if (left <= 0) throw Object.assign(new Error('out of time'), { code: 'ETIMEDOUT' })
+    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: Math.min(callMs, left) })
+  }
+  const repo = blockValue(agents, 'repo')
+  const label = blockValue(agents, 'in-progress-label') ?? 'in-progress'
+  if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+    clearedLine = 'CLEARED_UNKNOWN'
+    warnings.push('⚠ Stale claims not cleared: the ## Agent loop block names no repo (owner/repo).')
+  } else {
+    let stale = null
+    try {
+      stale = JSON.parse(gh('issue', 'list', '--repo', repo, '--state', 'closed', '--label', label, '--limit', '100', '--json', 'number') || '[]')
+        .map((i) => i?.number)
+        .filter((n) => Number.isInteger(n) && n > 0)
+    } catch (e) {
+      clearedLine = 'CLEARED_UNKNOWN'
+      warnings.push(`⚠ Stale claims not cleared: ${e instanceof SyntaxError ? 'gh printed no list' : ghFailure(e)}.`)
+    }
+    if (stale) {
+      const cleared = []
+      const failed = []
+      let reason = null
+      for (const n of stale) {
+        try {
+          gh('issue', 'edit', String(n), '--repo', repo, '--remove-label', label)
+          cleared.push(n)
+        } catch (e) {
+          failed.push(n)
+          reason ??= ghFailure(e)
+        }
+      }
+      clearedLine = cleared.length ? `CLEARED ${cleared.length} ${cleared.map((n) => `#${n}`).join(' ')}` : stale.length ? 'CLEARED_UNKNOWN' : 'CLEARED_NONE'
+      if (failed.length) warnings.push(`⚠ Stale claims not cleared on ${failed.map((n) => `#${n}`).join(' ')}: ${reason}.`)
+    }
+  }
+}
+
+// 5. The outbox copy.
 if (outboxDir && warnings.length > 0) {
   try {
     sendMessage(outboxDir, {
@@ -151,4 +230,4 @@ if (outboxDir && warnings.length > 0) {
   }
 }
 
-process.stdout.write([sessionLine, mailboxLine, ...warnings].join('\n') + '\n')
+process.stdout.write([sessionLine, mailboxLine, ...(branchLine ? [branchLine, clearedLine] : []), ...warnings].join('\n') + '\n')

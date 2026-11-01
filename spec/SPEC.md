@@ -371,7 +371,9 @@ whose named dependencies (`Depends on #a, #b`) are closed, after the author chec
 the claim: an issue carrying `in-progress-label` belongs to another executor even when no PR
 exists. On start the executor removes `in-progress-label` from closed issues: it normally removes
 the label on `MERGED`, which a loop stopped after `MERGE_READY` never sees, and a closed issue has
-no claim to protect.
+no claim to protect. `scripts/start-check.mjs --role executor` does it (`CLEARED …`), with bounded
+`gh` calls whose failure warns and never stops the start, and also prints where the clone is
+(`BRANCH <name> CLEAN|DIRTY`), which the start's resume check decides from (#142).
 
 **Claiming** uses a claim comment, so two executors that pick at the same moment cannot both win
 (see "Claim comments" below). The winner then adds `in-progress-label`; the loser picks next.

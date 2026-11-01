@@ -36,24 +36,32 @@ seconds, before the gate), `quality-gates`, `gate` (optional), `qa-gate`
 
 **First line you print, on every start** (including one that resumes work or stops at a check),
 before any other output: `Executor · <model> · <effort>`, as far as you know them, so a loop that
-came up on the wrong model is seen at once. If the block has `models:` (comma-separated
-`role=model[/effort]`, e.g. `models: executor=opus, reviewer=opus/high`) with an `executor` entry,
-and that entry differs from this session (its model word is not in your model's name, or it names
-an effort and yours differs), add `⚠ AGENTS.md expects <entry> for the executor; this session runs
-<model>.` and carry on: a mismatch never stops the loop. No `models:`, no `executor` entry, or an
-entry that matches → print nothing more. **The line after the model line names the track:**
+came up on the wrong model is seen at once. **The line after the model line names the track:**
 `Track: <milestone>` when the input names `--milestone "<milestone>"`, else `Track: all
-milestones`, so a start without the intended filter is seen at once (the `⚠` line, when there is
-one, comes after it).
+milestones`, so a start without the intended filter is seen at once.
 
-**Clear stale claims on start.** `gh issue list --repo <repo> --state closed --label
-<in-progress-label> --limit 100 --json number --jq '.[].number'`, then `gh issue edit <n> --repo
-<repo> --remove-label <in-progress-label>` for each number, one command per issue. The label is
-removed on `MERGED`, but a loop stopped after `MERGE_READY` never sees the merge. A closed issue
-has no claim to protect, so this is safe while other executors run, and safe to repeat.
+**The start check**, every start, before touching anything in the clone, one command: `node
+scripts/start-check.mjs --role executor --model "<model>"`, with `<model>` as in your first line.
+It checks the block's `models:` entry against this session, reads where the clone is, and clears
+stale claims. Its lines, in order:
+- `SESSION_NONE` (these prompts know no session id) and `NO_MAILBOX`: carry on.
+- `BRANCH <name> CLEAN|DIRTY`, `BRANCH_DETACHED CLEAN|DIRTY` or `BRANCH_UNKNOWN`: where this clone
+  is, read by the script. The resume check below decides from it.
+- `CLEARED <n> #a #b …`, `CLEARED_NONE` or `CLEARED_UNKNOWN`: the stale-claim clear, run by the
+  script (closed issues that still carried `<in-progress-label>`, which a loop stopped after
+  `MERGE_READY` leaves behind). Nothing for you to do whichever it is.
+- `⚠ …` lines (no session id, the wrong model, git or gh failing): repeat each one in your reply,
+  after the Track line. With no hook to show them, your text is the only copy. None of them stops
+  the loop.
 
-**Resume your own issue on start, before touching `main`.** `git branch --show-current` and `git
-status --porcelain`. On `main` with a clean tree, carry on. **No claim check runs on a clean
+A usage error (exit 1) → stop and say `start-check refused: <its first stderr line>`.
+
+**Resume your own issue on start, before touching `main`.** The start check's `BRANCH` line says
+where this clone is, and nothing else does: never a git status your tool attached at the session's
+start (a snapshot, not a check), and never a branch or status you remember. Below, a clean tree is
+the line's `CLEAN` and uncommitted changes are its `DIRTY`; `BRANCH_DETACHED` is a branch whose
+name carries no issue number. `BRANCH_UNKNOWN` → stop and say `Could not read this clone's branch:
+<the ⚠ line>. Restart when git works.` `BRANCH main CLEAN` → carry on. **No claim check runs on a clean
 `main`:** an issue number in the input goes to the issue path below, where the open-PR lookup
 (`pr-for-issue.mjs`) runs before any claim. Otherwise **the branch name comes
 first:** on a branch whose name carries an issue number (`issue-<N>-…` or the project's
