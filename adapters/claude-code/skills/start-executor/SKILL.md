@@ -70,9 +70,11 @@ bare start that ran before the intended command) is then seen at once.
 
    A usage error (exit 1) → **stop** and say `start-check refused: <its first stderr line>`.
 4. **See where this clone is before touching `main`.** `git branch --show-current` and `git
-   status --porcelain`. On `main` with a clean tree → pull (`pull.mjs`, under "Rules that hold";
-   an issue you hold that
-   `$ARGUMENTS` names is resumed later, from reference/implement.md §1). Otherwise (another branch, or
+   status --porcelain`. On `main` with a clean tree → pull (`pull.mjs`, under "Rules that hold"),
+   then clear stale claims (below). **No claim check runs on a clean `main`:** an issue number in
+   `$ARGUMENTS` goes to "Decide what you are working on", where the open-PR lookup
+   (`pr-for-issue.mjs`) runs before any claim, and an issue you hold is resumed from
+   reference/implement.md §1. Otherwise (another branch, or
    uncommitted changes anywhere) you may have stopped mid-implementation, for example for a plugin
    update. **The branch name comes first:** on a branch whose name carries an issue number
    (`issue-<N>-…`, or the project's issue-branch convention), that is `<N>`, and `$ARGUMENTS`
@@ -87,8 +89,8 @@ bare start that ran before the intended command) is then seen at once.
    `pick-next.mjs` reads it); no `Closes #N` → there is no `<N>`. It fails with `Could not
    resolve to a PullRequest` → `<N>` is the number. Any other failure (network, auth) → **stop**
    and say `Could not tell whether <n> is a PR: <the error>. Restart when gh works.`
-   The claim check below never runs on a PR's number. With a `<N>`, run it before deciding
-   anything, every start: `node ${CLAUDE_PLUGIN_ROOT}/scripts/claims.mjs --repo <repo> --issue <N>
+   The claim check below never runs on a PR's number. Off a clean `main` (another branch, or
+   uncommitted changes), with a `<N>`, run it before deciding anything: `node ${CLAUDE_PLUGIN_ROOT}/scripts/claims.mjs --repo <repo> --issue <N>
    --clone <clone> --in-progress-label <in-progress-label> --blocked-label <blocked-label>`
    (`<clone>` is the base name of your working directory). Whether you hold #<N> is its
    line alone, never the labels you remember; the branch and the tree decide only how you resume.
@@ -100,11 +102,13 @@ bare start that ran before the intended command) is then seen at once.
      On its branch (`issue-<N>-…`) → **Resume** (below),
      with no `git checkout main` and no `git pull`. On another branch (including `main` with
      uncommitted changes): with a clean tree, find its branch (`git branch --list
-     "issue-<N>-*"`), `git switch <branch>` and resume; with uncommitted changes, **stop** and say
+     "issue-<N>-*"`), `git switch <branch>` and resume; no such branch in this clone → `git
+     checkout main`, pull, and go on to "Decide what you are working on" with `<N>`, so the
+     open-PR lookup runs before anything is built; with uncommitted changes, **stop** and say
      `<branch> has uncommitted changes, and #<N>'s work is on <its branch>: commit, stash or
      discard them, then restart.` Never resume on a branch that is not the issue's.
-   - **`CLAIM_RELEASED`** (open, without `<in-progress-label>` or `<blocked-label>`: you released
-     it, say on a "stop") → read [reference/implement.md](reference/implement.md) §1 now, then
+   - **`CLAIM_RELEASED`** (open, without `<in-progress-label>` or `<blocked-label>`: nobody holds
+     it, released on a stop or never claimed) → read [reference/implement.md](reference/implement.md) §1 now, then
      claim it again as it says. You win → you hold it: go on as in the first
      bullet. You lose → as the next bullet.
    - **Anything else** (`CLAIM_LOST <clone>`: another clone holds it; `CLAIM_CLOSED`,
