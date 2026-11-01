@@ -54,8 +54,8 @@ is the project's conventions, which the agents follow.
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |
 | `review-waits-for-ci` | no | `off` | `on`: the reviewer holds an LGTM while a check on the head is pending, and `pr-watch` wakes it when one finishes (`CI_DONE:<n>`), for a project whose operator merges on the LGTM itself. `off`: the reviewer notes a pending check in the LGTM line, as before. Added later in 0.2, additive |
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
-| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status) |
-| `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent |
+| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status), and whose `[executor] Claimed by` comments count as claims (case-insensitive; #134). **Every executor's own login must be on it**, or its claims never count |
+| `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent or empty, claims included |
 | `audit-floor` | no | — | control ids ("Auditor") the auditor never recommends narrowing or dropping: security and privacy checks, the operator's merge, a named gate. A finding about one reports its cost only |
 | `audit-report` | no | `issue` | where the auditor's report goes: `issue` (a new issue per run, labelled `auditor-report`) or `none` (printed only; the operator posts it) |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
@@ -503,7 +503,12 @@ label alone: two agents can both read "no label" and both add it.
    moves on, and never touches the marker: a label is not per agent, so a loser removing it would
    strip the winner's claim.
 
-Executor: `[executor] Claimed by <clone>` on the issue; the marker is `in-progress-label`. A claim
+Executor: `[executor] Claimed by <clone>` on the issue; the marker is `in-progress-label`. Only a
+trusted author's claim counts (#134): its login is in `trusted-authors`, or, when that lists
+nobody, its association is in `allow-author-associations`, read from the block on the default
+branch. Anyone else's claim line is ignored as if it weren't there, by `claims.mjs`, by
+`pick-next.mjs`'s `RESUME` and by the claim step's race, so a comment cannot turn a held claim
+into a lost one. An executor whose own login isn't trusted deletes its claim and stops. A claim
 is live when it was posted no more than 10 minutes before the executor's own (GitHub's
 `created_at` on both, never the local clock). An older claim that still holds already carries the
 label, which the executor checks first; an older one that does not is from a claim since released

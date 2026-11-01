@@ -722,7 +722,7 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   check('pick: malformed --skip → usage error', /^EXIT 1/.test(badSkip), badSkip)
 
   // A parked issue's open PR comes back to the executor that held it (#78).
-  const claim = (clone, id) => ({ id, body: `[executor] Claimed by ${clone}`, created_at: '2026-01-01T10:00:00Z', user: user('acme') })
+  const claim = (clone, id, association = 'OWNER') => ({ id, body: `[executor] Claimed by ${clone}`, created_at: '2026-01-01T10:00:00Z', user: user('acme'), author_association: association })
   const parked = (over = {}) => ({
     issues: [issue(11), issue(20, { milestone: M4 }), ...(over.issues ?? [])],
     prs: [{ number: 49, body: 'Closes #200', author: user('acme') }, { number: 50, body: 'Fix.\n\nCloses #20', isCrossRepository: false, author: user('acme') }],
@@ -752,6 +752,18 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   check('pick: without --clone nothing changes → ISSUE:11', pick(parked()) === 'ISSUE:11')
   check('pick --clone: … the open PR saying "Closes #200" (no such issue) is passed over, not a failure, and #200 is not #20',
     pick(parked({ issueComments: { 20: [claim('exec-b', 1)] } }), asA) === 'ISSUE:11')
+  // #134: the PR author's claim counts only when that author is trusted (the default branch's block).
+  check('pick --clone (#134): the claim\'s author is not trusted (no list, association NONE) → no RESUME',
+    pick(parked({ issueComments: { 20: [claim('exec-a', 2, 'NONE')] } }), asA) === 'ISSUE:11')
+  check('pick --clone (#134): trusted-authors names someone else → no RESUME; naming the author → RESUME',
+    pick(parked({ agents: '## Agent loop\n\nrepo: acme/widgets\ntrusted-authors: [bob]\n' }), asA) === 'ISSUE:11' &&
+      pick(parked({ agents: '## Agent loop\n\nrepo: acme/widgets\ntrusted-authors: [Acme]\n' }), asA) === 'RESUME:20 PR:50')
+  const blindPick = run(ctx, 'pick-next.mjs', ['--repo', REPO, ...asA], parked({ agents: 'error' }))
+  check('pick --clone (#134): the block unreadable when a claim needs checking → exit 2, never a RESUME on an unread list', /^EXIT 2\n\npick-next: HTTP 502/.test(blindPick), blindPick)
+  writeFileSync(ctx.log, '')
+  const plainPick = pick(parked({ agents: 'error', issueComments: { 20: [] } }), asA)
+  check('pick --clone (#134): no claim to check → the block is not read (a pick gains no call)',
+    plainPick === 'ISSUE:11' && !readFileSync(ctx.log, 'utf8').includes('contents/AGENTS.md'), plainPick)
   const badClone = run(ctx, 'pick-next.mjs', ['--repo', REPO, '--clone', '../x'], { issues: [] })
   check('pick: a --clone that is not a clone name → usage error, exit 1', /^EXIT 1/.test(badClone), badClone)
   rmSync(ctx.home, { recursive: true, force: true })
@@ -3235,13 +3247,23 @@ const putMessage = (dir, id, extra, meta) => {
   const noJqClause = jqTexts.filter(([f, needle]) => !paragraphWith(f, needle).includes(perRow)).map(([f]) => f)
   check('loop texts: every loop\'s plain-command rule says --jq filters never end in ]], one array per row', noJqClause.length === 0, noJqClause.join('\n'))
 
-  const listing = 'gh api --paginate "repos/<repo>/issues/<N>/comments" --jq \'.[] | select((.body // "") | startswith("[executor] Claimed by ")) | "\\(.id) \\(.created_at) \\(.body)"\''
+  // #134: each line carries its author's login and association, which the trust rule needs.
+  const listing = 'gh api --paginate "repos/<repo>/issues/<N>/comments" --jq \'.[] | select((.body // "") | startswith("[executor] Claimed by ")) | "\\(.id) \\(.created_at) \\(.user.login) \\(.author_association) \\(.body)"\''
   // Counted flat (lines rewrapped) and raw: a copy may wrap at jq's whitespace, never inside the
   // "[executor] Claimed by " string, where the line break would become part of the match (#99 review).
   const count = (f) => flat(read(f)).split(listing).length - 1
   const unbroken = (f) => read(f).split('startswith("[executor] Claimed by "))').length - 1
   const cc = flat(read('claude-code/skills/start-executor/SKILL.md'))
   const listings = ['claude-code/skills/start-executor/SKILL.md', 'claude-code/skills/start-executor/reference/implement.md', 'generic/executor.md', 'kiro/skills/start-executor/SKILL.md']
+  // #134: in that race only a trusted author's claim counts, and an untrusted own claim stops.
+  const raceTrust = listings.slice(1).filter((f) => {
+    const t = flat(read(f))
+    return !t.includes('**Only a trusted author\'s claim counts** (#134)') || !t.includes('Anyone else\'s line is ignored as if it weren\'t there.') ||
+      !t.includes('is not trusted (trusted-authors or allow-author-associations in AGENTS.md), so its claims never count: add it, then restart.`') ||
+      t.indexOf('**Only a trusted author\'s claim counts**') < t.indexOf(listing) || t.indexOf('**Only a trusted author\'s claim counts**') > t.toLowerCase().indexOf('the lowest id', t.indexOf(listing))
+  })
+  check('claim race (#134): every executor\'s claim step counts only trusted authors\' claims, before the lowest id decides, and stops on an untrusted own claim',
+    raceTrust.length === 0, raceTrust.join('\n'))
   // #129: the resume's check is claims.mjs; the listing is left only in the claim step's race.
   check('loop texts: every executor lists claims only in its claim step, never wrapped inside a string',
     count('claude-code/skills/start-executor/SKILL.md') === 0 && count('claude-code/skills/start-executor/reference/implement.md') === 1 &&
@@ -3480,8 +3502,10 @@ const putMessage = (dir, id, extra, meta) => {
 // ---------------------------------------------------------------- claims.mjs, the resume claim check (#129)
 {
   const ctx = makeEnv()
-  const claimed = (clone, id, login = 'acme') => ({ id, body: `[executor] Claimed by ${clone}`, created_at: '2026-01-01T10:00:00Z', user: user(login) })
-  const held = (labels, comments, state = 'OPEN') => ({ issues: [{ number: 42, labels: labels.map((name) => ({ name })), state }], issueComments: { 42: comments } })
+  const claimed = (clone, id, login = 'acme', association = 'OWNER') =>
+    ({ id, body: `[executor] Claimed by ${clone}`, created_at: '2026-01-01T10:00:00Z', user: user(login), author_association: association })
+  const held = (labels, comments, state = 'OPEN', agents) =>
+    ({ issues: [{ number: 42, labels: labels.map((name) => ({ name })), state }], issueComments: { 42: comments }, ...(agents === undefined ? {} : { agents }) })
   const ask = (fixture, extra = []) => run(ctx, 'claims.mjs', ['--repo', REPO, '--issue', '42', '--clone', 'exec-a', ...extra], fixture).trim()
   const other = { id: 9, body: 'Looks good', created_at: '2026-01-01T09:00:00Z', user: user('acme') }
   check('claims: open, in progress, the newest claim names this clone → CLAIM_HELD',
@@ -3509,6 +3533,31 @@ const putMessage = (dir, id, extra, meta) => {
     ask(held(['in-progress'], [claimed('exec-a', 5)]), ['--in-progress-label', 'wip']) === 'CLAIM_RELEASED')
   check('claims: claims across pages are all read',
     ask({ ...held(['in-progress'], []), issueComments: undefined, comments_pages: [[claimed('exec-a', 1)], [claimed('exec-b', 2)]] }) === 'CLAIM_LOST exec-b')
+  // #134: a claim is text anyone who can comment can post; only a trusted author's counts.
+  const listBlock = (list) => `## Agent loop\n\nrepo: acme/widgets\ntrusted-authors: ${list}\n`
+  check('claims (#134): an untrusted login\'s newer claim is ignored → CLAIM_HELD stays CLAIM_HELD (no list: the association decides)',
+    ask(held(['in-progress'], [claimed('exec-a', 5), claimed('exec-b', 12, 'mallory', 'NONE')])) === 'CLAIM_HELD')
+  check('claims (#134): … only untrusted claims → CLAIM_NONE, as if they weren\'t there',
+    ask(held(['in-progress'], [claimed('exec-b', 12, 'mallory', 'CONTRIBUTOR')])) === 'CLAIM_NONE')
+  check('claims (#134): with no list, a MEMBER\'s or COLLABORATOR\'s claim counts → CLAIM_LOST <clone>',
+    ask(held(['in-progress'], [claimed('exec-a', 5), claimed('exec-b', 12, 'teammate', 'MEMBER')])) === 'CLAIM_LOST exec-b' &&
+      ask(held(['in-progress'], [claimed('exec-a', 5), claimed('exec-c', 12, 'helper', 'COLLABORATOR')])) === 'CLAIM_LOST exec-c')
+  check('claims (#134): allow-author-associations narrows the fallback (OWNER only → a MEMBER\'s claim is ignored)',
+    ask(held(['in-progress'], [claimed('exec-a', 5), claimed('exec-b', 12, 'teammate', 'MEMBER')], 'OPEN', '## Agent loop\n\nrepo: acme/widgets\nallow-author-associations: [OWNER]\n')) === 'CLAIM_HELD')
+  check('claims (#134): a trusted second account\'s claim → CLAIM_LOST <clone>, whatever its association',
+    ask(held(['in-progress'], [claimed('exec-a', 5), claimed('exec-b', 12, 'bot2', 'NONE')], 'OPEN', listBlock('[acme, "@bot2"]'))) === 'CLAIM_LOST exec-b')
+  check('claims (#134): with trusted-authors, the list alone decides: an OWNER not on it is ignored; logins match without case',
+    ask(held(['in-progress'], [claimed('exec-a', 5, 'ACME'), claimed('exec-b', 12, 'other-owner', 'OWNER')], 'OPEN', listBlock('[acme]'))) === 'CLAIM_HELD')
+  check('claims (#134): an empty trusted-authors list is no list → the association fallback',
+    ask(held(['in-progress'], [claimed('exec-a', 5), claimed('exec-b', 12, 'mallory', 'NONE')], 'OPEN', listBlock('[]'))) === 'CLAIM_HELD')
+  check('claims (#134): the clone\'s copy of AGENTS.md is never read (the fixture serves the default branch\'s)',
+    !readFileSync(path.join(scripts, 'claims.mjs'), 'utf8').includes('readFileSync'))
+  const blind = ask(held(['in-progress'], [claimed('exec-a', 5)], 'OPEN', 'error'))
+  check('claims (#134): the default branch\'s block unreadable → exit 2 with a claims: line, never a claim line', /^EXIT 2\n\nclaims: HTTP 502/.test(blind), blind)
+  writeFileSync(ctx.log, '')
+  const hostileRepo = ['acme/$(touch x)', 'acme/`id`', 'acme/w;id'].map((r) => run(ctx, 'claims.mjs', ['--repo', r, '--issue', '42', '--clone', 'exec-a'], {}))
+  check('claims (#134): a --repo outside GitHub\'s name characters → exit 1, no gh call (it reaches a shell line)',
+    hostileRepo.every((o) => o.startsWith('EXIT 1')) && readFileSync(ctx.log, 'utf8') === '', hostileRepo.join('\n'))
   const failed = ask({ fail: true })
   check('claims: a failed gh call → exit 2 with a claims: line, nothing on stdout', /^EXIT 2\n\nclaims: HTTP 502/.test(failed), failed)
   const missing = ask({ issues: [] })

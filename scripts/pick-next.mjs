@@ -15,7 +15,8 @@
  *   RESUME:<n> PR:<p>           with --clone only, before anything else: an open PR <p> whose body
  *                                says "Closes #<n>", where #<n> is open, carries neither the
  *                                in-progress nor the blocked label, is not skipped, and its newest
- *                                "[executor] Claimed by" comment by the PR's author names <clone>: an issue this
+ *                                "[executor] Claimed by" comment by the PR's author, a trusted one
+ *                                (#134: the default branch's block), names <clone>: an issue this
  *                                executor parked with a PR open and the operator has unblocked.
  *                                Lowest <n> first, whatever the milestone; never a fork's PR
  *   ISSUE:<n>                    the lowest-numbered open issue (in the milestone, when given) without
@@ -45,10 +46,11 @@
  * with nothing on stdout: the caller retries later and never picks by hand.
  */
 
-import { execFileSync } from 'child_process'
+import { execFileSync, execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import { recordFile, readPending, pendingFiles, shellWord } from './lib/rules.mjs'
+import { fetchAgents, trustTest, REPO_NAME } from './lib/block.mjs'
 
 const USAGE =
   'pick-next.mjs --repo owner/repo [--milestone <title>] [--in-progress-label <l>] [--blocked-label <l>] [--skip <n,n,...>] [--clone <clone>]'
@@ -67,7 +69,7 @@ function arg(name) {
 }
 
 const repo = arg('--repo')
-if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) usageError(repo ? `--repo: expected owner/repo, got "${repo}"` : undefined)
+if (!repo || !REPO_NAME.test(repo)) usageError(repo ? `--repo: expected owner/repo, got "${repo}"` : undefined)
 const milestone = arg('--milestone')
 const inProgress = arg('--in-progress-label') ?? 'in-progress'
 const blocked = arg('--blocked-label') ?? 'is-blocked'
@@ -127,7 +129,10 @@ const openPrs = () => (prCache ??= gh('pr', 'list', '--repo', repo, '--state', '
 // An issue this clone parked while its PR was open, unblocked since: its PR comes back to it, so
 // the review findings on it keep an owner. The claim comment is the record of whose it was. Both
 // are text others can write, so a fork's PR is never offered ("Closes #<n>" in its body), and only
-// claims posted by the PR's own author count.
+// claims posted by the PR's own author count, and only when that author is trusted (#134): the
+// block on the default branch says whom, read once, and only when a claim needs checking.
+let trusted = null
+const isTrusted = (c) => (trusted ??= trustTest(fetchAgents((cmd, opts) => execSync(cmd, { ...opts, encoding: 'utf8' }), repo)))(c)
 function resumable() {
   const closing = []
   for (const p of openPrs().filter((p) => p.isCrossRepository !== true && p.author?.login)) {
@@ -147,7 +152,7 @@ function resumable() {
     if (issue.state !== 'open' || hasLabel(issue, inProgress) || hasLabel(issue, blocked)) continue
     const pages = gh('api', '--paginate', '--slurp', `repos/${repo}/issues/${n}/comments`)
     const claims = pages.flat().filter((c) => c.user?.login === author && (c.body ?? '').startsWith('[executor] Claimed by '))
-    const newest = claims.sort((a, b) => a.id - b.id).at(-1)
+    const newest = claims.filter(isTrusted).sort((a, b) => a.id - b.id).at(-1)
     if (newest && newest.body.trim() === `[executor] Claimed by ${clone}`) return `RESUME:${n} PR:${pr}`
   }
   return null

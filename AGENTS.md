@@ -44,15 +44,19 @@ Three layers. Boundaries are strict.
   --clone <clone> [--in-progress-label <l>] [--blocked-label <l>]` prints one of `CLAIM_CLOSED`,
   `CLAIM_BLOCKED`, `CLAIM_RELEASED` (open, not in progress), `CLAIM_HELD` (the newest
   `[executor] Claimed by` comment names the clone), `CLAIM_LOST <clone>` or `CLAIM_NONE` (no claim
-  comment); exit 2 on a failed `gh` call. The resume branches on its line, so the check can't be
+  comment); exit 2 on a failed `gh` call. Only a trusted author's claim counts (#134): whom
+  `trusted-authors`, else `allow-author-associations`, names in the block on the default branch
+  (an unreadable block is exit 2). The resume branches on its line, so the check can't be
   skipped.
 - `scripts/lib/block.mjs` — reads a key from the `## Agent loop` block of an `AGENTS.md` text
-  (`pr-poll.mjs`, `pull.mjs`, `local-ci.mjs`, `start-check.mjs`).
+  (`pr-poll.mjs`, `pull.mjs`, `local-ci.mjs`, `start-check.mjs`), a list (`blockList`), whom the
+  block trusts (`trustTest`: `trusted-authors`, else `allow-author-associations`; `claims.mjs`,
+  `pick-next.mjs`), and the default branch's file (`fetchAgents`).
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
 - `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
   [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n] [--clone <clone>]`. Prints
   `RESUME:<n> PR:<p>` (with `--clone`: a PR this clone parked, unblocked since, before anything
-  else), `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE`, exits. No state
+  else; only a trusted author's claim counts, #134), `ISSUE:<n>`, `WAIT:<blocker> PR:<n|none>`, `MOVE_ON <title>` or `NONE`, exits. No state
   and no `--wait`: it lists fresh every call, so an issue filed while the executor waited is seen.
   While the clone's pending rules record holds a change (`pull.mjs`), it prints `RULES_PENDING:
   <files>: run node <scripts>/rules-ack.mjs, then pick again` instead, picks nothing and exits 0.

@@ -69,7 +69,7 @@ import { openSync, closeSync, writeFileSync, appendFileSync, readFileSync, unlin
 import { homedir } from 'os'
 import { createHash } from 'crypto'
 import path from 'path'
-import { blockLine } from './lib/block.mjs'
+import { blockList } from './lib/block.mjs'
 
 const USAGE =
   'local-ci.mjs --repo owner/repo --gate "<command>" [--context <name>] [--install "<command>" [--lockfiles a,b]] [--trusted-authors a,b] [--log-url <base>] [--head-check <secs> | --finish-superseded] [--wait [secs]]'
@@ -325,13 +325,7 @@ function trustedAuthors() {
   if (trustedArg !== null) return trustedArg.split(',').map((s) => s.trim()).filter(Boolean)
   defaultBranch ??= gh('api', `repos/${repo}`).default_branch
   git('fetch', '--quiet', 'origin', defaultBranch)
-  const agents = git('show', 'FETCH_HEAD:AGENTS.md')
-  const line = blockLine(agents, 'trusted-authors') ?? ''
-  return line
-    .replace(/^\[|\]$/g, '')
-    .split(',')
-    .map((s) => s.trim().replace(/^['"@]+|['"]+$/g, ''))
-    .filter(Boolean)
+  return blockList(git('show', 'FETCH_HEAD:AGENTS.md'), 'trusted-authors')
 }
 
 // The status under our context on a commit: its state, or null when there is none. The combined
