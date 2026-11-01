@@ -916,7 +916,7 @@ const holdsLock = (ctx, w, state) => until(() => lockPid(ctx, state) === w.child
   })()
   check('watch CI_DONE: without review-waits-for-ci: on, no CI_DONE ever → NONE, and a standing REVIEW:7 alone',
     /^NONE \S+\n$/.test(off) && offStanding === 'REVIEW:7\n', `${off}|${offStanding}`)
-  // … and turning it on later reports only what finishes after (the states were tracked meanwhile).
+  // … and turning it on later reports only what finishes after (seeded silently when it turns on).
   const turnedOn = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
   check('watch CI_DONE: … turning the key on later reports nothing that finished before', /^NONE /.test(turnedOn), turnedOn)
   rmSync(ctx.home, { recursive: true, force: true })
@@ -950,6 +950,34 @@ const holdsLock = (ctx, w, state) => until(() => lockPid(ctx, state) === w.child
   const delivered = watch(ctx, ciFx([status('local-ci', 'SUCCESS')]))
   check('watch CI_DONE: a waiter wakes on a check finishing → PENDING, and the one-shot run that follows → CI_DONE:7',
     waiting && woke.out === 'PENDING\n' && woke.code === 0 && woke.ms < 10000 && line(delivered) === 'CI_DONE:7', `held: ${waiting}\n${woke.ms}ms ${woke.code} ${woke.out}${woke.err}|${delivered}`)
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // The review of #141: a check change must not touch the state unless it is a finish the key
+  // reports. A state change wakes a waiter and resets the idle count, so storing every check change
+  // gave a standing REVIEW a wake on each one and pushed the idle wait back, with the key off too.
+  const quietWaiter = async (agents, before, after) => {
+    const c = seeded(ciFx(before, { agents, base: watchFx }))
+    watch(c, ciFx(before, { agents, base: watchFx }))
+    const waiter = start(c, 'pr-watch.mjs', watchArgs('--wait', '1', '--max', '4'))
+    const held = await holdsLock(c, waiter)
+    setFixture(c, ciFx(after, { agents, base: watchFx }))
+    const res = await waiter.done
+    rmSync(c.home, { recursive: true, force: true })
+    return { held, ...res }
+  }
+  const [offWait, onWait] = await Promise.all([
+    quietWaiter(ciOff, [status('local-ci', 'PENDING')], [status('local-ci', 'SUCCESS')]),
+    quietWaiter(ciOn, [status('local-ci', 'SUCCESS')], [status('local-ci', 'SUCCESS'), status('other-ci', 'PENDING')]),
+  ])
+  check('watch CI_DONE (review of #141): key off, a standing REVIEW:7 and a check that finishes → the waiter is not woken (NONE at --max)',
+    offWait.held && /^NONE \S+\n$/.test(offWait.out) && offWait.ms >= 3500, `held: ${offWait.held} ${offWait.ms}ms ${offWait.out}${offWait.err}`)
+  check('watch CI_DONE (review of #141): key on, a held REVIEW:7 and a new check that is only pending → the waiter is not woken (NONE at --max)',
+    onWait.held && /^NONE \S+\n$/.test(onWait.out) && onWait.ms >= 3500, `held: ${onWait.held} ${onWait.ms}ms ${onWait.out}${onWait.err}`)
+  ctx = makeEnv()
+  const idleRun = (state) => run(ctx, 'pr-watch.mjs', watchArgs('--idle-after', '2'), ciFx([status('local-ci', state)], { agents: ciOff }))
+  const idleOuts = ['PENDING', 'PENDING', 'PENDING', 'PENDING', 'SUCCESS', 'SUCCESS'].map(idleRun)
+  check('watch CI_DONE (review of #141): key off, a check that finishes on a reviewed PR → the IDLE count keeps rising (IDLE 4, IDLE 5)',
+    idleOuts[4].trimEnd().endsWith('IDLE 4') && idleOuts[5].trimEnd().endsWith('IDLE 5'), idleOuts.join('|'))
   rmSync(ctx.home, { recursive: true, force: true })
 
   // Every reviewer adapter takes the key, holds an LGTM on it, and handles CI_DONE without ever

@@ -307,13 +307,17 @@ function pass({ gh, save, dry }) {
     // CI_DONE: a check on the head reached a final state since the last run. A new head, a PR seen
     // for the first time and a state from before this signal existed are recorded silently: REVIEW
     // covers a push. A standing REVIEW (no reviewer post yet) does not suppress it: a first review
-    // held for CI is the case it exists for. Tracked with the key off too, so turning it on reports
-    // only what finishes after; left as it was when the block couldn't be read, so the next run
-    // still reports it.
-    const ci = ciStates(statusCheckRollup)
-    if (shaChanged || entry.ci === undefined) entry.ci = ci
-    else if (waitsForCi !== null) {
-      if (waitsForCi && Object.entries(ci).some(([k, s]) => isFinal(s) && entry.ci[k] !== s)) ciDone.push(number)
+    // held for CI is the case it exists for. Only final states are stored, so a check that appears
+    // or stays pending changes no state (a state change wakes a waiter and resets the idle count),
+    // while a re-run drops its key and its next finish counts again. With the key off nothing is
+    // stored, so the state is what it was before this signal existed, and turning the key on seeds
+    // silently: only what finishes after is reported. Left as it was when the block couldn't be
+    // read, so the next run still reports it; a new head is seeded even then.
+    const ci = Object.fromEntries(Object.entries(ciStates(statusCheckRollup)).filter(([, s]) => isFinal(s)))
+    if (waitsForCi === false) delete entry.ci
+    else if (shaChanged || entry.ci === undefined) entry.ci = ci
+    else if (waitsForCi) {
+      if (Object.entries(ci).some(([k, s]) => entry.ci[k] !== s)) ciDone.push(number)
       entry.ci = ci
     }
   }
