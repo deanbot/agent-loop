@@ -24,11 +24,14 @@
  *   3. The mailbox, from whichever of --inbox and --outbox were given: `MAILBOX <inbox>` (folders
  *      as given, ~ expanded) when both are and the pair is acceptable, else `NO_MAILBOX`. One folder
  *      without the other, a refused pair and an inbox that does not exist yet each add a ⚠ line.
- *   4. Executor only: clears stale claims. It lists the closed issues that still carry the block's
- *      `in-progress-label` (default `in-progress`) in its `repo`, and removes the label from each,
+ *   4. Executor only: clears stale claims. The clone's block names the repo; the `## Agent loop`
+ *      block of AGENTS.md on that repo's default branch (the contents API, never the clone's copy,
+ *      which on a PR's branch is the PR's) must name the same repo and gives the
+ *      `in-progress-label` (default `in-progress`). It lists the repo's closed issues that still
+ *      carry the label, and removes it from each,
  *      one `gh issue edit` per issue: `CLEARED <n> #a #b …` (the ones cleared), `CLEARED_NONE`
- *      (none to clear), or `CLEARED_UNKNOWN` (nothing cleared: no repo in the block, or gh
- *      failed). Each gh call times out after 10 s, all of them together after 30 s; a failure or
+ *      (none to clear), or `CLEARED_UNKNOWN` (nothing cleared: no repo in the block, the default
+ *      branch's block unreadable or naming another repo, or gh failed). Each gh call times out after 10 s, all of them together after 30 s; a failure or
  *      a timeout adds a ⚠ line and never stops the start.
  *   5. With a mailbox and at least one ⚠ line, the ⚠ lines go to the outbox as one message to the
  *      operator as well, for a deployment where nobody watches the terminal. A failed send adds a
@@ -41,11 +44,11 @@
  * removed and cut to 80 characters: on a PR's branch the file is the PR's.
  */
 
-import { execFileSync } from 'child_process'
+import { execFileSync, execSync } from 'child_process'
 import { readFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { blockValue } from './lib/block.mjs'
+import { blockValue, fetchAgents } from './lib/block.mjs'
 import { expandHome, mailboxProblem, mailboxWarning, sendMessage } from './lib/inbox.mjs'
 
 const USAGE = 'start-check.mjs --role executor|reviewer|qa --session <id> --model "<model>" [--effort <effort>] [--inbox <folder>] [--outbox <folder>]'
@@ -143,7 +146,7 @@ if (entry) {
   const modelDiffers = !model.toLowerCase().includes(word.toLowerCase())
   const effortDiffers = Boolean(wantEffort && effort && wantEffort.toLowerCase() !== effort.toLowerCase())
   if (modelDiffers || effortDiffers) {
-    warnings.push(`⚠ AGENTS.md expects ${clean(entry)} for the ${role}; this session runs ${clean(model)} · ${effort ?? 'unknown effort'}. Restart it with /model and /effort if that is wrong.`)
+    warnings.push(`⚠ AGENTS.md expects ${clean(entry)} for the ${role}; this session runs ${clean(model)} · ${effort ?? 'unknown effort'}. Restart it on that model and effort if that is wrong.`)
   }
 }
 
@@ -181,11 +184,38 @@ if (role === 'executor') {
     if (left <= 0) throw Object.assign(new Error('out of time'), { code: 'ETIMEDOUT' })
     return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: Math.min(callMs, left) })
   }
-  const repo = blockValue(agents, 'repo')
-  const label = blockValue(agents, 'in-progress-label') ?? 'in-progress'
-  if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) {
-    clearedLine = 'CLEARED_UNKNOWN'
+  // The clear is a write, so what drives it (the repo and the label) comes from the block on the
+  // default branch, never from the clone's copy, which on a PR's branch is the PR's (#129's rule).
+  // The clone's copy only names where to look, and the default branch's block must name the same
+  // repo.
+  const ghShell = (cmd, opts) => {
+    const left = deadline - Date.now()
+    try {
+      if (left <= 0) throw Object.assign(new Error('out of time'), { code: 'ETIMEDOUT' })
+      return execSync(cmd, { ...opts, encoding: 'utf8', timeout: Math.min(callMs, left) })
+    } catch (e) {
+      if (e?.code === 'ETIMEDOUT' || e?.signal) throw Object.assign(new Error(`gh timed out after ${callMs / 1000} s`), { stderr: `gh timed out after ${callMs / 1000} s` })
+      throw e
+    }
+  }
+  const named = blockValue(agents, 'repo')
+  let repo = null
+  let label = null
+  // GitHub's own name characters only: the name goes into fetchAgents' gh command line.
+  if (!named || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(named)) {
     warnings.push('⚠ Stale claims not cleared: the ## Agent loop block names no repo (owner/repo).')
+  } else {
+    try {
+      const main = fetchAgents(ghShell, named)
+      if (blockValue(main, 'repo') !== named) throw new Error(`the default branch's block names ${clean(blockValue(main, 'repo') ?? 'no repo')}, not ${named}`)
+      repo = named
+      label = blockValue(main, 'in-progress-label') ?? 'in-progress'
+    } catch (e) {
+      warnings.push(`⚠ Stale claims not cleared: could not read the default branch's block: ${clean(String(e?.message).trim().split('\n')[0])}.`)
+    }
+  }
+  if (!repo) {
+    clearedLine = 'CLEARED_UNKNOWN'
   } else {
     let stale = null
     try {

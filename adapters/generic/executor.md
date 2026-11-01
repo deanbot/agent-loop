@@ -41,7 +41,9 @@ came up on the wrong model is seen at once. **The line after the model line name
 milestones`, so a start without the intended filter is seen at once.
 
 **The start check**, every start, before touching anything in the clone, one command: `node
-scripts/start-check.mjs --role executor --model "<model>"`, with `<model>` as in your first line.
+scripts/start-check.mjs --role executor --model "<model>" --effort "<effort>"`, with `<model>` and
+`<effort>` as in your first line; leave `--effort "<effort>"` out when you don't know the effort
+(the script then compares the model alone).
 It checks the block's `models:` entry against this session, reads where the clone is, and clears
 stale claims. Its lines, in order:
 - `SESSION_NONE` (these prompts know no session id) and `NO_MAILBOX`: carry on.

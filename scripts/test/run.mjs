@@ -2888,7 +2888,7 @@ const putMessage = (dir, id, extra, meta) => {
   const qa = clone('qa')
   const startCmd = 'node /plugins/agent-loop/scripts/start-check.mjs --role reviewer --session s1 --model "Opus 5.5" --effort high --inbox /m/in'
   const warn1 = '⚠ No mailbox: --inbox and --outbox go together.'
-  const warn2 = '⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it with /model and /effort if that is wrong.'
+  const warn2 = '⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it on that model and effort if that is wrong.'
   const startOut = `NEW\nNO_MAILBOX\n${warn1}\n${warn2}\n`
   check('start lines hook: start-check.mjs in a reviewer, executor or QA clone → all its ⚠ lines, in order, as one systemMessage, and nothing else',
     [reviewer, exec, qa].every((d) => shown(ok(startCmd, startOut, d)) === `${warn1}\n${warn2}`), shown(ok(startCmd, startOut, reviewer)))
@@ -2949,7 +2949,8 @@ const putMessage = (dir, id, extra, meta) => {
   agents('executor=opus, reviewer=sonnet')
   const wrong = lines(base('reviewer', 'sess-b'))
   check('start-check: the models entry names another model → the ⚠ model line, with the entry and this session',
-    wrong.includes('⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it with /model and /effort if that is wrong.'), wrong.join('\n'))
+    wrong.includes('⚠ AGENTS.md expects sonnet for the reviewer; this session runs Opus 5.5 · high. Restart it on that model and effort if that is wrong.') &&
+      !wrong.some((l) => l.includes('/model') || l.includes('/effort')), wrong.join('\n'))
   agents('reviewer=opus/max')
   check('start-check: … the same model, another effort → the ⚠ model line', lines(base('reviewer', 'sess-b')).some((l) => l.startsWith('⚠ AGENTS.md expects opus/max for the reviewer')))
   check('start-check: … an effort not filled in is not compared → no line',
@@ -2998,11 +2999,14 @@ const putMessage = (dir, id, extra, meta) => {
   mkdirSync(root)
   const g = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   g('init', '-q', '-b', 'main')
-  writeFileSync(path.join(root, 'AGENTS.md'), '# App\n\n## Agent loop\n\nrepo: acme/widgets\nin-progress-label: claimed\n')
+  // The clone's copy names another label: the clear's label comes from the default branch's block
+  // (the fixture's `agents`), never the clone's, which on a PR's branch is the PR's.
+  writeFileSync(path.join(root, 'AGENTS.md'), '# App\n\n## Agent loop\n\nrepo: acme/widgets\nin-progress-label: branch-label\n')
   writeFileSync(path.join(root, '.gitignore'), '.agent-loop/\n')
   g('add', 'AGENTS.md', '.gitignore')
   g('commit', '-q', '-m', 'init')
-  const fx = (issues, more = {}) => writeFileSync(ctx.fixture, JSON.stringify({ issues, ...more }))
+  const MAIN_BLOCK = '# App\n\n## Agent loop\n\nrepo: acme/widgets\nin-progress-label: claimed\n'
+  const fx = (issues, more = {}) => writeFileSync(ctx.fixture, JSON.stringify({ issues, agents: MAIN_BLOCK, ...more }))
   const closed = (number, labels) => ({ number, state: 'CLOSED', labels: labels.map((name) => ({ name })) })
   const ghCalls = () => (existsSync(ctx.log) ? readFileSync(ctx.log, 'utf8').trim().split('\n').filter(Boolean) : [])
   const startIn = (dir, role = 'executor', env = {}) => {
@@ -3019,16 +3023,32 @@ const putMessage = (dir, id, extra, meta) => {
     two.status === 0 && two.lines[0] === 'NEW' && two.lines[1] === 'NO_MAILBOX' && two.lines[2] === 'BRANCH main CLEAN', two.lines.join('\n'))
   check('start-check (#142): two stale claims → CLEARED 2 #3 #9, the label removed from each with one gh issue edit, the open one left alone, no ⚠ line',
     two.lines[3] === 'CLEARED 2 #3 #9' && two.lines.length === 4 &&
-      calls[0] === 'issue list --repo acme/widgets --state closed --label claimed --limit 100 --json number' &&
-      calls.slice(1).join('|') === 'issue edit 3 --repo acme/widgets --remove-label claimed|issue edit 9 --repo acme/widgets --remove-label claimed', `${two.lines.join('\n')}\n${calls.join('\n')}`)
+      calls[1] === 'issue list --repo acme/widgets --state closed --label claimed --limit 100 --json number' &&
+      calls.slice(2).join('|') === 'issue edit 3 --repo acme/widgets --remove-label claimed|issue edit 9 --repo acme/widgets --remove-label claimed', `${two.lines.join('\n')}\n${calls.join('\n')}`)
+  check('start-check (#144 review): the clear reads the block from the default branch first (the contents API, no ref), and uses its label, never the clone\'s',
+    calls[0] === 'api repos/acme/widgets/contents/AGENTS.md' && !calls.some((c) => c.includes('branch-label')), calls.join('\n'))
   fx([closed(5, ['bug'])])
   const none = startIn(root)
-  check('start-check (#142): no stale claims → CLEARED_NONE, and only the list call', none.lines[3] === 'CLEARED_NONE' && ghCalls().length === 1, none.lines.join('\n'))
+  check('start-check (#142): no stale claims → CLEARED_NONE, and only the block read and the list call', none.lines[3] === 'CLEARED_NONE' && ghCalls().length === 2, none.lines.join('\n'))
+  fx([closed(3, ['claimed'])], { agents: 'error' })
+  const unread = startIn(root)
+  check('start-check (#144 review): the default branch\'s block unreadable → CLEARED_UNKNOWN and a ⚠ line, no list and no edit (never the clone\'s copy instead)',
+    unread.status === 0 && unread.lines[3] === 'CLEARED_UNKNOWN' && unread.lines.includes('⚠ Stale claims not cleared: could not read the default branch\'s block: HTTP 502: Bad Gateway (https://api.github.com/).') &&
+      ghCalls().length === 1, `${unread.lines.join('\n')}\n${ghCalls().join('\n')}`)
+  fx([closed(3, ['claimed'])], { agents: '# App\n\n## Agent loop\n\nrepo: other/place\nin-progress-label: claimed\n' })
+  const elsewhere = startIn(root)
+  check('start-check (#144 review): the default branch\'s block names another repo → CLEARED_UNKNOWN and a ⚠ line, no list and no edit',
+    elsewhere.lines[3] === 'CLEARED_UNKNOWN' && elsewhere.lines.some((l) => l.startsWith('⚠ Stale claims not cleared: could not read the default branch\'s block: the default branch\'s block names other/place, not acme/widgets')) &&
+      ghCalls().length === 1, `${elsewhere.lines.join('\n')}\n${ghCalls().join('\n')}`)
+  fx([closed(3, ['in-progress'])], { agents: '# App\n\n## Agent loop\n\nrepo: acme/widgets\n' })
+  const byDefault = startIn(root)
+  check('start-check (#142): no in-progress-label on the default branch → the default label in-progress (the clone\'s label never counts)',
+    byDefault.lines[3] === 'CLEARED 1 #3' && ghCalls()[1]?.includes('--label in-progress '), `${byDefault.lines.join('\n')}\n${ghCalls().join('\n')}`)
 
   writeFileSync(path.join(root, 'scratch.txt'), 'x')
   check('start-check (#142): an untracked file → DIRTY', startIn(root).lines[2] === 'BRANCH main DIRTY')
   rmSync(path.join(root, 'scratch.txt'))
-  writeFileSync(path.join(root, 'AGENTS.md'), '# App\n\n## Agent loop\n\nrepo: acme/widgets\nin-progress-label: claimed\n\nedited\n')
+  writeFileSync(path.join(root, 'AGENTS.md'), '# App\n\n## Agent loop\n\nrepo: acme/widgets\nin-progress-label: branch-label\n\nedited\n')
   check('start-check (#142): a changed tracked file → DIRTY', startIn(root).lines[2] === 'BRANCH main DIRTY')
   g('checkout', '-q', '--', 'AGENTS.md')
   g('switch', '-q', '-c', 'issue-42-thing')
@@ -3052,15 +3072,20 @@ const putMessage = (dir, id, extra, meta) => {
   mkdirSync(plain)
   writeFileSync(path.join(plain, 'AGENTS.md'), '# App\n\n## Agent loop\n\nrepo: acme/widgets\n')
   const nogit = startIn(plain)
-  check('start-check (#142): git failing (not a checkout) → BRANCH_UNKNOWN and a ⚠ line, exit 0; the clear still runs, with the default label',
+  check('start-check (#142): git failing (not a checkout) → BRANCH_UNKNOWN and a ⚠ line, exit 0; the clear still runs',
     nogit.status === 0 && nogit.lines[2] === 'BRANCH_UNKNOWN' && nogit.lines.some((l) => l.startsWith('⚠ Could not read the branch or the working tree: ')) &&
-      ghCalls()[0]?.includes('--label in-progress '), `${nogit.lines.join('\n')}\n${ghCalls().join('\n')}`)
+      ghCalls()[1]?.startsWith('issue list '), `${nogit.lines.join('\n')}\n${ghCalls().join('\n')}`)
 
+  fx([closed(3, ['claimed'])], { closedListFail: true })
+  const listDown = startIn(root)
+  check('start-check (#142): the closed-issue list failing → CLEARED_UNKNOWN and ⚠ Stale claims not cleared: <gh\'s line>, no edit',
+    listDown.lines[3] === 'CLEARED_UNKNOWN' && listDown.lines.includes('⚠ Stale claims not cleared: HTTP 502: Bad Gateway (https://api.github.com/).') && ghCalls().length === 2,
+    `${listDown.lines.join('\n')}\n${ghCalls().join('\n')}`)
   fx([closed(3, ['claimed'])], { fail: true })
   const down = startIn(root)
   check('start-check (#142): gh failing → CLEARED_UNKNOWN and ⚠ Stale claims not cleared: <gh\'s line>, exit 0, the branch line still there',
     down.status === 0 && down.lines[2] === 'BRANCH main CLEAN' && down.lines[3] === 'CLEARED_UNKNOWN' &&
-      down.lines.includes('⚠ Stale claims not cleared: HTTP 502: Bad Gateway (https://api.github.com/).'), down.lines.join('\n'))
+      down.lines.includes('⚠ Stale claims not cleared: could not read the default branch\'s block: HTTP 502: Bad Gateway (https://api.github.com/).'), down.lines.join('\n'))
   fx([closed(3, ['claimed']), closed(7, ['claimed'])], { editFail: [3] })
   const part = startIn(root)
   check('start-check (#142): one edit failing → CLEARED 1 #7, and a ⚠ line naming #3 and why',
@@ -3070,7 +3095,7 @@ const putMessage = (dir, id, extra, meta) => {
   const slow = startIn(root, 'executor', { AGENT_LOOP_START_GH_TIMEOUT_MS: '500' })
   const slowMs = Date.now() - t0
   check('start-check (#142): a gh call that hangs is cut off by the timeout → CLEARED_UNKNOWN and ⚠ … timed out, exit 0, well before gh would answer',
-    slow.status === 0 && slow.lines[3] === 'CLEARED_UNKNOWN' && slow.lines.includes('⚠ Stale claims not cleared: gh timed out after 0.5 s.') && slowMs < 2500,
+    slow.status === 0 && slow.lines[3] === 'CLEARED_UNKNOWN' && slow.lines.includes('⚠ Stale claims not cleared: could not read the default branch\'s block: gh timed out after 0.5 s.') && slowMs < 2500,
     `${slowMs} ms\n${slow.lines.join('\n')}`)
   fx([3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => closed(n, ['claimed'])), { delayMs: 200 })
   const t1 = Date.now()
@@ -3080,6 +3105,14 @@ const putMessage = (dir, id, extra, meta) => {
     /^CLEARED \d+ #3 /.test(many.lines[3]) && many.lines.some((l) => /^⚠ Stale claims not cleared on (#\d+ ?)+: gh timed out after 0\.6 s\.$/.test(l)) && manyMs < 5000,
     `${manyMs} ms\n${many.lines.join('\n')}`)
 
+  // The repo name goes into a gh command line: only GitHub's name characters pass.
+  for (const bad of ['acme/$(touch pwned)', 'acme/`touch pwned`', 'acme/w;touch pwned', 'acme/w"x']) {
+    writeFileSync(path.join(plain, 'AGENTS.md'), `# App\n\n## Agent loop\n\nrepo: ${bad}\n`)
+    fx([closed(3, ['in-progress'])])
+    const hostile = startIn(plain)
+    check(`start-check (#144 review): a repo of ${JSON.stringify(bad)} in the clone's block → refused, no gh call, nothing run`,
+      hostile.lines[3] === 'CLEARED_UNKNOWN' && ghCalls().length === 0 && !existsSync(path.join(plain, 'pwned')), `${hostile.lines.join('\n')}\n${ghCalls().join('\n')}`)
+  }
   writeFileSync(path.join(plain, 'AGENTS.md'), '# App\n\n## Agent loop\n\nqa-gate: off\n')
   fx([closed(3, ['in-progress'])])
   const noRepo = startIn(plain)
@@ -3207,8 +3240,9 @@ const putMessage = (dir, id, extra, meta) => {
 
   // #142: a live resume decided the branch and the tree from the context's start snapshot and
   // passed the stale-claim clear by. Both are start-check.mjs's lines now, in every executor.
-  const execStart = { 'claude-code/skills/start-executor/SKILL.md': startCmd('executor'), 'generic/executor.md': 'node scripts/start-check.mjs --role executor --model "<model>"',
-    'kiro/skills/start-executor/SKILL.md': 'node scripts/start-check.mjs --role executor --model "<model>"' }
+  // The review of #144: generic and Kiro pass the effort too, or the model check loses its effort half.
+  const execStart = { 'claude-code/skills/start-executor/SKILL.md': startCmd('executor'), 'generic/executor.md': 'node scripts/start-check.mjs --role executor --model "<model>" --effort "<effort>"',
+    'kiro/skills/start-executor/SKILL.md': 'node scripts/start-check.mjs --role executor --model "<model>" --effort "<effort>"' }
   const noBranch = Object.entries(execStart).filter(([f, cmd]) => {
     const t = flat(read(f))
     const at = (s) => t.indexOf(s)

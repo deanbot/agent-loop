@@ -31,6 +31,7 @@
 //               'too-large' → encoding "none" and no content, as for a file over 1 MB)
 //   A query string (`?per_page=100`) on a path is ignored.
 //               gh issue list --state closed [--label L] serves the CLOSED ones (carrying L), as { number }
+//   closedListFail → that closed-issue list fails like a network error (true)
 //   editFail  → gh issue edit N … fails for these numbers (array); otherwise it succeeds
 //   fail      → every call fails like a network error         (true)
 //   delayMs   → every call takes this long before answering    (number)
@@ -157,6 +158,10 @@ if (args[0] === 'pr' && args[1] === 'checks') {
 if (args[0] === 'pr' && args[1] === 'list') out(fixture.prs)
 if (args[0] === 'pr' && args[1] === 'view') out(fixture.prView)
 if (args[0] === 'issue' && args[1] === 'list' && args[args.indexOf('--state') + 1] === 'closed') {
+  if (fixture.closedListFail) {
+    process.stderr.write('HTTP 502: Bad Gateway (https://api.github.com/)\n')
+    process.exit(1)
+  }
   const label = args.includes('--label') ? args[args.indexOf('--label') + 1] : null
   out(
     (fixture.issues ?? [])

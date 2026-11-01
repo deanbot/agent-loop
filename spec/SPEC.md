@@ -383,7 +383,9 @@ the claim: an issue carrying `in-progress-label` belongs to another executor eve
 exists. On start the executor removes `in-progress-label` from closed issues: it normally removes
 the label on `MERGED`, which a loop stopped after `MERGE_READY` never sees, and a closed issue has
 no claim to protect. `scripts/start-check.mjs --role executor` does it (`CLEARED …`), with bounded
-`gh` calls whose failure warns and never stops the start, and also prints where the clone is
+`gh` calls whose failure warns and never stops the start. The repo and the label come from the
+block on the default branch, never the clone's copy: what drives a write is the default branch's
+config, so a PR's branch can't point the clear at other issues. It also prints where the clone is
 (`BRANCH <name> CLEAN|DIRTY`), which the start's resume check decides from (#142).
 
 **Claiming** uses a claim comment, so two executors that pick at the same moment cannot both win
