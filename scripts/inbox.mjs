@@ -27,6 +27,8 @@
  *   INVALID:<messageId>   a new file with a message name that is not a valid message (the reason
  *                         goes to stderr); reported once, like a message
  *   NONE <timestamp>      nothing new, or no such folder
+ *   MAILBOX_ERROR: <folder>: <code>   the folder can't be read (ENOTDIR: under a file; EACCES: no
+ *                         read permission): exit 5, checked before any read or wait (#98)
  * A first run reports every message already there: a message is direction, not history.
  *
  * Sending writes `<messageId>.json` atomically (a temporary dotfile, then a rename) and prints
@@ -129,6 +131,17 @@ if (send) {
   }
   process.stdout.write(`SENT:${sendMessage(dir, fields)}\n`)
   process.exit(0)
+}
+
+// A folder that exists but can't be read (a path under a file, no read permission: it went bad
+// after the start's check) is one line and its own exit code, never a stack trace or a silent NONE
+// (#98): the loop reports it once and goes on without the mailbox. A missing folder is still NONE.
+// Exit 5: 1 is a usage error, 3 and 4 are the waiter's.
+try {
+  listMessages(dir)
+} catch (e) {
+  process.stdout.write(`MAILBOX_ERROR: ${dir}: ${e?.code ?? 'EIO'}\n`)
+  process.exit(5)
 }
 
 const STATE_FILE = recordFile(dir)

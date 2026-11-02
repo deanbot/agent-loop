@@ -809,6 +809,14 @@ outbox gets no warning (sending creates it).
 Neither argument → no mailbox, and nothing changes. One without the other, or a refused pair → the
 adapter warns once and runs without a mailbox.
 
+**A folder that goes bad after the start** (#98): `inbox.mjs --dir <inbox>` on an inbox that
+exists but can't be read (a path under a file, no read permission) prints one line,
+`MAILBOX_ERROR: <inbox>: <code>` (`ENOTDIR`, `EACCES`, …), and exits 5, with no stack trace; it
+checks before any read, `--wait` included. An inbox that doesn't exist is still `NONE`. The loop
+reports the line once, in its status line and to the outbox, and runs without a mailbox for the
+rest of the session: no inbox read and no `--inbox` on its waiters. It never retries the read
+each cycle.
+
 The folders are never configuration a project checks in (the `## Agent loop` block, a checked-in
 settings file, environment variables such settings can set). A loop reads the block from the
 working tree at its start, and a reviewer that restarts while its clone sits on a PR's head would
