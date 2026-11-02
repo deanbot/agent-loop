@@ -108,7 +108,8 @@ bare start that ran before the intended command) is then seen at once.
    gh works.` Then:
    - **You hold #<N>**: `CLAIM_HELD`, or `CLAIM_NONE` (claimed before claim comments existed)
      when `$ARGUMENTS` names it, by its own number or by a PR whose `Closes #<N>` names it.
-     On its branch (`issue-<N>-…`) → **Resume** (below),
+     On its branch (`issue-<N>-…`) → **Resume** (below; step 3's start check has already
+     settled the mailbox, so the loop's step 0 reads only its `MAILBOX <inbox>`),
      with no `git checkout main` and no `git pull`. On another branch (including `main` with
      uncommitted changes): with a clean tree, find its branch (`git branch --list
      "issue-<N>-*"`), `git switch <branch>` and resume; no such branch in this clone → `git
@@ -126,7 +127,8 @@ bare start that ran before the intended command) is then seen at once.
      branch); with uncommitted changes, **stop** and say `<branch> has uncommitted changes and
      this clone does not hold #<N>: commit, stash or discard them, then restart.` Never switch
      branches over uncommitted work.
-5. **Mailbox**: step 3's `MAILBOX` or `NO_MAILBOX` line decided it. Messages are read in the PR
+5. **Mailbox**: step 3's `MAILBOX` or `NO_MAILBOX` line decided it, before step 4 could send you
+   anywhere: no inbox is read on any other word (#109). Messages are read in the PR
    loop only: one that arrives while you implement or wait on a pick waits for the first poll
    cycle.
 
@@ -348,7 +350,8 @@ is: the script reads `qa-gate`, `gate` and `local-ci` from the block on the defa
 
 Each cycle:
 
-0. With a mailbox, first `node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --dir <inbox>`, in the
+0. With a mailbox (only `<inbox>` from this start's step 3 `MAILBOX <inbox>` line, which the
+   start check settles before any later step can send you here), first `node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --dir <inbox>`, in the
    foreground, once per cycle, and handle what it prints before any signal ("Messages").
 1. Run `<poll> --idle-after 3` in the foreground, once per cycle. You never need the waiter's own
    output. A last line `IDLE <count>` means this is the third poll or later in a row with no new
@@ -557,8 +560,8 @@ for the operator, and the reply to it belongs to that role: nothing for you.
   ${CLAUDE_SESSION_ID}`, and say "Executor stopped". Nothing else. A task notification that
   arrives after the stop is not a continuation: do nothing.
 - **Superseded** (a beat printed `SUPERSEDED <id>`, or the guard refused a command as
-  superseded): stop the running waiter with `TaskStop`, call `ScheduleWakeup({ stop: true })`, and
-  say "Executor stopped: session <id> took over this clone". Nothing else: no label, no release,
+  superseded): stop the waiter with `TaskStop` if one still runs; a waiter that exited 4 has
+  already ended. Then call `ScheduleWakeup({ stop: true })`, and say "Executor stopped: session <id> took over this clone". Nothing else: no label, no release,
   no comment, no git command. The claims belong to the clone, and the new session carries them on.
 
 ## Permissions
