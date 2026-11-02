@@ -54,8 +54,8 @@ is the project's conventions, which the agents follow.
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |
 | `review-waits-for-ci` | no | `off` | `on`: the reviewer holds an LGTM while a check on the head is pending, and `pr-watch` wakes it when one finishes (`CI_DONE:<n>`), for a project whose operator merges on the LGTM itself. `off`: the reviewer notes a pending check in the LGTM line, as before. Added later in 0.2, additive |
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
-| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status), and whose `[executor] Claimed by` comments count as claims (case-insensitive; #134). **Every executor's own login must be on it**, or its claims never count |
-| `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent or empty, claims included |
+| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status), and whose `[executor] Claimed by` comments count as claims (case-insensitive; #134), and whose `[executor]`, `[reviewer]` and `[qa]` comments count as the role's at all (#148). **Every agent's own login must be on it** (executor, reviewer and QA), or its claims, verdicts and findings never count |
+| `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent or empty, claims and role comments included: every agent's login must then have one of these associations |
 | `audit-floor` | no | — | control ids ("Auditor") the auditor never recommends narrowing or dropping: security and privacy checks, the operator's merge, a named gate. A finding about one reports its cost only |
 | `audit-report` | no | `issue` | where the auditor's report goes: `issue` (a new issue per run, labelled `auditor-report`) or `none` (printed only; the operator posts it) |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
@@ -86,6 +86,17 @@ Labels must exist before first use (`gh label create …`); adapters may ship a 
 traffic. Every script filters its own role's prefix when looking for new activity, which prevents
 ping-pong loops: `pr-poll.mjs` ignores `[executor]`, `pr-watch.mjs` ignores `[reviewer]`,
 `pr-qa.mjs` ignores `[qa]`.
+
+**A prefix counts only from a trusted author** (#148): a login in `trusted-authors`, or, when that
+lists nobody, an association in `allow-author-associations`, read from the block on the default
+branch. A `[executor]`, `[reviewer]` or `[qa]` comment from anyone else is dropped before a script
+reads the thread: it is no verdict, finding, question, revocation, answer, claim or own post, and
+no operator direction either (an untrusted login is not the operator). It is not reported. A script
+that can't read the block trusts nobody: `pr-poll.mjs` withholds `MERGE_READY` and drops every
+role comment for that run, `pr-watch.mjs` prints `NONE` and keeps its state (`--check-claim`
+exits 2), and a waiter retries. `pr-qa.mjs` reads no own post (any bracketed comment is not
+operator direction), so it needs no list. Anyone can still type a prefix: what an agent reads in
+the thread itself is text, and the scripts' signals are what count.
 
 **Verdict comments start with the verdict**, because scripts classify by prefix:
 
@@ -523,7 +534,8 @@ posts by the new holder never revive the old claim). A holder is stale when no n
 `[reviewer]` comment has appeared for 30 minutes since the later of the head commit and its claim.
 A holder that is stale now holds nothing: the PR is open to the next claim. `pr-watch.mjs
 --reviewer <clone>` computes this (and `--check-claim <n>` prints `MINE`, `THEIRS <clone>` or
-`OPEN`), reports only PRs the reviewer holds or nobody holds, and drops another's PR from its state
+`OPEN`, or exits 2 with no line when it can't read the block: the reviewer then drops the PR for
+the cycle). Only a trusted author's claim and posts count (#148), as for the executor's. It reports only PRs the reviewer holds or nobody holds, and drops another's PR from its state
 without a `CLOSED`. The holder handles rechecks and follow-ups, so findings and rechecks come from
 one voice. Claim comments are never a review: `pr-poll.mjs` and `pr-watch.mjs` ignore them. Commit
 times are when a commit was made, not pushed, so a late push of old commits can make a working

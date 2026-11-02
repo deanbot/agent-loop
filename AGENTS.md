@@ -24,7 +24,10 @@ Three layers. Boundaries are strict.
   holds a PR. A PR labelled needs-operator that falls into conflict is reported as a standing
   `MERGE_CONFLICT:<n>`. With `review-waits-for-ci: on` in the block on the default branch (read
   as `pr-poll.mjs` reads it), a check on a watched head reaching a final state since the last run
-  gives `CI_DONE:<n>`, so a reviewer holding its LGTM for CI is woken (#131).
+  gives `CI_DONE:<n>`, so a reviewer holding its LGTM for CI is woken (#131). Only a trusted
+  author's role-prefixed comment counts (#148, the same rule as `claims.mjs`): an outsider's
+  `[reviewer]` line is no post and no claim. A block it can't read → `NONE`, state kept (a waiter
+  retries); `--check-claim` exits 2 with no line.
 - `scripts/pr-poll.mjs` — executor signal source. `--repo owner/repo --pr <n> [--require-qa]
   [--require-gate] [--local-ci <context>] [--local-ci-window <secs>]`. Signals then content
   blocks, exits. It reads `qa-gate`, `gate` and `local-ci` from the `## Agent loop` block of
@@ -34,7 +37,10 @@ Three layers. Boundaries are strict.
   needs the LGTM's `Gate on <sha>:` line on the head. `--local-ci <context>` (the block's
   `local-ci` key): a head with no checks is CI pending until the runner's check appears, or, after
   the window (300 s from first seeing the head), `NO_LOCAL_CI` once for the PR and no CI as before,
-  later heads included, until the runner's check appears on a head again.
+  later heads included, until the runner's check appears on a head again. Only a trusted author's
+  `[executor]`, `[reviewer]` or `[qa]` comment counts (#148): an outsider's is dropped before the
+  thread is read (no verdict, finding, revocation or answer), and with the block unreadable every
+  role comment is.
 - `scripts/pr-for-issue.mjs` — the executor's open-PR lookup before it claims an issue it was
   started on. `--repo owner/repo --closes <N>` prints `PR:<n> <branch>` (the newest open,
   same-repository PR whose body says `Closes #<N>`) or `NONE`; exit 2 on a failed `gh` call, on
@@ -51,7 +57,8 @@ Three layers. Boundaries are strict.
 - `scripts/lib/block.mjs` — reads a key from the `## Agent loop` block of an `AGENTS.md` text
   (`pr-poll.mjs`, `pull.mjs`, `local-ci.mjs`, `start-check.mjs`), a list (`blockList`), whom the
   block trusts (`trustTest`: `trusted-authors`, else `allow-author-associations`; `claims.mjs`,
-  `pick-next.mjs`), and the default branch's file (`fetchAgents`).
+  `pick-next.mjs`, `pr-poll.mjs`, `pr-watch.mjs`), the role prefixes (`ROLE_PREFIX`), and the
+  default branch's file (`fetchAgents`).
 - `scripts/pr-qa.mjs` — QA signal source. `--repo owner/repo [--skip n,n]`. One line, exits.
 - `scripts/pick-next.mjs` — the executor's issue pick. `--repo owner/repo [--milestone <title>]
   [--in-progress-label <l>] [--blocked-label <l>] [--skip n,n] [--clone <clone>]`. Prints

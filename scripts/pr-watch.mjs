@@ -8,6 +8,12 @@
  *   [executor]       — developer agent; answers reviewer questions, triggers REVIEW_COMMENTS
  *   [reviewer]       — this agent's own posts; filtered out to prevent ping-pong loops
  *
+ * A role prefix counts only from a trusted author (#148): `trusted-authors`, else
+ * `allow-author-associations`, in the block on the default branch. A role-prefixed comment from anyone
+ * else is dropped before anything reads the thread: it is no reviewer post, no claim, and no operator
+ * comment. A run that can't read the block prints NONE and keeps its state (everything withheld,
+ * CLOSED and a standing MERGE_CONFLICT included); a waiter logs it and retries.
+ *
  * Only [reviewer] comments are suppressed. All other comments (including [executor]) are
  * treated as meaningful signals. The exception: an [executor] comment older than the reviewer's
  * newest post was already read (the reviewer re-reads the thread immediately before posting).
@@ -68,7 +74,7 @@ import { execSync } from 'child_process'
 import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
-import { blockValue, fetchAgents } from './lib/block.mjs'
+import { blockValue, fetchAgents, trustTest, ROLE_PREFIX, REPO_NAME } from './lib/block.mjs'
 
 const USAGE =
   'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
@@ -80,6 +86,7 @@ function arg(name) {
 
 const repo = arg('--repo')
 if (!repo) usageError(USAGE)
+if (!REPO_NAME.test(repo)) usageError(USAGE, `--repo: expected owner/repo, got "${repo}"`)
 
 // `gh api --paginate` prints one JSON document per page; `--slurp` wraps them in one array (gh ≥ 2.43).
 function ghApiAll(gh, path) {
@@ -137,23 +144,32 @@ function claimHolder(comments, commits, now) {
   return holder && !stale(holder.claim, now) ? holder.clone : null
 }
 
-function holderOf(gh, number) {
+// A PR's comments, timeline or inline, with every role-prefixed one from an untrusted author dropped
+// (#148): such a comment is no reviewer post (it silences nothing and marks nothing read), no claim,
+// and no operator direction either, since an untrusted login is not the operator.
+function commentsOf(gh, apiPath, trusted) {
+  return ghApiAll(gh, apiPath).filter((c) => !ROLE_PREFIX.test(c.body ?? '') || trusted(c))
+}
+
+function holderOf(gh, number, trusted) {
   return claimHolder(
-    ghApiAll(gh, `repos/${repo}/issues/${number}/comments`),
+    commentsOf(gh, `repos/${repo}/issues/${number}/comments`, trusted),
     ghApiAll(gh, `repos/${repo}/pulls/${number}/commits`),
     Date.now()
   )
 }
 
 // The default branch's AGENTS.md text, or null when it can't be read. Kept once read: the block
-// changes rarely, and a waiter would otherwise fetch it every interval.
+// changes rarely, and a waiter would otherwise fetch it every interval. A waiter's pass (dry) throws
+// instead, so the failure is logged and retried like any other API error, never a silent NONE.
 let agentsText
 function readAgents(gh, dry) {
   if (agentsText !== undefined) return agentsText
   try {
     agentsText = fetchAgents(gh, repo)
   } catch (e) {
-    if (!dry) process.stderr.write(`pr-watch: could not read the Agent loop block (CI_DONE withheld): ${e.message}\n`)
+    if (dry) throw e
+    process.stderr.write(`pr-watch: could not read the Agent loop block (signals withheld): ${e.message}\n`)
     return null
   }
   return agentsText
@@ -178,7 +194,12 @@ const isFinal = (s) => !s.split(',').includes('PENDING')
 function pass({ gh, save, dry }) {
   // review-waits-for-ci: on → CI_DONE (the header). null: the block couldn't be read this run.
   const agents = readAgents(gh, dry)
-  const waitsForCi = agents === null ? null : blockValue(agents, 'review-waits-for-ci')?.toLowerCase() === 'on'
+  // Whose comments speak for a role comes from the block too (#148). Without it nothing here can be
+  // decided safely (trusting everyone lets anyone silence a review; trusting nobody makes every PR
+  // look unreviewed), so the run withholds everything and keeps the state for the next one.
+  if (agents === null) return `NONE ${new Date().toISOString()}\n`
+  const trusted = trustTest(agents)
+  const waitsForCi = blockValue(agents, 'review-waits-for-ci')?.toLowerCase() === 'on'
   let state = {}
   try {
     state = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
@@ -209,7 +230,7 @@ function pass({ gh, save, dry }) {
     }
 
     if (reviewer) {
-      const holder = holderOf(gh, number)
+      const holder = holderOf(gh, number, trusted)
       if (holder && holder !== reviewer) {
         delete state[number]
         continue
@@ -234,14 +255,14 @@ function pass({ gh, save, dry }) {
       }
       // Advance comment cursors — reviewer reads thread during REVIEW, so seeding here
       // prevents pre-REVIEW comments from re-firing as REVIEW_COMMENTS next run.
-      const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
-      const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${number}/comments`)
+      const comments = commentsOf(gh, `repos/${repo}/issues/${number}/comments`, trusted)
+      const inlineComments = commentsOf(gh, `repos/${repo}/pulls/${number}/comments`, trusted)
       entry.lastComment = comments.length > 0 ? comments.at(-1).id : (entry.lastComment ?? 0)
       entry.lastReviewComment = inlineComments.length > 0 ? inlineComments.at(-1).id : (entry.lastReviewComment ?? 0)
     } else {
       // No new commits — check for new non-reviewer comments (timeline + inline review)
-      const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
-      const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${number}/comments`)
+      const comments = commentsOf(gh, `repos/${repo}/issues/${number}/comments`, trusted)
+      const inlineComments = commentsOf(gh, `repos/${repo}/pulls/${number}/comments`, trusted)
       const hasReviewerPost = comments.some(isReviewerPost)
       // A standing conflict on a PR in the operator's inbox as ready: main moved under an unchanged
       // head (#48). Nobody else may report it: with no executor polling, pr-poll never runs. Reported
@@ -347,7 +368,16 @@ function pass({ gh, save, dry }) {
 }
 
 if (checkClaim) {
-  const holder = holderOf((cmd) => execSync(cmd, { encoding: 'utf8' }), checkClaim)
+  const gh = (cmd, opts) => execSync(cmd, { encoding: 'utf8', ...opts })
+  let trusted
+  try {
+    trusted = trustTest(fetchAgents(gh, repo))
+  } catch (e) {
+    // Whose claims count can't be told: no answer, so the reviewer holds nothing it didn't check.
+    process.stderr.write(`pr-watch: could not read the Agent loop block (no claim answer): ${e.message}\n`)
+    process.exit(2)
+  }
+  const holder = holderOf(gh, checkClaim, trusted)
   process.stdout.write(holder === null ? 'OPEN\n' : holder === reviewer ? 'MINE\n' : `THEIRS ${holder}\n`)
 } else {
   await runSignalScript({ argv: process.argv, usage: USAGE, stateFile: STATE_FILE, pass })

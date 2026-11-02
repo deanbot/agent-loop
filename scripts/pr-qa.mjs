@@ -10,7 +10,9 @@
  *   Operator comment (unprefixed) — may be manual-verification confirmation for
  *                   observation-required items; triggers QA_READY so QA can re-evaluate
  *
- * [qa] own posts are not tracked as operator comments (own prefix filtered).
+ * [qa] own posts are not tracked as operator comments (own prefix filtered). No post of any role
+ * moves the cursor or silences a signal here, so who wrote a [qa] line doesn't matter and the block's
+ * trust list isn't read (#148): an outsider's [qa] PASS is as inert as QA's own.
  * [executor] and [reviewer] comments do not trigger re-evaluation (executor fixes
  * produce SHA changes; reviewer findings are irrelevant to A.C. evaluation).
  *
