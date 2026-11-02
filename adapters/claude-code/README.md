@@ -265,8 +265,9 @@ to the outbox as one message, for a deployment where nobody watches the terminal
 - Prompt injection: issue and PR text reaches the model. Run on private repos with
   `trusted-authors` set (see the root README's Security section). A PR's comments, reviews and
   inline comments reach the loops only from trusted authors (#151): the signal scripts drop
-  anyone else's, and every role reads the thread through `pr-thread.mjs`. Comments on the issue
-  itself are not filtered yet.
+  anyone else's, and every role reads the thread through `pr-thread.mjs`. The same holds for the
+  issue a PR closes (#153): `pr-thread.mjs --issue` prints its title and body only for a trusted
+  author, and only trusted authors' comments on it.
 - Reviewer's "has this been answered" judgement is model-dependent; the thread is always re-read
   before posting, which narrows but does not close the race with a concurrent executor push.
 - Mailbox: without the outbox and the three inbox lines in the clone's settings (see "Mailbox"

@@ -108,6 +108,24 @@ nothing from that PR's thread that cycle. The signals carry what they carried be
 executor's poll its blocks, now with every item's `id:`; the reviewer's and QA's a PR number), and
 the agent reads the rest there.
 
+**The agents read an issue through `pr-thread.mjs --issue <n>`** (#153), never `gh issue view` or a
+`gh api` read of the issue or its comments. It prints one `ISSUE` block first (`id:`, `author:`,
+`trusted: yes|no` by the same rule, `state:`, `labels:`, `at:`, then `title:` and the body
+indented only when the author is trusted), then the trusted comments as `COMMENT` blocks and
+`UNTRUSTED <count>` for the rest; a PR's number, an unreadable block or a failed `gh` call is exit
+2. The executor's author check is that `trusted:` line: `no` → one `[executor] Skipped:` comment,
+never a claim, and never a hand-off to the operator (an outsider's issue is not work, and handing
+it on would let anyone fill the operator's queue by filing issues). The reviewer and QA take an
+untrusted author's issue as stating no criteria: only trusted comments on it or on the PR can, and
+with none the reviewer asks the operator (a `[reviewer] Question:`) and QA posts `BLOCKED`, so the
+operator states the criteria in a comment on the PR, where the waiters wake (they read the PR's
+comments, not the issue's). `pick-next.mjs` still reads issue bodies
+for `Depends on`, in the script, and prints only a number: an outsider's issue is picked like any
+and then skipped by the author check, and an outsider can't put one in a milestone. An outsider's
+issue the operator wants worked is re-filed (or its content carried into a new issue) by a trusted
+author. A milestone or label a maintainer adds doesn't make its body direction: the text is still
+the outsider's.
+
 **Outside input** (a contributor who isn't trusted, a user's report on a PR) reaches the loop only
 through a trusted login: an issue the operator files or triages (the executor's author check), or
 a trusted login's comment quoting it. A project that wants outsiders' comments acted on adds them
@@ -534,7 +552,9 @@ trusted author's claim counts (#134): its login is in `trusted-authors`, or, whe
 nobody, its association is in `allow-author-associations`, read from the block on the default
 branch. Anyone else's claim line is ignored as if it weren't there, by `claims.mjs`, by
 `pick-next.mjs`'s `RESUME` and by the claim step's race, so a comment cannot turn a held claim
-into a lost one. An executor whose own login isn't trusted deletes its claim and stops. A claim
+into a lost one. The race is `claims.mjs --race <the claim's id>` (`RACE_WON`, `RACE_LOST`,
+`RACE_UNTRUSTED <login>`, `RACE_UNKNOWN`): it decides on ids, times and trust and prints no
+comment's text, since anyone can post an `[executor] Claimed by` line with more after it (#153). An executor whose own login isn't trusted deletes its claim and stops. A claim
 is live when it was posted no more than 10 minutes before the executor's own (GitHub's
 `created_at` on both, never the local clock). An older claim that still holds already carries the
 label, which the executor checks first; an older one that does not is from a claim since released

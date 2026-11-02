@@ -15,7 +15,8 @@
 //   openPrs   → gh pr list ... --state open --json, when set (array; else `prs`)
 //   prView    → gh pr view N ... --json                      (object)
 //   issues    → gh issue list (open ones, --milestone filters on .milestone.title) and
-//               gh api repos/o/r/issues/N → { state: 'open' | 'closed', labels } (array: { number, body, labels,
+//               gh api repos/o/r/issues/N → { state: 'open' | 'closed', labels, and user, author_association,
+//               title, body, created_at, pull_request as given } (array: { number, body, labels,
 //               state?: 'OPEN' | 'CLOSED' | 'MERGED', milestone? }; a MERGED entry is a PR)
 //   milestones → gh api repos/o/r/milestones?…                 (array: { number, title, state })
 //   repo      → gh api repos/o/r                              (object; default { default_branch: 'main' })
@@ -146,7 +147,10 @@ if (args[0] === 'api') {
       process.stderr.write('gh: Not Found (HTTP 404)\n')
       process.exit(1)
     }
-    out({ number: issue.number, state: (issue.state ?? 'OPEN') === 'OPEN' ? 'open' : 'closed', labels: issue.labels ?? [] })
+    // The REST issue's other fields (user, author_association, title, body, created_at, pull_request)
+    // as the fixture gives them.
+    const { user, author_association, title, body, created_at, pull_request } = issue
+    out({ number: issue.number, state: (issue.state ?? 'OPEN') === 'OPEN' ? 'open' : 'closed', labels: issue.labels ?? [], user, author_association, title, body, created_at, pull_request })
   }
   process.stderr.write(`fake-gh: unhandled api target ${target}\n`)
   process.exit(2)

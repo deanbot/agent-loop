@@ -42,7 +42,10 @@ Three layers. Boundaries are strict.
   thread is read (no verdict, finding, revocation, answer or direction). With the block unreadable
   no `NEW_*` signal is given and the comment cursors stay put; a waiter retries. Each block names
   its item's `id:`.
-- `scripts/pr-thread.mjs` — a PR's thread as the agents read it (#151). `--repo owner/repo --pr
+- `scripts/pr-thread.mjs` — a PR's thread, or an issue, as the agents read it (#151, #153).
+  `--issue <n>` instead of `--pr` prints an `ISSUE` block (`id:`, `author:`, `trusted: yes|no`,
+  `state:`, `labels:`, `at:`, and `title:` and the body only for a trusted author), then the
+  trusted comments and `UNTRUSTED <count>`; a PR's number is exit 2. `--repo owner/repo --pr
   <n>` prints every trusted author's comment, review and inline comment, oldest first (`COMMENT`,
   `REVIEW` or `INLINE`, then `id:`, `author:`, `at:` and the body indented), then `UNTRUSTED
   <count>` for what it left out, or `EMPTY`; exit 2 with the block unreadable or a failed `gh`
@@ -53,7 +56,10 @@ Three layers. Boundaries are strict.
   same-repository PR whose body says `Closes #<N>`) or `NONE`; exit 2 on a failed `gh` call, on
   which the executor stops rather than claims. It replaces a `--jq` regex filter that drew Claude
   Code's safety check.
-- `scripts/claims.mjs` — the executor's claim check on resume. `--repo owner/repo --issue <N>
+- `scripts/claims.mjs` — the executor's claim check on resume, and its claim race. `--race
+  <your claim's comment id>` (with only `--repo` and `--issue`) prints `RACE_WON`, `RACE_LOST`,
+  `RACE_UNTRUSTED <login>` or `RACE_UNKNOWN`, decided on ids, times and trust, never printing a
+  comment's text (#153). `--repo owner/repo --issue <N>
   --clone <clone> [--in-progress-label <l>] [--blocked-label <l>]` prints one of `CLAIM_CLOSED`,
   `CLAIM_BLOCKED`, `CLAIM_RELEASED` (open, not in progress), `CLAIM_HELD` (the newest
   `[executor] Claimed by` comment names the clone), `CLAIM_LOST <clone>` or `CLAIM_NONE` (no claim
