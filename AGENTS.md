@@ -42,7 +42,10 @@ Three layers. Boundaries are strict.
   thread is read (no verdict, finding, revocation, answer or direction). With the block unreadable
   no `NEW_*` signal is given and the comment cursors stay put; a waiter retries. Each block names
   its item's `id:`.
-- `scripts/pr-thread.mjs` — a PR's thread as the agents read it (#151). `--repo owner/repo --pr
+- `scripts/pr-thread.mjs` — a PR's thread, or an issue, as the agents read it (#151, #153).
+  `--issue <n>` instead of `--pr` prints an `ISSUE` block (`id:`, `author:`, `trusted: yes|no`,
+  `state:`, `labels:`, `at:`, and `title:` and the body only for a trusted author), then the
+  trusted comments and `UNTRUSTED <count>`; a PR's number is exit 2. `--repo owner/repo --pr
   <n>` prints every trusted author's comment, review and inline comment, oldest first (`COMMENT`,
   `REVIEW` or `INLINE`, then `id:`, `author:`, `at:` and the body indented), then `UNTRUSTED
   <count>` for what it left out, or `EMPTY`; exit 2 with the block unreadable or a failed `gh`

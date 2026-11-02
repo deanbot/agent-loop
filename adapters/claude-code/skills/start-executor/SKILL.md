@@ -180,7 +180,7 @@ Rules that hold for the whole session:
 **Resume** (step 4 found an issue you hold): skip the rest of this section. Stay on the branch and
 keep the working tree. If an open PR has `Closes #<N>` (the lookup below), orient on it and enter
 the loop. Otherwise read [reference/implement.md](reference/implement.md) from §2 (the issue and
-every comment), then see what is done: `git log --oneline main..HEAD`, `git status --porcelain`,
+its trusted comments, through `pr-thread.mjs --issue`), then see what is done: `git log --oneline main..HEAD`, `git status --porcelain`,
 `git diff HEAD`. Continue from there; do not re-claim and do not start over. Say `Resuming #<N> on
 <branch>` in the line after the model and Track lines.
 
