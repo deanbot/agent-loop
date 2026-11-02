@@ -295,6 +295,13 @@ new file, or `NONE`:
   --to unknown --context inbox --task <messageId> --text "Not acted on: <messageId>.json is not a
   valid message (<the reason>)."` (the reason in plain words, as above).
 - **`NONE`** → nothing to do.
+- **`MAILBOX_ERROR: <inbox>: <code>`** (exit 5) → the inbox can't be read any more (it went bad
+  after the start's check, #98). Once: print `⚠ Mailbox off: <the line>; running without it.` in
+  the status line and send that line to your outbox (`node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs
+  --send --dir <outbox> --role ROLE_AGENT --from <clone> --to operator --context <repo>
+  --text "<the line in plain words>"`; a failed send changes nothing). Then run without a mailbox
+  for the rest of the session: no step 0, and `<inbox-flag>` empty on every waiter. Never retry
+  the read each cycle.
 
 A cycle that handled a message is not idle: it takes the normal wait.
 
