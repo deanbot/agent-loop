@@ -175,7 +175,9 @@ function gather() {
   const clipped = spans
     .map((s) => ({ ...s, ended: s.to, from: iso(Math.max(Date.parse(s.from), since)), to: iso(Math.min(Date.parse(s.to), until)) }))
     .filter((s) => Date.parse(s.to) > Date.parse(s.from))
-  return { prs: [...byNumber.values()], attempts, spans: clipped }
+  // The PRs open now: only their executor waiters count in the idle line (#108).
+  const openPrs = new Set((gh('pr', 'list', '--repo', repo, '--state', 'open', '--limit', '1000', '--json', 'number') ?? []).map((p) => p.number))
+  return { prs: [...byNumber.values()], attempts, spans: clipped, openPrs }
 }
 
 function findings({ prs, attempts, spans }) {
@@ -300,26 +302,49 @@ function median(list) {
 const notes = []
 let claimStats = null
 
-// Wake-ups that found nothing: each waiter's current idle streak, from this machine's state folder.
-function idleStreaks() {
+// Wake-ups that found nothing: each waiter's idle streak at the time of the run, from this machine's
+// state folder. A file is read for its waiter's kind and PR only, never named in the report (it is a
+// local file name, #108): the executor's (pr-poll) for an open PR, and the role waiters, the
+// reviewer's (pr-state, any clone, whose name is left out) and QA's (pr-qa). A merged or closed PR's
+// waiter is a leftover, and a name that fits none of these (another repository's, an old format) is
+// skipped.
+const WAITER_ORDER = { 'pr-poll': 0, 'pr-state': 1, 'pr-qa': 2 }
+function idleStreaks(openPrs) {
   const dir = path.join(homedir(), '.agent-loop', 'state')
-  const slug = repo.replace('/', '-')
+  const slug = repo.replace('/', '-').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const kinds = [
+    [new RegExp(`^${slug}-pr-poll-(\\d+)-wait\\.json$`), (m) => ({ waiter: 'pr-poll', pr: Number(m[1]) })],
+    [new RegExp(`^${slug}-pr-state(-[^/]+)?-wait\\.json$`), () => ({ waiter: 'pr-state' })],
+    [new RegExp(`^${slug}-pr-qa-state-wait\\.json$`), () => ({ waiter: 'pr-qa' })],
+  ]
+  let files
   try {
-    return readdirSync(dir)
-      .filter((f) => f.startsWith(`${slug}-`) && f.endsWith('-wait.json'))
-      .map((f) => {
-        try {
-          const idle = JSON.parse(readFileSync(path.join(dir, f), 'utf8')).idle
-          return Number.isInteger(idle) ? { file: f, idle } : null
-        } catch {
-          return null
-        }
-      })
-      .filter(Boolean)
+    files = readdirSync(dir)
   } catch {
     return []
   }
+  return files
+    .map((f) => {
+      let kind = null
+      for (const [re, of] of kinds) {
+        const m = re.exec(f)
+        if (m) {
+          kind = of(m)
+          break
+        }
+      }
+      if (!kind || (kind.pr !== undefined && !openPrs.has(kind.pr))) return null
+      try {
+        const idle = JSON.parse(readFileSync(path.join(dir, f), 'utf8')).idle
+        return Number.isInteger(idle) ? { ...kind, idle } : null
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => WAITER_ORDER[a.waiter] - WAITER_ORDER[b.waiter] || (a.pr ?? 0) - (b.pr ?? 0) || a.idle - b.idle)
 }
+const waiterName = (i) => (i.waiter === 'pr-poll' ? `the executor's on PR #${i.pr}` : i.waiter === 'pr-state' ? "the reviewer's" : "QA's")
 
 let data
 try {
@@ -332,7 +357,7 @@ try {
 const result = findings(data)
 const ids = new Set(result.map((f) => f.id))
 const unmatchedFloor = floor.filter((id) => !ids.has(id))
-const idle = idleStreaks()
+const idle = idleStreaks(data.openPrs)
 const command = ['node scripts/audit.mjs', '--repo', repo, '--since', iso(since), '--until', iso(until), ...(floor.length ? ['--floor', floor.join(',')] : []),
   ...(arg('--operators') ? ['--operators', list(arg('--operators')).join(',')] : []), ...(arg('--labels') ? ['--labels', labels.join(',')] : []),
   ...(arg('--in-progress-label') ? ['--in-progress-label', inProgress] : [])].join(' ')
@@ -370,6 +395,6 @@ lines.push('## Measured, no finding', '')
 for (const n of notes) lines.push(`- ${n}`)
 if (unmatchedFloor.length) lines.push(`- \`audit-floor\` ids that matched no control in this period: ${unmatchedFloor.map((id) => `\`${id}\``).join(', ')}.`)
 lines.push(idle.length
-  ? `- Wake-ups that found nothing, as each waiter's current idle streak on this machine: ${idle.map((i) => `${i.file} ${i.idle}`).join(', ')}. What a wake-up catches isn't recorded, so there is no finding.`
+  ? `- Wake-ups that found nothing: ${idle.length} waiter${idle.length === 1 ? '' : 's'} on this machine, for open PRs and the roles, with their idle streaks at the time of the run (not counts over the period): ${idle.map((i) => `${waiterName(i)} ${i.idle}`).join(', ')}. What a wake-up catches isn't recorded, so there is no finding.`
   : '- Wake-ups that found nothing: no waiter state for this repository on this machine.')
 process.stdout.write(lines.join('\n') + '\n')

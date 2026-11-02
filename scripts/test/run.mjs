@@ -1613,6 +1613,41 @@ const idleOf = (out) => /^IDLE (\d+)$/m.exec(out)?.[1] ?? null
   const own = run(ctx, 'pick-next.mjs', ['--repo', REPO], { issues: [{ number: 5, title: 'a', body: '', labels: [{ name: 'audit' }] }, { number: 6, title: 'b', body: '', labels: [] }] }).trim()
   check('pick: an issue labelled auditor-report is never picked; a project\'s own audit label is not that label', picked === 'ISSUE:6' && own === 'ISSUE:5', `${picked} ${own}`)
   rmSync(ctx.home, { recursive: true, force: true })
+
+  // The idle line (#108): no state file, path or clone name; only open PRs' executor waiters and the
+  // role waiters; streaks at the time of the run.
+  const args = ['--repo', REPO, '--since', '2026-03-01', '--until', '2026-03-31']
+  const ictx = makeEnv()
+  const none = run(ictx, 'audit.mjs', args, fx)
+  check('audit idle (#108): no state folder → "no waiter state for this repository on this machine"',
+    none.includes('\n- Wake-ups that found nothing: no waiter state for this repository on this machine.\n'), none)
+  const dir = path.join(ictx.home, '.agent-loop', 'state')
+  mkdirSync(dir, { recursive: true })
+  const empty = run(ictx, 'audit.mjs', args, fx)
+  check('audit idle (#108): an empty state folder → the same line', empty.includes('\n- Wake-ups that found nothing: no waiter state for this repository on this machine.\n'), empty)
+  const seed = (name, idle) => writeFileSync(path.join(dir, name), JSON.stringify({ baseline: 'NONE', activity: null, idle }))
+  seed('acme-widgets-pr-poll-12-wait.json', 4) // open
+  seed('acme-widgets-pr-poll-11-wait.json', 0) // merged: a leftover
+  seed('acme-widgets-pr-poll-3-wait.json', 2) // open
+  seed('acme-widgets-pr-state-rev-a-wait.json', 1)
+  seed('acme-widgets-pr-qa-state-wait.json', 5)
+  seed('acme-widgets-two-pr-poll-12-wait.json', 9) // another repository's slug that starts the same
+  seed('acme-widgets-pr-poll-state-wait.json', 9) // no waiter of today
+  writeFileSync(path.join(dir, 'acme-widgets-pr-poll-12.json'), '{}')
+  const ifx = { ...fx, openPrs: [{ number: 3 }, { number: 12 }] }
+  const imd = run(ictx, 'audit.mjs', args, ifx)
+  const line = imd.split('\n').find((l) => l.startsWith('- Wake-ups that found nothing')) ?? ''
+  check('audit idle (#108): open PRs\' executor waiters and the role waiters, by role and PR, in order; the merged PR\'s and others\' left out; current streaks, not period counts',
+    line === "- Wake-ups that found nothing: 4 waiters on this machine, for open PRs and the roles, with their idle streaks at the time of the run (not counts over the period): the executor's on PR #3 2, the executor's on PR #12 4, the reviewer's 1, QA's 5. What a wake-up catches isn't recorded, so there is no finding.", line)
+  check('audit idle (#108): the markdown names no state file, folder or clone', !imd.includes('-wait.json') && !imd.includes('.agent-loop') && !imd.includes('rev-a') && !imd.includes(ictx.home), imd)
+  const ijson = run(ictx, 'audit.mjs', [...args, '--format', 'json'], ifx)
+  check('audit idle (#108): --format json keeps the detail without file names',
+    JSON.stringify(JSON.parse(ijson).idle) === '[{"waiter":"pr-poll","pr":3,"idle":2},{"waiter":"pr-poll","pr":12,"idle":4},{"waiter":"pr-state","idle":1},{"waiter":"pr-qa","idle":5}]' &&
+      !ijson.includes('-wait.json') && !ijson.includes('rev-a'), ijson)
+  const gone = run(ictx, 'audit.mjs', args, { ...fx, openPrs: [] })
+  check('audit idle (#108): with no PR open only the role waiters count',
+    gone.includes(": the reviewer's 1, QA's 5. ") && gone.includes('2 waiters on this machine'), gone)
+  rmSync(ictx.home, { recursive: true, force: true })
 }
 
 // ---------------------------------------------------------------- already read before the role's own post (#28)
