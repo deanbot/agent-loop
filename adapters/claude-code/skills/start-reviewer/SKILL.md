@@ -74,7 +74,8 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
 4. `$ARGUMENTS` may hold `--skip n,n,…` (PR numbers to ignore) and `--inbox <folder> --outbox
    <folder>` (step 3). `<skip>` below is the `--skip n,n,…` part, or empty: pass only that to the
    watch script, never `--outbox`.
-5. **Mailbox**: step 3's `MAILBOX` or `NO_MAILBOX` line decided it.
+5. **Mailbox**: step 3's `MAILBOX` or `NO_MAILBOX` line decided it, before any later step could
+   send you anywhere: no inbox is read on any other word (#109).
 
 Rules that hold for the whole session:
 
@@ -149,7 +150,8 @@ session and end every later cycle with `ScheduleWakeup({ delaySeconds: 300, … 
 those cycles still runs the watch, so news is seen within five minutes. A waiter that exits 0
 (`PENDING` or `NONE`) ends the count and the 5-minute rhythm.
 
-0. With a mailbox, first `node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --dir <inbox>`, in the
+0. With a mailbox (only `<inbox>` from this start's step 3 `MAILBOX <inbox>` line, which the
+   start check settles before any later step can send you here), first `node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --dir <inbox>`, in the
    foreground, once per cycle, and handle what it prints before any signal ("Messages").
 1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-watch.mjs --repo <repo> <as> --needs-operator-label
    <needs-operator-label> --idle-after 3 <skip>`, in the foreground, once per cycle. One line,
@@ -295,6 +297,13 @@ new file, or `NONE`:
   --to unknown --context inbox --task <messageId> --text "Not acted on: <messageId>.json is not a
   valid message (<the reason>)."` (the reason in plain words, as above).
 - **`NONE`** → nothing to do.
+- **`MAILBOX_ERROR: <inbox>: <code>`** (exit 5) → the inbox can't be read any more (it went bad
+  after the start's check, #98). Once: print `⚠ Mailbox off: <the line>; running without it.` in
+  the status line and send that line to your outbox (`node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs
+  --send --dir <outbox> --role ROLE_AGENT --from <clone> --to operator --context <repo>
+  --text "<the line in plain words>"`; a failed send changes nothing). Then run without a mailbox
+  for the rest of the session: no step 0, and `<inbox-flag>` empty on every waiter. Never retry
+  the read each cycle.
 
 A cycle that handled a message is not idle: it takes the normal wait.
 
@@ -402,8 +411,8 @@ stopped". Nothing else. A task notification that arrives after the stop is not a
 nothing.
 
 **Superseded** (a beat printed `SUPERSEDED <id>`, or the guard refused a command as
-superseded): stop the running waiter with `TaskStop`, call `ScheduleWakeup({ stop: true })`, and
-say "Reviewer stopped: session <id> took over this clone". Nothing else: no label, no release, no
+superseded): stop the waiter with `TaskStop` if one still runs; a waiter that exited 4 has
+already ended. Then call `ScheduleWakeup({ stop: true })`, and say "Reviewer stopped: session <id> took over this clone". Nothing else: no label, no release, no
 comment, no git command. The new session carries on with the clone's work.
 
 ## Permissions

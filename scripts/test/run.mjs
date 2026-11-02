@@ -2722,6 +2722,42 @@ const putMessage = (dir, id, extra, meta) => {
   check('wait --inbox (poll): a standing MERGE_READY stays quiet, and a new message ends the executor\'s waiter → PENDING', r.out === 'PENDING\n' && r.ms >= 1500 && r.ms < 5000, `${r.ms}ms\n${r.out}${r.err}`)
   rmSync(ctx.home, { recursive: true, force: true })
 }
+// #98: an inbox that goes bad after the start's check is one line and exit 5, never a stack trace.
+{
+  const ctx = makeEnv()
+  const file = path.join(ctx.home, 'a-file')
+  writeFileSync(file, 'x')
+  const under = path.join(file, 'inbox')
+  const noStack = (r) => !/\n\s+at /.test(r.out + r.err) && !/Error:/.test(r.out + r.err)
+  const u = inbox(ctx, ['--dir', under])
+  check('inbox (#98): --dir under a file → MAILBOX_ERROR: <inbox>: ENOTDIR on stdout, exit 5, no stack trace',
+    u.code === 5 && u.out === `MAILBOX_ERROR: ${under}: ENOTDIR\n` && noStack(u), JSON.stringify(u))
+  const asFile = inbox(ctx, ['--dir', file])
+  check('inbox (#98): --dir naming a file → MAILBOX_ERROR …: ENOTDIR, exit 5', asFile.code === 5 && asFile.out === `MAILBOX_ERROR: ${file}: ENOTDIR\n` && noStack(asFile), JSON.stringify(asFile))
+  const uw = inbox(ctx, ['--dir', under, '--wait', '1', '--max', '2'])
+  check('inbox (#98): … with --wait the same line and exit 5 at once, no wait', uw.code === 5 && uw.out === `MAILBOX_ERROR: ${under}: ENOTDIR\n` && noStack(uw), JSON.stringify(uw))
+  const locked = path.join(ctx.home, 'locked')
+  mkdirSync(locked)
+  chmodSync(locked, 0o000)
+  const l = inbox(ctx, ['--dir', locked])
+  chmodSync(locked, 0o755)
+  // Root reads any folder: there the unreadable case can't be made, so it checks only the shape.
+  const root = typeof process.getuid === 'function' && process.getuid() === 0
+  check('inbox (#98): an unreadable inbox (no read permission) → MAILBOX_ERROR: <inbox>: EACCES, exit 5, no stack trace',
+    root ? l.code === 0 : l.code === 5 && l.out === `MAILBOX_ERROR: ${locked}: EACCES\n` && noStack(l), JSON.stringify(l))
+  const missing = inbox(ctx, ['--dir', path.join(ctx.home, 'not-yet')])
+  check('inbox (#98): an inbox that doesn\'t exist is still NONE, exit 0', missing.code === 0 && /^NONE \S+\n$/.test(missing.out), JSON.stringify(missing))
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // Every Claude Code loop says what MAILBOX_ERROR means: report once, then no mailbox for good.
+  const skillsDir = path.resolve(scripts, '..', 'adapters', 'claude-code', 'skills')
+  const noRule = ['executor', 'reviewer', 'qa'].filter((r) => {
+    const t = readFileSync(path.join(skillsDir, `start-${r}`, 'SKILL.md'), 'utf8').replace(/\n\s*/g, ' ')
+    return !t.includes('**`MAILBOX_ERROR: <inbox>: <code>`** (exit 5)') || !t.includes('Once: print `⚠ Mailbox off: <the line>; running without it.` in the status line and send that line to your outbox') ||
+      !t.includes('Then run without a mailbox for the rest of the session: no step 0, and `<inbox-flag>` empty on every waiter. Never retry the read each cycle.')
+  })
+  check('inbox (#98): every Claude Code loop reports MAILBOX_ERROR once (status line and outbox) and runs without the mailbox from then on, never retrying', noRule.length === 0, noRule.join('\n'))
+}
 
 // ---------------------------------------------------------------- pull.mjs
 {
@@ -3892,6 +3928,33 @@ const putMessage = (dir, id, extra, meta) => {
   })
   check('start lines (#128): every Claude Code start runs start-check.mjs with each mailbox folder it was given, branches on its lines, and leaves the ⚠ lines to the hook',
     noStart.length === 0, noStart.join('\n'))
+
+  // #109: a live resume went step 4 → Resume → the loop and read the inbox before the mailbox
+  // check. The check is the start check's (step 3) now; it must come before every jump to Resume or
+  // the loop, the loop's inbox read must take only its MAILBOX line, and the Resume jump names it.
+  const jumps = ['→ **Resume**', 'enter the loop', 'enter executor loop', '## The loop', 'Each cycle:']
+  const early = ['executor', 'reviewer', 'qa'].filter((r) => {
+    const t = flat(read(`claude-code/skills/start-${r}/SKILL.md`))
+    const settled = Math.max(t.indexOf(startCmd(r)), t.indexOf('`MAILBOX <inbox>` → you have a mailbox'))
+    const firstJump = Math.min(...jumps.map((j) => t.indexOf(j)).filter((i) => i !== -1))
+    const step0 = t.indexOf('0. With a mailbox (only `<inbox>` from this start\'s step 3 `MAILBOX <inbox>` line, which the start check settles before any later step can send you here), first `node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --dir <inbox>`')
+    const anyInbox = t.indexOf('inbox.mjs --dir <inbox>')
+    return t.indexOf(startCmd(r)) === -1 || settled > firstJump || step0 === -1 || anyInbox < step0 ||
+      (r === 'executor' && !t.includes("→ **Resume** (below; step 3's start check has already settled the mailbox"))
+  })
+  check('mailbox order (#109): in every Claude Code start the start check settles the mailbox before any jump to Resume or the loop, the loop\'s inbox read takes only its MAILBOX line, and the executor\'s Resume jump names it',
+    early.length === 0, early.join('\n'))
+  // A superseded session's waiter has often exited 4 (TAKEN_OVER) already, and a live stop's
+  // TaskStop on it failed: the stop is only for a waiter that still runs.
+  const hardStop = ['executor', 'reviewer', 'qa'].filter((r) => {
+    const t = flat(read(`claude-code/skills/start-${r}/SKILL.md`))
+    const at = t.indexOf('**Superseded** (a beat printed `SUPERSEDED <id>`')
+    const para = at === -1 ? '' : t.slice(at, at + 400)
+    return !para.includes('stop the waiter with `TaskStop` if one still runs; a waiter that exited 4 has already ended.') || para.includes('stop the running waiter')
+  })
+  check('superseded stop: every Claude Code role stops the waiter only if one still runs (one that exited 4 has ended)', hardStop.length === 0, hardStop.join('\n'))
+  const noMailboxRoles = ['generic/executor.md', 'generic/reviewer.md', 'generic/qa.md', 'kiro/skills/start-executor/SKILL.md', 'kiro/skills/start-reviewer/SKILL.md'].filter((f) => read(f).includes('inbox.mjs --dir'))
+  check('mailbox order (#109): generic and Kiro starts have no mailbox (NO_MAILBOX), so none reads an inbox', noMailboxRoles.length === 0, noMailboxRoles.join('\n'))
 
   // #142: a live resume decided the branch and the tree from the context's start snapshot and
   // passed the stale-claim clear by. Both are start-check.mjs's lines now, in every executor.
