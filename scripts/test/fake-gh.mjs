@@ -12,6 +12,7 @@
 //   commits   → gh api repos/o/r/pulls/N/commits             (array)
 //   checks    → gh pr checks N ... --json                    (array; null → "no checks reported", exit 1)
 //   prs       → gh pr list ... --json                        (array)
+//   openPrs   → gh pr list ... --state open --json, when set (array; else `prs`)
 //   prView    → gh pr view N ... --json                      (object)
 //   issues    → gh issue list (open ones, --milestone filters on .milestone.title) and
 //               gh api repos/o/r/issues/N → { state: 'open' | 'closed', labels, and user, author_association,
@@ -165,6 +166,7 @@ if (args[0] === 'pr' && args[1] === 'checks') {
   }
   out(fixture.checks)
 }
+if (args[0] === 'pr' && args[1] === 'list' && args[args.indexOf('--state') + 1] === 'open' && fixture.openPrs !== undefined) out(fixture.openPrs)
 if (args[0] === 'pr' && args[1] === 'list') out(fixture.prs)
 if (args[0] === 'pr' && args[1] === 'view') out(fixture.prView)
 if (args[0] === 'issue' && args[1] === 'list' && args[args.indexOf('--state') + 1] === 'closed') {

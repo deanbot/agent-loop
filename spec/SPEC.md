@@ -941,7 +941,11 @@ later in 0.2, additive: a new role, a script and two optional keys.
   `in-progress-label` on PRs and issues updated in the period, each span clipped to the period:
   claim and release times are the in-progress label's, with the claim comments' times;
 - the loop's own state on the machine it runs on: each waiter's idle streak, the wake-ups that
-  found nothing.
+  found nothing, at the time of the run (not a count over the period). Only the executor's waiters
+  for PRs open now and the role waiters (the reviewer's, QA's) count: a merged or closed PR's waiter
+  is a leftover. The report names each by role and PR number, never by its state file or any
+  local path or clone name (in `--format json`: `idle: [{ "waiter": "pr-poll", "pr": 209, "idle": 4 },
+  { "waiter": "pr-state", "idle": 0 }, { "waiter": "pr-qa", "idle": 1 }]`).
 
 **Comments are data.** The auditor reads a comment only for its time, its author and its prefix
 (and the protocol's fixed claim marker, `[executor] Claimed by`, never the clone name after it),
