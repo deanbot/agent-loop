@@ -10,9 +10,12 @@
  *   Operator comment (unprefixed) — may be manual-verification confirmation for
  *                   observation-required items; triggers QA_READY so QA can re-evaluate
  *
- * [qa] own posts are not tracked as operator comments (own prefix filtered). No post of any role
- * moves the cursor or silences a signal here, so who wrote a [qa] line doesn't matter and the block's
- * trust list isn't read (#148): an outsider's [qa] PASS is as inert as QA's own.
+ * [qa] own posts are not tracked as operator comments (own prefix filtered).
+ * A comment counts only from a trusted author (#151): `trusted-authors`, else
+ * `allow-author-associations`, in the block on the default branch. An outsider's unprefixed comment
+ * is not the operator confirming a criterion, so it triggers nothing. QA reads the thread through
+ * pr-thread.mjs, which drops the same comments. A run that can't read the block prints NONE and keeps
+ * its state (everything withheld); a waiter logs it and retries.
  * [executor] and [reviewer] comments do not trigger re-evaluation (executor fixes
  * produce SHA changes; reviewer findings are irrelevant to A.C. evaluation).
  *
@@ -37,6 +40,7 @@ import { readFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
+import { fetchAgents, trustedItems, REPO_NAME } from './lib/block.mjs'
 
 const USAGE = 'pr-qa.mjs --repo owner/repo [--skip <n,n,...>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
@@ -47,6 +51,22 @@ function arg(name) {
 
 const repo = arg('--repo')
 if (!repo) usageError(USAGE)
+if (!REPO_NAME.test(repo)) usageError(USAGE, `--repo: expected owner/repo, got "${repo}"`)
+
+// The default branch's AGENTS.md text, or null when it can't be read. Kept once read. A waiter's
+// pass (dry) throws instead, so the failure is logged and retried, never a silent NONE.
+let agentsText
+function readAgents(gh, dry) {
+  if (agentsText !== undefined) return agentsText
+  try {
+    agentsText = fetchAgents(gh, repo)
+  } catch (e) {
+    if (dry) throw e
+    process.stderr.write(`pr-qa: could not read the Agent loop block (signals withheld): ${e.message}\n`)
+    agentsText = null // kept for the rest of this one-shot run (only it passes dry: false)
+  }
+  return agentsText
+}
 
 // `gh api --paginate` prints one JSON document per page; `--slurp` wraps them in one array (gh ≥ 2.43).
 function ghApiAll(gh, path) {
@@ -67,7 +87,12 @@ const skip = new Set(
     .map(Number)
 )
 
-function pass({ gh, save }) {
+function pass({ gh, save, dry }) {
+  // Whose comments are the operator's comes from the block (#151). Without it nothing here can be
+  // decided safely, so the run withholds everything and keeps the state for the next one.
+  const agents = readAgents(gh, dry)
+  if (agents === null) return `NONE ${new Date().toISOString()}\n`
+  const commentsOf = (number) => trustedItems(agents, ghApiAll(gh, `repos/${repo}/issues/${number}/comments`))
   let state = {}
   try {
     state = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
@@ -101,12 +126,12 @@ function pass({ gh, save }) {
       }
       // Seed comment cursor when SHA changes — prevents pre-existing comments from
       // re-firing as QA_READY on the next cycle after a commit.
-      const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
+      const comments = commentsOf(number)
       entry.lastComment = comments.length > 0 ? comments.at(-1).id : (entry.lastComment ?? 0)
     } else {
       // No new commits — check for new operator (unprefixed) comments.
       // These may be manual-verification confirmations for observation-required items.
-      const comments = ghApiAll(gh, `repos/${repo}/issues/${number}/comments`)
+      const comments = commentsOf(number)
       if (entry.lastComment === null) {
         // First comment tracking run — seed cursor, emit nothing.
         entry.lastComment = comments.length > 0 ? comments.at(-1).id : 0

@@ -57,9 +57,15 @@ export function trustTest(agents) {
   return (c) => associations.includes(String(c?.author_association ?? '').toUpperCase())
 }
 
-// A comment that speaks as one of the loop's roles. Its prefix counts only from a trusted author
-// (#148): a role-prefixed comment from anyone else is no agent's and no operator's.
-export const ROLE_PREFIX = /^\[(executor|reviewer|qa)\]/
+// The items of a PR thread (issue comments, review submissions, inline review comments) a loop may
+// read at all: only a trusted author's (#148 for role comments, #151 for operator direction).
+// Anyone else's is no agent's post and no operator's direction, so it is dropped before anything
+// reads the list. `agents` null (the block unreadable) → nobody is trusted, so nothing is kept.
+export function trustedItems(agents, items) {
+  if (agents === null || agents === undefined) return []
+  const trusted = trustTest(agents)
+  return items.filter((c) => trusted(c))
+}
 
 // owner/repo in GitHub's own name characters: fetchAgents puts it on a gh command line.
 export const REPO_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/

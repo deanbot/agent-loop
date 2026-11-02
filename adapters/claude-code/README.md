@@ -263,7 +263,10 @@ to the outbox as one message, for a deployment where nobody watches the terminal
 
 - Single account: no formal reviews; the comment-prefix protocol is the review channel.
 - Prompt injection: issue and PR text reaches the model. Run on private repos with
-  `trusted-authors` set (see the root README's Security section).
+  `trusted-authors` set (see the root README's Security section). A PR's comments, reviews and
+  inline comments reach the loops only from trusted authors (#151): the signal scripts drop
+  anyone else's, and every role reads the thread through `pr-thread.mjs`. Comments on the issue
+  itself are not filtered yet.
 - Reviewer's "has this been answered" judgement is model-dependent; the thread is always re-read
   before posting, which narrows but does not close the race with a concurrent executor push.
 - Mailbox: without the outbox and the three inbox lines in the clone's settings (see "Mailbox"
