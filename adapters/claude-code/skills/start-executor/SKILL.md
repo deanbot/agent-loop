@@ -553,8 +553,8 @@ for the operator, and the reply to it belongs to that role: nothing for you.
   ${CLAUDE_SESSION_ID}`, and say "Executor stopped". Nothing else. A task notification that
   arrives after the stop is not a continuation: do nothing.
 - **Superseded** (a beat printed `SUPERSEDED <id>`, or the guard refused a command as
-  superseded): stop the running waiter with `TaskStop`, call `ScheduleWakeup({ stop: true })`, and
-  say "Executor stopped: session <id> took over this clone". Nothing else: no label, no release,
+  superseded): stop the waiter with `TaskStop` if one still runs; a waiter that exited 4 has
+  already ended. Then call `ScheduleWakeup({ stop: true })`, and say "Executor stopped: session <id> took over this clone". Nothing else: no label, no release,
   no comment, no git command. The claims belong to the clone, and the new session carries them on.
 
 ## Permissions

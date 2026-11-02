@@ -404,8 +404,8 @@ stopped". Nothing else. A task notification that arrives after the stop is not a
 nothing.
 
 **Superseded** (a beat printed `SUPERSEDED <id>`, or the guard refused a command as
-superseded): stop the running waiter with `TaskStop`, call `ScheduleWakeup({ stop: true })`, and
-say "Reviewer stopped: session <id> took over this clone". Nothing else: no label, no release, no
+superseded): stop the waiter with `TaskStop` if one still runs; a waiter that exited 4 has
+already ended. Then call `ScheduleWakeup({ stop: true })`, and say "Reviewer stopped: session <id> took over this clone". Nothing else: no label, no release, no
 comment, no git command. The new session carries on with the clone's work.
 
 ## Permissions

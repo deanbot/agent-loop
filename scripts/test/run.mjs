@@ -3818,6 +3818,15 @@ const putMessage = (dir, id, extra, meta) => {
   })
   check('mailbox order (#109): in every Claude Code start the start check settles the mailbox before any jump to Resume or the loop, the loop\'s inbox read takes only its MAILBOX line, and the executor\'s Resume jump names it',
     early.length === 0, early.join('\n'))
+  // A superseded session's waiter has often exited 4 (TAKEN_OVER) already, and a live stop's
+  // TaskStop on it failed: the stop is only for a waiter that still runs.
+  const hardStop = ['executor', 'reviewer', 'qa'].filter((r) => {
+    const t = flat(read(`claude-code/skills/start-${r}/SKILL.md`))
+    const at = t.indexOf('**Superseded** (a beat printed `SUPERSEDED <id>`')
+    const para = at === -1 ? '' : t.slice(at, at + 400)
+    return !para.includes('stop the waiter with `TaskStop` if one still runs; a waiter that exited 4 has already ended.') || para.includes('stop the running waiter')
+  })
+  check('superseded stop: every Claude Code role stops the waiter only if one still runs (one that exited 4 has ended)', hardStop.length === 0, hardStop.join('\n'))
   const noMailboxRoles = ['generic/executor.md', 'generic/reviewer.md', 'generic/qa.md', 'kiro/skills/start-executor/SKILL.md', 'kiro/skills/start-reviewer/SKILL.md'].filter((f) => read(f).includes('inbox.mjs --dir'))
   check('mailbox order (#109): generic and Kiro starts have no mailbox (NO_MAILBOX), so none reads an inbox', noMailboxRoles.length === 0, noMailboxRoles.join('\n'))
 

@@ -204,8 +204,8 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/session.mjs --release ${CLAUDE_SESSION_ID}` and sa
 task notification that arrives after the stop is not a continuation: do nothing.
 
 **Superseded** (a beat printed `SUPERSEDED <id>`, or the guard refused a command as
-superseded): stop the running waiter with `TaskStop`, call `ScheduleWakeup({ stop: true })`, and
-say "QA stopped: session <id> took over this clone". Nothing else: no label, no release, no
+superseded): stop the waiter with `TaskStop` if one still runs; a waiter that exited 4 has
+already ended. Then call `ScheduleWakeup({ stop: true })`, and say "QA stopped: session <id> took over this clone". Nothing else: no label, no release, no
 comment, no git command. The new session carries on with the clone's work.
 
 ## Messages
