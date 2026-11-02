@@ -121,7 +121,10 @@ with none the reviewer asks the operator (a `[reviewer] Question:`) and QA posts
 operator states the criteria in a comment on the PR, where the waiters wake (they read the PR's
 comments, not the issue's). `pick-next.mjs` still reads issue bodies
 for `Depends on`, in the script, and prints only a number: an outsider's issue is picked like any
-and then skipped by the author check, and an outsider can't put one in a milestone.
+and then skipped by the author check, and an outsider can't put one in a milestone. An outsider's
+issue the operator wants worked is re-filed (or its content carried into a new issue) by a trusted
+author. A milestone or label a maintainer adds doesn't make its body direction: the text is still
+the outsider's.
 
 **Outside input** (a contributor who isn't trusted, a user's report on a PR) reaches the loop only
 through a trusted login: an issue the operator files or triages (the executor's author check), or
