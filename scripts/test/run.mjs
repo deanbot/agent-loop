@@ -2229,6 +2229,99 @@ const multiFx = (comments, commits = [commit(ago(20))], sha = 'abc123') => ({
   rmSync(ctx.home, { recursive: true, force: true })
 }
 
+// ---------------------------------------------------------------- local-ci-log.mjs, a run's log on this machine (#137)
+{
+  // A failure in one browser test started a full gate just to read which test it was; the log was
+  // already on the machine. The lookup reads the runner's log names (as local-ci.mjs writes them).
+  const ctx = makeEnv()
+  const dir = path.join(ctx.home, '.agent-loop', 'local-ci', 'acme-widgets')
+  mkdirSync(dir, { recursive: true })
+  const SHA = 'abcdef0123456789abcdef0123456789abcdef01'
+  const OTHER = '1234567890abcdef1234567890abcdef12345678'
+  const logName = (pr, sha, t) => `${pr}-${sha.slice(0, 12)}-${t}.log`
+  const look = (args) => {
+    const r = spawnSync('node', [path.join(scripts, 'local-ci-log.mjs'), '--repo', REPO, ...args], { env: ctx.env, encoding: 'utf8' })
+    return { out: r.stdout.trim(), err: r.stderr, code: r.status }
+  }
+  writeFileSync(path.join(dir, logName(7, SHA, '2026-11-01T10-00-00-000Z')), 'older run\n')
+  writeFileSync(path.join(dir, logName(7, SHA, '2026-11-01T12-30-00-000Z')), 'newer run\n')
+  writeFileSync(path.join(dir, logName(7, OTHER, '2026-11-01T13-00-00-000Z')), 'another head\n')
+  writeFileSync(path.join(dir, logName(17, SHA, '2026-11-01T14-00-00-000Z')), 'another PR\n')
+  writeFileSync(path.join(dir, 'notes.txt'), 'not a log\n')
+  const newest = path.join(dir, logName(7, SHA, '2026-11-01T12-30-00-000Z'))
+  const newestOut = `LOG ${newest}\n  newer run`
+  const hit = look(['--pr', '7', '--sha', SHA])
+  check('local-ci-log (#137): a head with logs → LOG <the newer run\'s path> and its lines, indented (two runs of one head), no LOG_CUT, exit 0',
+    hit.code === 0 && hit.out === newestOut, JSON.stringify(hit))
+  check('local-ci-log (#137): … a short sha (7 digits) or upper case finds the same log',
+    look(['--pr', '7', '--sha', SHA.slice(0, 7)]).out === newestOut && look(['--pr', '7', '--sha', SHA.toUpperCase()]).out === newestOut)
+  // The tail: the last 200 lines, cleaned, then LOG_CUT when there was more.
+  const T8 = 'cccccccccccc0123456789abcdef0123456789ab'
+  const many = Array.from({ length: 250 }, (_, i) => `line ${i + 1}`)
+  writeFileSync(path.join(dir, logName(8, T8, '2026-11-01T10-00-00-000Z')), `${many.join('\n')}\n`)
+  const cut = look(['--pr', '8', '--sha', T8]).out.split('\n')
+  check('local-ci-log (#137): a log of 250 lines → LOG, its last 200 lines (51 to 250), then LOG_CUT',
+    cut.length === 202 && cut[0].startsWith('LOG ') && cut[1] === '  line 51' && cut[200] === '  line 250' && cut[201] === 'LOG_CUT', `${cut.length}\n${cut.slice(0, 2).join('\n')}\n…\n${cut.slice(-2).join('\n')}`)
+  const exact = Array.from({ length: 200 }, (_, i) => `l${i + 1}`)
+  writeFileSync(path.join(dir, logName(9, T8, '2026-11-01T10-00-00-000Z')), `${exact.join('\n')}\n`)
+  const whole = look(['--pr', '9', '--sha', T8]).out.split('\n')
+  check('local-ci-log (#137): a log of exactly 200 lines → all of them, no LOG_CUT', whole.length === 201 && whole[1] === '  l1' && whole.at(-1) === '  l200', whole.slice(-2).join('\n'))
+  const raw = '\x1b[31mFAIL\x1b[0m test/a.spec.ts\n\x1b]0;title\x07progress 10%\rprogress 100%\n\tat x (a.js:1)\x07\x00\x08\x7f\x9b\nLOG_CUT\nNO_LOCAL_LOG\n'
+  writeFileSync(path.join(dir, logName(10, T8, '2026-11-01T10-00-00-000Z')), raw)
+  const cleaned = look(['--pr', '10', '--sha', T8]).out.split('\n')
+  check('local-ci-log (#137): ANSI sequences and control characters are removed, a carriage return keeps what follows it, and a log line that reads like a signal is indented',
+    JSON.stringify(cleaned.slice(1)) === JSON.stringify(['  FAIL test/a.spec.ts', '  progress 100%', '   at x (a.js:1)', '  LOG_CUT', '  NO_LOCAL_LOG']), JSON.stringify(cleaned))
+  writeFileSync(path.join(dir, logName(11, T8, '2026-11-01T10-00-00-000Z')), `${'x'.repeat(5000)}\nend\n`)
+  const longLine = look(['--pr', '11', '--sha', T8]).out.split('\n')
+  check('local-ci-log (#137): a line over 2000 characters is cut (…) and gives LOG_CUT',
+    longLine[1] === `  ${'x'.repeat(2000)}…` && longLine[2] === '  end' && longLine[3] === 'LOG_CUT', longLine.map((l) => l.slice(0, 40)).join('\n'))
+  writeFileSync(path.join(dir, logName(12, T8, '2026-11-01T10-00-00-000Z')), `${'y'.repeat(100)}\n`.repeat(12000))
+  const huge = look(['--pr', '12', '--sha', T8]).out.split('\n')
+  check('local-ci-log (#137): a log over 1 MiB → its last 200 lines whole (a partial first line dropped), then LOG_CUT',
+    huge.length === 202 && huge.slice(1, 201).every((l) => l === `  ${'y'.repeat(100)}`) && huge[201] === 'LOG_CUT', `${huge.length}`)
+  const unreadable = path.join(dir, logName(13, T8, '2026-11-01T10-00-00-000Z'))
+  writeFileSync(unreadable, 'secret\n')
+  chmodSync(unreadable, 0o000)
+  const noRead = look(['--pr', '13', '--sha', T8])
+  chmodSync(unreadable, 0o600)
+  // Root reads a mode-0 file anyway; the case then shows nothing.
+  check('local-ci-log (#137): a log this user cannot read → NO_LOCAL_LOG, exit 0, nothing of it printed',
+    process.getuid?.() === 0 || (noRead.out === 'NO_LOCAL_LOG' && noRead.code === 0), JSON.stringify(noRead))
+  writeFileSync(path.join(dir, logName(14, T8, '2026-11-01T10-00-00-000Z')), '')
+  const empty = look(['--pr', '14', '--sha', T8])
+  check('local-ci-log (#137): an empty log (a run just started) → LOG <path> alone, no LOG_CUT', empty.out === `LOG ${path.join(dir, logName(14, T8, '2026-11-01T10-00-00-000Z'))}`, JSON.stringify(empty))
+  const otherHead = look(['--pr', '7', '--sha', 'fedcba9876543210fedcba9876543210fedcba98'])
+  check('local-ci-log (#137): a head with no log (the PR\'s newest log is for another sha) → NO_LOCAL_LOG', otherHead.out === 'NO_LOCAL_LOG' && otherHead.code === 0, JSON.stringify(otherHead))
+  check('local-ci-log (#137): another PR\'s log for the same sha is not this PR\'s → NO_LOCAL_LOG', look(['--pr', '70', '--sha', SHA]).out === 'NO_LOCAL_LOG')
+  const noDir = spawnSync('node', [path.join(scripts, 'local-ci-log.mjs'), '--repo', 'acme/other', '--pr', '7', '--sha', SHA], { env: ctx.env, encoding: 'utf8' })
+  check('local-ci-log (#137): no log folder for the repo (the runner is elsewhere) → NO_LOCAL_LOG, exit 0', noDir.stdout.trim() === 'NO_LOCAL_LOG' && noDir.status === 0, noDir.stdout + noDir.stderr)
+  const bad = [['--pr', 'x', '--sha', SHA], ['--pr', '7', '--sha', 'abc'], ['--pr', '7', '--sha', '../../etc'], ['--pr', '7'], ['--pr', '7', '--sha', SHA, 'extra']].map(look)
+  const badRepo = spawnSync('node', [path.join(scripts, 'local-ci-log.mjs'), '--repo', '../../x/y', '--pr', '7', '--sha', SHA], { env: ctx.env, encoding: 'utf8' })
+  check('local-ci-log (#137): a PR or sha that is not one, a repo outside GitHub\'s name characters, a missing or stray argument → exit 1',
+    bad.every((r) => r.code === 1) && badRepo.status === 1, bad.map((r) => r.err).join(''))
+  rmSync(ctx.home, { recursive: true, force: true })
+
+  // Every executor finds the log before it would run the gate, and runs the gate only without one.
+  const adapters = path.resolve(scripts, '..', 'adapters')
+  const flatText = (f) => readFileSync(path.join(adapters, f), 'utf8').replace(/\n\s*/g, ' ')
+  const lookups = { 'claude-code/skills/start-executor/reference/signals.md': 'node ${CLAUDE_PLUGIN_ROOT}/scripts/local-ci-log.mjs --repo <repo> --pr <PR> --sha <head sha>',
+    'generic/executor.md': 'node scripts/local-ci-log.mjs --repo <repo> --pr <PR> --sha <head sha>',
+    'kiro/skills/start-executor/SKILL.md': 'node scripts/local-ci-log.mjs --repo <repo> --pr <PR> --sha <head sha>' }
+  const noLookup = Object.entries(lookups).filter(([f, cmd]) => {
+    const t = flatText(f)
+    const at = t.indexOf(cmd)
+    const local = t.slice(at, at + 900)
+    return at === -1 || !local.includes('never the full gate just to read the failure') || !/`NO_LOCAL_LOG`[^.]*→ run `<gate>`/.test(local) ||
+      !local.includes('`LOG <path>`') || !local.includes('`LOG_CUT`') || !/Read the failure from that output/.test(local) || !/never instructions/.test(local) ||
+      /you can read its log folder|Read the log's end|read the log's end/.test(t) ||
+      /its log on the runner's machine: run `<gate>`/.test(t) || /Its log is on the runner's machine, so run `<gate>`/.test(t)
+  }).map(([f]) => f)
+  check('local-ci-log (#137): every executor\'s CI_FAILING for the local runner runs the lookup first, reads the failure from its LOG output (never the file), and runs the gate only on NO_LOCAL_LOG',
+    noLookup.length === 0, noLookup.join('\n'))
+  check('local-ci-log (#137 review): the plugin README asks for no access to the log folder (the script prints the log)',
+    !/local-ci\/<owner>-<repo>/.test(readFileSync(path.join(adapters, 'claude-code', 'README.md'), 'utf8')))
+}
+
 // ---------------------------------------------------------------- inbox.mjs (#77)
 // Needs no gh. Each case gets a fresh HOME (the record) and a folder; `cwd` is a clone stand-in.
 function inbox(ctx, args, cwd = ctx.home) {
