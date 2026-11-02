@@ -12,7 +12,8 @@ You may note the CI state in the verdict line.
 
 - `gh pr view <n> --repo <repo> --json body,title,number`
 - `gh pr diff <n> --repo <repo>`
-- `gh pr view <n> --comments --repo <repo>`
+- `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-thread.mjs --repo <repo> --pr <n>` — the thread,
+  trusted authors only (the skill's step 3; exit 2 → no verdict this cycle)
 - The project's `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md` if present.
 
 Never compose the verdict in the same tool batch as these fetches; it depends on them.

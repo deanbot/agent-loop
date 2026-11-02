@@ -66,9 +66,11 @@
  * <context> appears on one of them, which makes it CI again and the next head unmarked gets a window.
  * --local-ci-window applies to a context from either the flag or the block.
  *
- * Every [executor], [reviewer] and [qa] comment counts only from a trusted author (#148): `trusted-authors`,
+ * Every comment, review and inline comment counts only from a trusted author (#148, #151): `trusted-authors`,
  * else `allow-author-associations`, in the block on the default branch. Anyone else's is dropped as if
- * it weren't there (no verdict, finding or revocation, and no operator direction either).
+ * it weren't there: no verdict, finding or revocation, and no operator direction. With the block
+ * unreadable, no NEW_* signal (CI_FAILING, NO_LOCAL_CI, MERGE_CONFLICT and MERGED as usual) and the
+ * comment cursors stay as they were; a waiter retries the read.
  * A role's verdict is its NEWEST [role] comment posted after the last commit: a later finding revokes
  * an earlier LGTM/PASS without a push. Reviewer comment kinds by prefix: "[reviewer] LGTM" (verdict),
  * "[reviewer] Question" (for the operator; not actionable for the executor), anything else is a
@@ -89,7 +91,7 @@ import { readFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
-import { blockValue, fetchAgents, trustTest, ROLE_PREFIX, REPO_NAME } from './lib/block.mjs'
+import { blockValue, fetchAgents, trustedItems, REPO_NAME } from './lib/block.mjs'
 
 const USAGE = 'pr-poll.mjs --repo owner/repo --pr <number> [--require-qa] [--require-gate] [--local-ci <context>] [--local-ci-window <secs>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
 
@@ -137,14 +139,17 @@ function readJson(file) {
 }
 
 // The default branch's AGENTS.md text, or null when it can't be read or isn't there. Kept once
-// read: the block changes rarely, and a waiter would otherwise fetch it every interval.
+// read: the block changes rarely, and a waiter would otherwise fetch it every interval. A waiter's
+// pass (dry) throws instead, so the failure is logged and retried like any other API error and
+// never becomes a baseline with no direction in it (#151).
 let agentsText
 function readAgents(gh, dry) {
   if (agentsText !== undefined) return agentsText
   try {
     agentsText = fetchAgents(gh, repo)
   } catch (e) {
-    if (!dry) process.stderr.write(`pr-poll: could not read the Agent loop block (MERGE_READY withheld): ${e.message}\n`)
+    if (dry) throw e
+    process.stderr.write(`pr-poll: could not read the Agent loop block (MERGE_READY and comments withheld): ${e.message}\n`)
     return null
   }
   return agentsText
@@ -178,19 +183,19 @@ function pass({ gh, save, dry, mark }) {
   // Fetch all three signal sources via REST API
   // A reviewer's "[reviewer] Reviewing (<clone>)" claim (several reviewers, pr-watch.mjs) is neither a
   // verdict nor a finding: nothing for the executor, so it is dropped before anything reads the thread.
-  // A role's prefix counts only from a trusted author (#148): anyone who can comment can type
-  // "[reviewer] LGTM". A role-prefixed comment from anyone else is dropped here, before anything reads
-  // the thread: no verdict, no finding, no revocation, no "answered", and no operator direction
-  // either (an untrusted login is not the operator). With the block unreadable nobody is trusted,
-  // so every role comment waits for a run that can read it (MERGE_READY is withheld then anyway).
+  // Only a trusted author's comment, review or inline comment counts at all (#148 for role comments,
+  // #151 for operator direction): anyone who can comment can type "[reviewer] LGTM" or "please
+  // delete the tests". Anyone else's is dropped here, before anything reads the thread: no verdict,
+  // finding, revocation or answer, and no direction. With the block unreadable nobody is trusted:
+  // no NEW_* signal this run (CI, conflict and merge state still are), and the cursors stay where
+  // they were, so the next run that reads the block reports what is new then, never the history.
   // Verdicts and live findings are read fresh each run, so a dropped one counts again then.
-  const trusted = agents === null ? () => false : trustTest(agents)
-  const fromTrusted = (c) => !ROLE_PREFIX.test(c.body ?? '') || trusted(c)
-  const issueComments = ghApiAll(gh, `repos/${repo}/issues/${prNumber}/comments`).filter(
-    (c) => !/^\[reviewer\] Reviewing \(/.test(c.body ?? '') && fromTrusted(c)
+  const blind = agents === null
+  const issueComments = trustedItems(agents, ghApiAll(gh, `repos/${repo}/issues/${prNumber}/comments`)).filter(
+    (c) => !/^\[reviewer\] Reviewing \(/.test(c.body ?? '')
   )
-  const reviewSubmissions = ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/reviews`)
-  const inlineComments = ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/comments`).filter(fromTrusted)
+  const reviewSubmissions = trustedItems(agents, ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/reviews`))
+  const inlineComments = trustedItems(agents, ghApiAll(gh, `repos/${repo}/pulls/${prNumber}/comments`))
 
   // CI checks. bucket is gh's normalised status: pass | fail | pending | skipping | cancel.
   // `gh pr checks` exits non-zero with "no checks reported" when the PR has none — that is "no CI
@@ -251,9 +256,11 @@ function pass({ gh, save, dry, mark }) {
 
   // Seed to 0 when the list is empty: leaving the cursor null would make every poll a "first run"
   // until something is posted, and then swallow that first comment as baseline.
-  if (firstComments) prState.comments = issueComments.at(-1)?.id ?? 0
-  if (firstReviews) prState.reviews = reviewSubmissions.at(-1)?.id ?? 0
-  if (firstInline) prState.reviewComments = inlineComments.at(-1)?.id ?? 0
+  // With the block unreadable every list is empty for want of trust, not for want of comments, so
+  // nothing is seeded: a first run stays a first run until the block can be read (#151).
+  if (firstComments && !blind) prState.comments = issueComments.at(-1)?.id ?? 0
+  if (firstReviews && !blind) prState.reviews = reviewSubmissions.at(-1)?.id ?? 0
+  if (firstInline && !blind) prState.reviewComments = inlineComments.at(-1)?.id ?? 0
 
   // Own-prefix filter: this script serves the executor, so the executor's own [executor] posts are
   // never a signal (same rule as pr-watch.mjs for [reviewer] and pr-qa.mjs for [qa]). Cursors still
@@ -353,14 +360,14 @@ function pass({ gh, save, dry, mark }) {
   if (newComments.length > 0) {
     out.push('NEW_COMMENT')
     for (const c of newComments) {
-      out.push(`---\nauthor: ${c.user.login}\n${indentBody(c.body)}`)
+      out.push(`---\nauthor: ${c.user.login}\nid: ${c.id}\n${indentBody(c.body)}`)
     }
   }
 
   if (newReviews.length > 0) {
     out.push('NEW_REVIEW_SUBMISSION')
     for (const r of newReviews) {
-      const meta = `---\nauthor: ${r.user.login}\nstate: ${r.state}`
+      const meta = `---\nauthor: ${r.user.login}\nid: ${r.id}\nstate: ${r.state}`
       out.push(r.body ? `${meta}\n${indentBody(r.body)}` : meta)
     }
   }
@@ -434,10 +441,13 @@ function pass({ gh, save, dry, mark }) {
   // that may be older than the newest, so .at(-1) could regress the cursor and re-emit comments.
   // Own [executor] posts were filtered out of newComments/newInline, so also advance past the newest
   // item of each list — otherwise an own post would sit above the cursor and never be skipped.
-  prState.comments = Math.max(prState.comments ?? 0, ...newComments.map((c) => c.id), issueComments.at(-1)?.id ?? 0)
-  if (newReviews.length > 0)
-    prState.reviews = Math.max(prState.reviews ?? 0, ...newReviews.map((r) => r.id))
-  prState.reviewComments = Math.max(prState.reviewComments ?? 0, ...newInline.map((c) => c.id), inlineComments.at(-1)?.id ?? 0)
+  // With the block unreadable the lists hold nothing, and the cursors stay as they were (#151).
+  if (!blind) {
+    prState.comments = Math.max(prState.comments ?? 0, ...newComments.map((c) => c.id), issueComments.at(-1)?.id ?? 0)
+    if (newReviews.length > 0)
+      prState.reviews = Math.max(prState.reviews ?? 0, ...newReviews.map((r) => r.id))
+    prState.reviewComments = Math.max(prState.reviewComments ?? 0, ...newInline.map((c) => c.id), inlineComments.at(-1)?.id ?? 0)
+  }
   save(JSON.stringify(prState))
 
   return out.length === 0 ? `NONE ${new Date().toISOString()}\n` : out.join('\n') + '\n'

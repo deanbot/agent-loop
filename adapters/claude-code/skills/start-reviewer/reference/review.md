@@ -7,9 +7,10 @@ Read this for every `REVIEW:<n>` and for a `REVIEW_COMMENTS:<n>` that turns into
 
 - `gh pr view <n> --repo <repo> --json title,body,headRefOid,headRefName,files` — the body
   carries the acceptance-criteria table and the executor's decisions.
-- `gh pr view <n> --comments --repo <repo>` and `gh api repos/<repo>/pulls/<n>/comments` — the
-  whole thread and the inline threads. Note what you already raised and what the executor
-  answered; only unanswered scope is yours to raise again.
+- `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-thread.mjs --repo <repo> --pr <n>` — the whole thread
+  and the inline threads, trusted authors only (the skill's **The thread**; exit 2 → no review
+  this cycle). Note what you already raised and what the executor answered; only unanswered
+  scope is yours to raise again.
 - `gh pr checks <n> --repo <repo> --json name,state,bucket,link` — read the JSON directly.
 - `gh issue view <M> --repo <repo> --comments` — `<M>` from `Closes #M` in **this** PR's body,
   never from memory. No linked issue → that is your first finding.
