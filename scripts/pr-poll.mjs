@@ -141,7 +141,9 @@ function readJson(file) {
 // The default branch's AGENTS.md text, or null when it can't be read or isn't there. Kept once
 // read: the block changes rarely, and a waiter would otherwise fetch it every interval. A waiter's
 // pass (dry) throws instead, so the failure is logged and retried like any other API error and
-// never becomes a baseline with no direction in it (#151).
+// never becomes a baseline with no direction in it (#151). Only a one-shot run passes dry: false,
+// and its failure is kept for the rest of that run, so the baseline pass after it sees the same
+// unreadable block instead of throwing.
 let agentsText
 function readAgents(gh, dry) {
   if (agentsText !== undefined) return agentsText
@@ -150,7 +152,7 @@ function readAgents(gh, dry) {
   } catch (e) {
     if (dry) throw e
     process.stderr.write(`pr-poll: could not read the Agent loop block (MERGE_READY and comments withheld): ${e.message}\n`)
-    return null
+    agentsText = null
   }
   return agentsText
 }

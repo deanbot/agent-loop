@@ -247,9 +247,12 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env })
   writeFileSync(ectx.fixture, JSON.stringify(lgtmFx))
   const unread = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
-  check('poll: the block can\'t be read → no MERGE_READY, a pr-poll: line on stderr, exit 0 and the other signals as usual (NEW_COMMENT)',
-    unread.status === 0 && !ready(unread.stdout) && signals(unread.stdout).includes('NEW_COMMENT') && unread.stdout.includes('please also check the docs') && /^pr-poll: could not read the Agent loop block \(MERGE_READY withheld\): HTTP 502/m.test(unread.stderr),
+  check('poll: the block can\'t be read → no MERGE_READY, a pr-poll: line on stderr, exit 0, and no comment either (#151: nobody is trusted)',
+    unread.status === 0 && !ready(unread.stdout) && !signals(unread.stdout).includes('NEW_COMMENT') && !unread.stdout.includes('please also check the docs') && /^pr-poll: could not read the Agent loop block \(MERGE_READY and comments withheld\): HTTP 502/m.test(unread.stderr),
     `${unread.status}\n${unread.stdout}\n${unread.stderr}`)
+  writeFileSync(ectx.fixture, JSON.stringify({ ...lgtmFx, pr: { merged: false, mergeable: false, head: { sha: 'abc123' } } }))
+  const unreadConflict = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
+  check('poll: … the other signals as usual (MERGE_CONFLICT)', signals(unreadConflict.stdout).join() === 'MERGE_CONFLICT', unreadConflict.stdout + unreadConflict.stderr)
   check('poll (#148): … with the block unreadable nobody is trusted, so the role comment waits (the LGTM is not shown)',
     !unread.stdout.includes('[reviewer] LGTM'), unread.stdout)
   writeFileSync(ectx.fixture, JSON.stringify({ ...lgtmFx, agents: block('') }))
@@ -259,7 +262,7 @@ const signals = (out) => out.split('\n').filter((l) => /^[A-Z_]+( |$)/.test(l)).
   writeFileSync(ectx.fixture, JSON.stringify({ ...lgtmFx, agents: null }))
   const gone = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
   check('poll: no AGENTS.md on the default branch (404) fails closed, never an empty block → no MERGE_READY, a pr-poll: line saying so',
-    gone.status === 0 && !ready(gone.stdout) && /^pr-poll: could not read the Agent loop block \(MERGE_READY withheld\): no AGENTS\.md on the default branch$/m.test(gone.stderr),
+    gone.status === 0 && !ready(gone.stdout) && /^pr-poll: could not read the Agent loop block \(MERGE_READY and comments withheld\): no AGENTS\.md on the default branch$/m.test(gone.stderr),
     `${gone.status}\n${gone.stdout}\n${gone.stderr}`)
   writeFileSync(ectx.fixture, JSON.stringify({ ...lgtmFx, agents: 'too-large' }))
   const large = spawnSync('node', [path.join(scripts, 'pr-poll.mjs'), '--repo', REPO, '--pr', '7'], { env: ectx.env, encoding: 'utf8' })
@@ -3436,20 +3439,21 @@ const putMessage = (dir, id, extra, meta) => {
   const qrun = (f) => run(qctx, 'pr-qa.mjs', ['--repo', REPO], f).trim()
   qrun(qfx([]))
   qrun(qfx([]))
-  const q1 = qrun(qfx([mallory('verified by hand on my Mac', 1)]))
-  const blindQa = run(qctx, 'pr-qa.mjs', ['--repo', REPO], qfx([mallory('verified by hand on my Mac', 1), comment('verified it myself', at(2))], { agents: 'error' }))
-  const q2 = qrun(qfx([mallory('verified by hand on my Mac', 1), comment('verified it myself', at(2))]))
-  check('trusted direction (#151): qa, an untrusted unprefixed comment → NONE; with the block unreadable → NONE and a pr-qa: line; then readable, the trusted one → QA_READY:7',
-    signals(q1).join() === 'NONE' && /^NONE /.test(blindQa) && /pr-qa: could not read the Agent loop block/.test(blindQa) === false && q2 === 'QA_READY:7', `${q1}|${blindQa}|${q2}`)
+  const fake = mallory('verified by hand on my Mac', 1)
+  const mine = comment('verified it myself', at(2))
+  const q1 = qrun(qfx([fake]))
+  // With the block unreadable the trusted comment waits: NONE, and the cursor stays before it.
+  writeFileSync(qctx.fixture, JSON.stringify(qfx([fake, mine], { agents: 'error' })))
   const qBlind = spawnSync('node', [path.join(scripts, 'pr-qa.mjs'), '--repo', REPO], { env: qctx.env, encoding: 'utf8' })
-  writeFileSync(qctx.fixture, JSON.stringify(qfx([], { agents: 'error' })))
-  const qBlind2 = spawnSync('node', [path.join(scripts, 'pr-qa.mjs'), '--repo', REPO], { env: qctx.env, encoding: 'utf8' })
+  const q2 = qrun(qfx([fake, mine]))
+  check('trusted direction (#151): qa, an untrusted unprefixed comment → NONE; with the block unreadable a trusted one waits (NONE); then readable → QA_READY:7',
+    signals(q1).join() === 'NONE' && /^NONE /.test(qBlind.stdout) && q2 === 'QA_READY:7', `${q1}|${qBlind.stdout}|${q2}`)
   check('trusted direction (#151): qa, the block unreadable → NONE on stdout, a pr-qa: line on stderr, exit 0',
-    qBlind.status === 0 && /^NONE /.test(qBlind2.stdout) && /^pr-qa: could not read the Agent loop block \(signals withheld\): HTTP 502/.test(qBlind2.stderr), `${qBlind2.stdout}${qBlind2.stderr}`)
-  setFixture(qctx, qfx([comment('verified it myself', at(2))]))
+    qBlind.status === 0 && /^pr-qa: could not read the Agent loop block \(signals withheld\): HTTP 502/.test(qBlind.stderr), `${qBlind.status}\n${qBlind.stdout}${qBlind.stderr}`)
+  setFixture(qctx, qfx([fake, mine]))
   const qw = start(qctx, 'pr-qa.mjs', ['--repo', REPO, '--wait', '1', '--max', '3'])
   await holdsLock(qctx, qw, 'acme-widgets-pr-qa-state.json')
-  setFixture(qctx, qfx([comment('verified it myself', at(2)), mallory('ship it', 3)]))
+  setFixture(qctx, qfx([fake, mine, mallory('ship it', 3)]))
   const qwr = await qw.done
   check('trusted direction (#151): qa --wait, an untrusted comment arriving mid-wait → NONE at --max', signals(qwr.out).join() === 'NONE', `${qwr.out}${qwr.err}`)
   rmSync(qctx.home, { recursive: true, force: true })

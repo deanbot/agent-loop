@@ -106,8 +106,8 @@ Formal reviews are rare in single-account mode. `CHANGES_REQUESTED` → treat th
 ## NEW_COMMENT
 
 Read the full thread, not just the new blocks: `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-thread.mjs
---repo <repo> --pr <PR>` (the skill's **The thread**: trusted authors only, never `gh pr view
---comments`; exit 2 → act on nothing from it this cycle). Every block below comes from a trusted
+--repo <repo> --pr <PR>` (the skill's **The thread**: trusted authors only, never read another
+way; exit 2 → act on nothing from it this cycle). Every block below comes from a trusted
 author: the poll drops anyone else's comment, review and inline comment.
 
 - **`[reviewer]` findings** (anything but `LGTM`): collect every unaddressed one. Reproduce each

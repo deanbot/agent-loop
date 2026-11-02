@@ -63,7 +63,7 @@ function readAgents(gh, dry) {
   } catch (e) {
     if (dry) throw e
     process.stderr.write(`pr-qa: could not read the Agent loop block (signals withheld): ${e.message}\n`)
-    return null
+    agentsText = null // kept for the rest of this one-shot run (only it passes dry: false)
   }
   return agentsText
 }
