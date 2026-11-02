@@ -3392,13 +3392,16 @@ const putMessage = (dir, id, extra, meta) => {
   const bctx = makeEnv()
   const history = [comment('old direction, long done', at(0)), comment('[reviewer] 1. an old finding', at(1)), comment('[executor] fixed in abc', at(2))]
   const failing = [{ name: 'check', state: 'FAILURE', bucket: 'fail', link: 'https://ci/2' }]
-  const blind = poll(bctx, { ...BASE, comments: history, checks: failing, agents: 'error' })
-  check('trusted direction (#151): poll, the block unreadable → no NEW_* signal, but CI_FAILING still comes through',
-    signals(blind).includes('CI_FAILING') && !signals(blind).some((s) => s.startsWith('NEW_')) && !blind.includes('old direction'), blind)
-  check('trusted direction (#151): … and the comment cursors are not seeded', JSON.parse(stateText(bctx, POLL_STATE)).comments === null, stateText(bctx, POLL_STATE))
-  const seen = poll(bctx, { ...BASE, comments: history })
+  const oldThread = { comments: history, reviews: [review(510, 'COMMENTED', 'an old review')], inline: [inl(610, 'an old nit'), inl(611, 'done', 'acme', 'OWNER', { in_reply_to_id: 610 })] }
+  const blind = poll(bctx, { ...BASE, ...oldThread, checks: failing, agents: 'error' })
+  check('trusted direction (#151): poll, the block unreadable → no NEW_* signal, but CI_FAILING still comes through (one-shot, exit 0)',
+    signals(blind).includes('CI_FAILING') && !signals(blind).some((s) => s.startsWith('NEW_')) && !blind.includes('old direction') && !blind.startsWith('EXIT'), blind)
+  const blindState = JSON.parse(stateText(bctx, POLL_STATE))
+  check('trusted direction (#151): … and no cursor is seeded (comments, reviews, inline)',
+    blindState.comments === null && blindState.reviews === null && blindState.reviewComments === null, stateText(bctx, POLL_STATE))
+  const seen = poll(bctx, { ...BASE, ...oldThread })
   check('trusted direction (#151): … the next run that reads the block seeds them (a first run): the history is not replayed as news',
-    !signals(seen).includes('NEW_COMMENT') && !seen.includes('old direction'), seen)
+    signals(seen).every((s) => !s.startsWith('NEW_')) && !seen.includes('old direction') && !seen.includes('an old'), seen)
   rmSync(bctx.home, { recursive: true, force: true })
 
   // The waiters: an outsider's comment ends no wait.
