@@ -54,8 +54,8 @@ is the project's conventions, which the agents follow.
 | `qa-gate` | no | `off` | `on` runs the QA role: reviewer waits for `[qa] PASS`, `MERGE_READY` requires it |
 | `review-waits-for-ci` | no | `off` | `on`: the reviewer holds an LGTM while a check on the head is pending, and `pr-watch` wakes it when one finishes (`CI_DONE:<n>`), for a project whose operator merges on the LGTM itself. `off`: the reviewer notes a pending check in the LGTM line, as before. Added later in 0.2, additive |
 | `needs-operator-label` | no | `needs-operator` | label on a PR (or issue) while it waits on the operator: an open question, or `MERGE_READY` |
-| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status), and whose `[executor] Claimed by` comments count as claims (case-insensitive; #134), and whose `[executor]`, `[reviewer]` and `[qa]` comments count as the role's at all (#148). **Every agent's own login must be on it** (executor, reviewer and QA), or its claims, verdicts and findings never count |
-| `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent or empty, claims and role comments included: every agent's login must then have one of these associations |
+| `trusted-authors` | recommended | — | GitHub logins whose issues the executor may process; also whose PRs the local runner runs the gate on (exact match: an unlisted login's PR gets no status), and whose `[executor] Claimed by` comments count as claims (case-insensitive; #134), and whose `[executor]`, `[reviewer]` and `[qa]` comments count as the role's at all (#148), and whose PR comments, reviews and inline comments count as the operator's direction (#151). **Every agent's own login and the operator's must be on it** (executor, reviewer and QA), or their claims, verdicts, findings and direction never count |
+| `allow-author-associations` | no | `[OWNER, MEMBER, COLLABORATOR]` | fallback author filter when `trusted-authors` is absent or empty, claims, role comments and operator direction included: every agent's login and the operator's must then have one of these associations |
 | `audit-floor` | no | — | control ids ("Auditor") the auditor never recommends narrowing or dropping: security and privacy checks, the operator's merge, a named gate. A finding about one reports its cost only |
 | `audit-report` | no | `issue` | where the auditor's report goes: `issue` (a new issue per run, labelled `auditor-report`) or `none` (printed only; the operator posts it) |
 | `models` | no | — | expected model per role, `role=model[/effort]` comma-separated (`executor=opus, reviewer=opus/high`); every start prints the role, model and effort first; a role with an entry that differs says so on a second line and runs anyway, and a role without an entry prints nothing more |
@@ -76,7 +76,7 @@ Labels must exist before first use (`gh label create …`); adapters may ship a 
 
 | Prefix | Sender | Purpose |
 |---|---|---|
-| *(none)* | Operator | Direction, questions, confirmations, approval |
+| *(none)* | Operator (a trusted login) | Direction, questions, confirmations, approval |
 | `[executor]` | Executor | Fix summaries, questions, blocked notices |
 | `[reviewer]` | Reviewer | Findings, `LGTM`, questions for the operator, conflict notices |
 | `[qa]` | QA | Criterion table, `PASS` or `BLOCKED` |
@@ -87,16 +87,31 @@ traffic. Every script filters its own role's prefix when looking for new activit
 ping-pong loops: `pr-poll.mjs` ignores `[executor]`, `pr-watch.mjs` ignores `[reviewer]`,
 `pr-qa.mjs` ignores `[qa]`.
 
-**A prefix counts only from a trusted author** (#148): a login in `trusted-authors`, or, when that
-lists nobody, an association in `allow-author-associations`, read from the block on the default
-branch. A `[executor]`, `[reviewer]` or `[qa]` comment from anyone else is dropped before a script
-reads the thread: it is no verdict, finding, question, revocation, answer, claim or own post, and
-no operator direction either (an untrusted login is not the operator). It is not reported. A script
-that can't read the block trusts nobody: `pr-poll.mjs` withholds `MERGE_READY` and drops every
-role comment for that run, `pr-watch.mjs` prints `NONE` and keeps its state (`--check-claim`
-exits 2), and a waiter retries. `pr-qa.mjs` reads no own post (any bracketed comment is not
-operator direction), so it needs no list. Anyone can still type a prefix: what an agent reads in
-the thread itself is text, and the scripts' signals are what count.
+**A comment counts only from a trusted author** (#148 for prefixes, #151 for the operator's): a
+login in `trusted-authors`, or, when that lists nobody, an association in
+`allow-author-associations`, read from the block on the default branch. That holds for every item
+of a PR's thread: timeline comments, review submissions and inline review comments. Anyone else's
+is dropped before a script reads the thread: a role-prefixed one is no verdict, finding, question,
+revocation, answer, claim or own post, and an unprefixed one, or a review, is no operator
+direction or confirmation (an untrusted login is not the operator). Neither wakes a waiter or is
+reported. A script that can't read the block trusts nobody: `pr-poll.mjs` withholds `MERGE_READY`
+and every `NEW_*` signal and keeps its comment cursors, `pr-watch.mjs` and `pr-qa.mjs` print
+`NONE` and keep their state (`--check-claim` exits 2), and a waiter retries.
+
+**The agents read the thread through `pr-thread.mjs`** (`--repo owner/repo --pr <n>`), never
+`gh pr view --comments` or a `gh api` read of the comments or reviews, which show no author
+association. It prints the trusted items only, oldest first, each block starting `COMMENT`,
+`REVIEW` or `INLINE` with its id, author and time and the body indented, then `UNTRUSTED <count>`
+when it left anything out (no author, no text; the agents never fetch those), or `EMPTY`. An
+unreadable block or a failed `gh` call is exit 2 with nothing on stdout, and the agent acts on
+nothing from that PR's thread that cycle. The signals carry what they carried before (the
+executor's poll its blocks, now with every item's `id:`; the reviewer's and QA's a PR number), and
+the agent reads the rest there.
+
+**Outside input** (a contributor who isn't trusted, a user's report on a PR) reaches the loop only
+through a trusted login: an issue the operator files or triages (the executor's author check), or
+a trusted login's comment quoting it. A project that wants outsiders' comments acted on adds them
+to `trusted-authors`, which also lets them steer the loop.
 
 **Verdict comments start with the verdict**, because scripts classify by prefix:
 

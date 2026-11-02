@@ -8,10 +8,11 @@
  *   [executor]       — developer agent; answers reviewer questions, triggers REVIEW_COMMENTS
  *   [reviewer]       — this agent's own posts; filtered out to prevent ping-pong loops
  *
- * A role prefix counts only from a trusted author (#148): `trusted-authors`, else
- * `allow-author-associations`, in the block on the default branch. A role-prefixed comment from anyone
- * else is dropped before anything reads the thread: it is no reviewer post, no claim, and no operator
- * comment. A run that can't read the block prints NONE and keeps its state (everything withheld,
+ * A comment counts only from a trusted author (#148 for role prefixes, #151 for the operator's):
+ * `trusted-authors`, else `allow-author-associations`, in the block on the default branch. Anyone
+ * else's is dropped before anything reads the thread: it is no reviewer post, no claim, and no operator
+ * comment, so it wakes nothing. The reviewer reads the thread through pr-thread.mjs, which drops the
+ * same comments. A run that can't read the block prints NONE and keeps its state (everything withheld,
  * CLOSED and a standing MERGE_CONFLICT included); a waiter logs it and retries.
  *
  * Only [reviewer] comments are suppressed. All other comments (including [executor]) are
@@ -74,7 +75,7 @@ import { execSync } from 'child_process'
 import { homedir } from 'os'
 import path from 'path'
 import { runSignalScript, usageError } from './lib/wait.mjs'
-import { blockValue, fetchAgents, trustTest, ROLE_PREFIX, REPO_NAME } from './lib/block.mjs'
+import { blockValue, fetchAgents, trustTest, REPO_NAME } from './lib/block.mjs'
 
 const USAGE =
   'pr-watch.mjs --repo owner/repo [--skip <n,n,...>] [--reviewer <clone> [--stale-after <secs>] [--check-claim <n>]] [--needs-operator-label <name>] [--idle-after <n>] [--wait [secs] [--max secs] [--inbox <folder>]]'
@@ -144,11 +145,11 @@ function claimHolder(comments, commits, now) {
   return holder && !stale(holder.claim, now) ? holder.clone : null
 }
 
-// A PR's comments, timeline or inline, with every role-prefixed one from an untrusted author dropped
-// (#148): such a comment is no reviewer post (it silences nothing and marks nothing read), no claim,
-// and no operator direction either, since an untrusted login is not the operator.
+// A PR's comments, timeline or inline, with every one from an untrusted author dropped (#148, #151):
+// such a comment is no reviewer post (it silences nothing and marks nothing read), no claim, and no
+// operator direction (it wakes no reviewer), since an untrusted login is not the operator.
 function commentsOf(gh, apiPath, trusted) {
-  return ghApiAll(gh, apiPath).filter((c) => !ROLE_PREFIX.test(c.body ?? '') || trusted(c))
+  return ghApiAll(gh, apiPath).filter((c) => trusted(c))
 }
 
 function holderOf(gh, number, trusted) {
