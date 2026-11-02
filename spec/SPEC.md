@@ -116,9 +116,10 @@ indented only when the author is trusted), then the trusted comments as `COMMENT
 2. The executor's author check is that `trusted:` line: `no` → one `[executor] Skipped:` comment,
 never a claim, and never a hand-off to the operator (an outsider's issue is not work, and handing
 it on would let anyone fill the operator's queue by filing issues). The reviewer and QA take an
-untrusted author's issue as stating no criteria: only trusted comments on it can, and with none
-the reviewer asks the operator (a `[reviewer] Question:`) and QA posts `BLOCKED`, so the operator
-states the criteria in a comment or re-files the issue. `pick-next.mjs` still reads issue bodies
+untrusted author's issue as stating no criteria: only trusted comments on it or on the PR can, and
+with none the reviewer asks the operator (a `[reviewer] Question:`) and QA posts `BLOCKED`, so the
+operator states the criteria in a comment on the PR, where the waiters wake (they read the PR's
+comments, not the issue's). `pick-next.mjs` still reads issue bodies
 for `Depends on`, in the script, and prints only a number: an outsider's issue is picked like any
 and then skipped by the author check, and an outsider can't put one in a milestone.
 
