@@ -552,7 +552,9 @@ trusted author's claim counts (#134): its login is in `trusted-authors`, or, whe
 nobody, its association is in `allow-author-associations`, read from the block on the default
 branch. Anyone else's claim line is ignored as if it weren't there, by `claims.mjs`, by
 `pick-next.mjs`'s `RESUME` and by the claim step's race, so a comment cannot turn a held claim
-into a lost one. An executor whose own login isn't trusted deletes its claim and stops. A claim
+into a lost one. The race is `claims.mjs --race <the claim's id>` (`RACE_WON`, `RACE_LOST`,
+`RACE_UNTRUSTED <login>`, `RACE_UNKNOWN`): it decides on ids, times and trust and prints no
+comment's text, since anyone can post an `[executor] Claimed by` line with more after it (#153). An executor whose own login isn't trusted deletes its claim and stops. A claim
 is live when it was posted no more than 10 minutes before the executor's own (GitHub's
 `created_at` on both, never the local clock). An older claim that still holds already carries the
 label, which the executor checks first; an older one that does not is from a claim since released

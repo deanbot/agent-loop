@@ -32,19 +32,17 @@ comments.
   of your working directory. One command per call:
   1. `gh issue comment <N> --repo <repo> --body "[executor] Claimed by <clone>"`. It prints the
      comment's URL; the number after `#issuecomment-` is your claim's id.
-  2. `gh api --paginate "repos/<repo>/issues/<N>/comments" --jq '.[] | select((.body // "") |
-     startswith("[executor] Claimed by ")) | "\(.id) \(.created_at) \(.user.login) \(.author_association) \(.body)"'`.
-  3. **Only a trusted author's claim counts** (#134), by the author check's rule above: its login
-     in `trusted-authors`, or, with no list, its association in `allow-author-associations`.
-     Anyone else's line is ignored as if it weren't there. Your own claim's author fails that rule
-     → `gh api -X DELETE "repos/<repo>/issues/comments/<your id>"` and **stop**: say `@<login> is
-     not trusted (trusted-authors or allow-author-associations in AGENTS.md), so its claims never
-     count: add it, then restart.` Of the trusted claims, the live ones are yours and those posted
-     no more than 10 minutes before yours (compare the `created_at` values, never your clock). The
-     lowest id among them wins.
-  4. Yours → `gh issue edit <N> --add-label <in-progress-label> --repo <repo>`. Not yours → `gh
-     api -X DELETE "repos/<repo>/issues/comments/<your id>"`, leave the label alone (it is the
-     winner's), and pick next.
+  2. `node ${CLAUDE_PLUGIN_ROOT}/scripts/claims.mjs --repo <repo> --issue <N> --race <your id>`
+     decides the race and prints one line, never a comment's text (#153). **Only a trusted
+     author's claim counts** (#134), by the author check's rule above; of those, the live ones are
+     yours and those posted no more than 10 minutes before it, and the lowest id wins.
+  3. `RACE_WON` → yours: `gh issue edit <N> --add-label <in-progress-label> --repo <repo>`.
+     `RACE_LOST` → not yours: `gh api -X DELETE "repos/<repo>/issues/comments/<your id>"`, leave
+     the label alone (it is the winner's), and pick next. `RACE_UNTRUSTED <login>` → `gh api -X
+     DELETE "repos/<repo>/issues/comments/<your id>"` and **stop**: say `@<login> is not trusted
+     (trusted-authors or allow-author-associations in AGENTS.md), so its claims never count: add
+     it, then restart.` `RACE_UNKNOWN` (your claim isn't on the issue) or a failed run (exit 2, a
+     `claims:` line) → never add the label: delete your claim if it is there and pick next.
 
 If the operator says "stop" during implementation, remove the label and end: no wakeup exists yet.
 
