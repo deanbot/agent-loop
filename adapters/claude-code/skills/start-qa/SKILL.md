@@ -63,7 +63,8 @@ come up on the wrong model. A wakeup is a continuation, not a start: it does not
 4. `$ARGUMENTS` may hold `--skip n,n,…` (PR numbers to ignore) and `--inbox <folder> --outbox
    <folder>` (step 3). `<skip>` below is the `--skip n,n,…` part, or empty: pass only that to the
    script, never `--outbox`.
-5. **Mailbox**: step 3's `MAILBOX` or `NO_MAILBOX` line decided it.
+5. **Mailbox**: step 3's `MAILBOX` or `NO_MAILBOX` line decided it, before any later step could
+   send you anywhere: no inbox is read on any other word (#109).
 
 Rules for the whole session: never merge or push; no interactive prompts (a decision you need from
 the operator is a standalone `[qa] Question: <one line>` comment with two or three lines of context
@@ -126,7 +127,8 @@ session and end every later cycle with `ScheduleWakeup({ delaySeconds: 300, … 
 those cycles still runs the watch, so news is seen within five minutes. A waiter that exits 0
 (`PENDING` or `NONE`) ends the count and the 5-minute rhythm.
 
-0. With a mailbox, first `node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --dir <inbox>`, in the
+0. With a mailbox (only `<inbox>` from this start's step 3 `MAILBOX <inbox>` line, which the
+   start check settles before any later step can send you here), first `node ${CLAUDE_PLUGIN_ROOT}/scripts/inbox.mjs --dir <inbox>`, in the
    foreground, once per cycle, and handle what it prints before any signal ("Messages").
 1. `node ${CLAUDE_PLUGIN_ROOT}/scripts/pr-qa.mjs --repo <repo> --idle-after 3 <skip>`, in the
    foreground, once per cycle. Signals: `NONE`, `CLOSED:<n>`, `MERGE_CONFLICT:<n>`, `QA_READY:<n>`
